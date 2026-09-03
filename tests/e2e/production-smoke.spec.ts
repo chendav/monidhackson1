@@ -113,6 +113,7 @@ test.describe("deployed RFP X-Ray smoke", () => {
       expect(health.storage_safety).toBe("current");
       expect(health.dependencies).toEqual({
         database: "ready",
+        neon_capacity: "attested",
         maintenance: "fresh",
         private_storage: "attested",
         workflow: "attested_300s",

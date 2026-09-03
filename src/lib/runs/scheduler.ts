@@ -1,3 +1,7 @@
+// Manifest-discovery anchor only. This Preview-only canary has no public
+// scheduler or route; importing its declaration gives the Workflow builder a
+// server-side entrypoint. The module performs no credential or network work.
+import "@/workflows/redelivery-probe";
 import { getConfig } from "@/lib/config";
 import { AppError } from "@/lib/errors";
 import { processRun } from "@/lib/pipeline";
