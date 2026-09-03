@@ -246,7 +246,6 @@ function riskSemanticallyDependsOnSupersededFact(
   },
   currentValues: string[]
 ) {
-  if (risk.documentSha256 !== superseded.documentSha256) return null;
   const sourceObjectiveTokens = extractAssertionTokens(superseded.value);
   if (sourceObjectiveTokens.size === 0) return null;
   const currentObjectiveTokens = new Set(currentValues.flatMap((value) => [...extractAssertionTokens(value)]));

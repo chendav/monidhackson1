@@ -2393,6 +2393,50 @@ describe("server-owned materialization and reconciliation", () => {
     );
   });
 
+  it("withholds an amendment-cited risk that repeats a superseded base-document deadline", () => {
+    const oldClosing = "Solicitation closing date is September 1, 2026.";
+    const newClosing = "Solicitation closing date is changed to September 15, 2026.";
+    const historicalRisk = "Bids received after September 1, 2026 will be rejected.";
+    const value = addMinimumCoverage(draft([
+      {
+        id: "cross-document-closing-old", topic: "solicitation closing date",
+        document_sha256: baseSha, amendment_number: null, effect: "add",
+        category: "submission", text: oldClosing, evidence_needed: null,
+        consequence: null, citations: [citation(baseSha, oldClosing)]
+      },
+      {
+        id: "cross-document-closing-new", topic: "solicitation closing date",
+        document_sha256: amendmentSha, amendment_number: "001", effect: "replace",
+        category: "submission", text: newClosing, evidence_needed: null,
+        consequence: null, citations: [citation(amendmentSha, newClosing)]
+      }
+    ]));
+    value.risks.push({
+      id: "cross-document-stale-risk", topic: "late bid", document_sha256: amendmentSha,
+      amendment_number: "001", effect: "add", severity: "high", category: "submission",
+      finding: historicalRisk, impact: "The bid will be rejected.",
+      recommended_action: "Submit before September 1, 2026.",
+      citations: [citation(amendmentSha, historicalRisk)]
+    });
+    const result = materializeAnalysis({
+      draft: value,
+      documents: [
+        { name: "base.pdf", sourceUrl: null, index: index(baseSha, [oldClosing,
+          "The bidder must submit a signed form. A bid that fails a mandatory requirement will be non-compliant."]), role: "base", amendmentNumber: null },
+        { name: "a001.pdf", sourceUrl: null, index: index(amendmentSha, [newClosing,
+          historicalRisk]), role: "amendment", amendmentNumber: "001" }
+      ],
+      manifests: [manifests[0], { ...manifests[1], amendment_number: "001", pages: 2 }],
+      costs: [], expiresAt: new Date("2026-09-03T00:00:00Z")
+    }).result;
+    expect(result.requirements.find((item) => item.id === "cross-document-closing-old")?.status)
+      .toBe("superseded");
+    expect(result.requirements.find((item) => item.id === "cross-document-closing-new")?.status)
+      .toBe("active");
+    expect(result.risks.find((risk) => risk.id === "cross-document-stale-risk"))
+      .toBeUndefined();
+  });
+
   it("keeps closed reconciliation identities scoped to their exact source objects", () => {
     const reconcilePair = (oldTopic: string, oldValue: string, oldQuote: string,
       nextTopic: string, nextValue: string, nextQuote: string) => reconcileVersionedFacts([
