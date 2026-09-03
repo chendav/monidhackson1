@@ -4,7 +4,8 @@
  * Provider-free Vercel Workflow hard-kill/redelivery probe.
  *
  * Safety contract:
- * - the only mutation is one start() against an exact, READY Preview deployment;
+ * - default mode's only mutation is one start() against an exact, READY Preview deployment;
+ * - verify-existing mode is remote-read-only and never evaluates start();
  * - an uncertain start acknowledgement is terminal and is never retried;
  * - the start process receives only Vercel auth plus immutable probe bindings;
  * - no application route, database, blob, Monid, or OpenAI module is imported;
@@ -22,6 +23,8 @@ const REPOSITORY_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)
 const EVIDENCE_DIRECTORY = path.join(REPOSITORY_ROOT, ".data", "release-evidence");
 export const REDELIVERY_PROBE_WORKFLOW_ID =
   "workflow//./src/workflows/redelivery-probe//redeliveryProbeWorkflow";
+export const REDELIVERY_PROBE_STEP_ID =
+  "step//./src/workflows/redelivery-probe-step//redeliveryProbeStep";
 const CHILD_FLAG = "--start-child";
 const CHILD_ACK_TYPE = "rfp_xray_recovery_start_ack";
 const CHILD_ERROR_TYPE = "rfp_xray_recovery_start_error";
@@ -97,6 +100,30 @@ export function parseRecoveryProbeOptions(environment = process.env) {
     fail("RECOVERY_PROBE_PREVIEW_REQUIRED", "configuration");
   }
 
+  const mode = environment.RFP_XRAY_RECOVERY_MODE || "start";
+  if (mode !== "start" && mode !== "verify-existing") {
+    fail("RECOVERY_MODE_INVALID", "configuration");
+  }
+  const hasExistingRunInput = environment.RFP_XRAY_RECOVERY_EXISTING_RUN_ID !== undefined ||
+    environment.RFP_XRAY_ALLOW_EXISTING_RUN_VERIFICATION !== undefined;
+  if (mode === "start" && hasExistingRunInput) {
+    fail("RECOVERY_EXISTING_RUN_MODE_REQUIRED", "configuration");
+  }
+  if (
+    mode === "verify-existing" &&
+    environment.RFP_XRAY_ALLOW_EXISTING_RUN_VERIFICATION !== "true"
+  ) {
+    fail("RECOVERY_EXISTING_RUN_OPT_IN_REQUIRED", "configuration");
+  }
+  const existingRunId = mode === "verify-existing"
+    ? requiredString(
+        environment,
+        "RFP_XRAY_RECOVERY_EXISTING_RUN_ID",
+        RUN_ID,
+        "RECOVERY_EXISTING_RUN_ID_INVALID"
+      )
+    : null;
+
   const token = environment.WORKFLOW_VERCEL_AUTH_TOKEN || environment.VERCEL_TOKEN;
   if (
     typeof token !== "string" || token.length < 8 || token.length > 4096 ||
@@ -171,6 +198,8 @@ export function parseRecoveryProbeOptions(environment = process.env) {
   }
 
   return {
+    mode,
+    existingRunId,
     environment: "preview",
     token,
     binding,
@@ -375,6 +404,22 @@ export async function startWorkflowExactlyOnce(startAttempt) {
   return acknowledgement.runId;
 }
 
+/**
+ * Select an existing run without evaluating the start callback, or perform the
+ * single permitted start in the default mode. Keeping this branch explicit
+ * makes the read-only guarantee directly unit-testable.
+ */
+export async function resolveRecoveryProbeRunId(options, startAttempt) {
+  if (options.mode === "verify-existing") {
+    if (typeof options.existingRunId !== "string" || !RUN_ID.test(options.existingRunId)) {
+      fail("RECOVERY_EXISTING_RUN_ID_INVALID", "configuration");
+    }
+    return options.existingRunId;
+  }
+  if (options.mode !== "start") fail("RECOVERY_MODE_INVALID", "configuration");
+  return startWorkflowExactlyOnce(startAttempt);
+}
+
 function spawnStartChildOnce(options, forker = fork) {
   const childEnvironment = buildCleanChildEnvironment(options);
   return new Promise((resolve, reject) => {
@@ -486,11 +531,41 @@ async function listAllEvents(world, runId, deadline) {
   fail("RECOVERY_EVENT_PAGE_LIMIT_EXCEEDED", "event_verification");
 }
 
+async function listAllSteps(world, runId, deadline) {
+  const steps = [];
+  let cursor;
+  for (let page = 0; page < MAX_EVENT_PAGES; page += 1) {
+    const response = await withDeadline(
+      world.steps.list({
+        runId,
+        pagination: { limit: 1000, sortOrder: "asc", ...(cursor ? { cursor } : {}) },
+        resolveData: "none"
+      }),
+      deadline,
+      "RECOVERY_STEP_READ_TIMEOUT",
+      "event_verification"
+    );
+    if (!response || !Array.isArray(response.data)) {
+      fail("RECOVERY_STEP_LOG_INVALID", "event_verification");
+    }
+    steps.push(...response.data);
+    if (!response.hasMore) return steps;
+    if (!response.cursor || response.cursor === cursor) {
+      fail("RECOVERY_STEP_PAGINATION_INVALID", "event_verification");
+    }
+    cursor = response.cursor;
+  }
+  fail("RECOVERY_STEP_PAGE_LIMIT_EXCEEDED", "event_verification");
+}
+
 function eventAttempt(event) {
-  const eventData = event && typeof event.eventData === "object" && !Array.isArray(event.eventData)
-    ? event.eventData
-    : null;
-  return eventData?.attempt;
+  if (!event || typeof event !== "object" || Array.isArray(event)) return Number.NaN;
+  if (event.eventData === undefined) return undefined;
+  if (!event.eventData || typeof event.eventData !== "object" || Array.isArray(event.eventData)) {
+    return Number.NaN;
+  }
+  if (!Object.hasOwn(event.eventData, "attempt")) return undefined;
+  return event.eventData.attempt;
 }
 
 function assertExactOutput(output, binding, stepIdSha256) {
@@ -594,7 +669,19 @@ export function estimateVercelProbeCost(eventCount) {
 /**
  * Validate the complete provider event log, then return a sanitized receipt.
  */
-export function buildRecoveryEvidence({ binding, run, events, output, startedAt, finishedAt }) {
+export function buildRecoveryEvidence({
+  binding,
+  run,
+  events,
+  steps,
+  output,
+  startedAt,
+  finishedAt,
+  mode = "start"
+}) {
+  if (mode !== "start" && mode !== "verify-existing") {
+    fail("RECOVERY_MODE_INVALID", "event_verification");
+  }
   const runRecord = asRecord(run, "RECOVERY_RUN_INVALID", "event_verification");
   if (
     typeof runRecord.runId !== "string" || !RUN_ID.test(runRecord.runId) ||
@@ -606,6 +693,9 @@ export function buildRecoveryEvidence({ binding, run, events, output, startedAt,
   }
   if (!Array.isArray(events) || events.length < 1 || events.some((event) => event.runId !== runRecord.runId)) {
     fail("RECOVERY_EVENT_LOG_INVALID", "event_verification");
+  }
+  if (!Array.isArray(steps) || steps.length !== 1) {
+    fail("RECOVERY_MATERIALIZED_STEP_INVALID", "event_verification");
   }
 
   const stepStarted = events.filter((event) => event.eventType === "step_started");
@@ -622,15 +712,44 @@ export function buildRecoveryEvidence({ binding, run, events, output, startedAt,
   const stepIds = new Set(stepStarted.map((event) => event.correlationId));
   if (
     stepIds.size !== 1 || typeof stepStarted[0].correlationId !== "string" ||
-    stepCompleted[0].correlationId !== stepStarted[0].correlationId ||
-    stepStarted.map(eventAttempt).some((attempt) => !Number.isInteger(attempt)) ||
-    stepStarted.map(eventAttempt).join(",") !== "1,2" ||
-    events.some((event) => event.eventType === "step_started" && eventAttempt(event) >= 3)
+    stepCompleted[0].correlationId !== stepStarted[0].correlationId
   ) {
     fail("RECOVERY_REDELIVERY_SEQUENCE_INVALID", "event_verification");
   }
 
-  const stepIdSha256 = sha256Text(stepStarted[0].correlationId);
+  const stepId = stepStarted[0].correlationId;
+  const materializedStep = asRecord(
+    steps[0],
+    "RECOVERY_MATERIALIZED_STEP_INVALID",
+    "event_verification"
+  );
+  if (
+    materializedStep.runId !== runRecord.runId || materializedStep.stepId !== stepId ||
+    materializedStep.stepName !== REDELIVERY_PROBE_STEP_ID ||
+    materializedStep.status !== "completed" || materializedStep.attempt !== 2
+  ) {
+    fail("RECOVERY_MATERIALIZED_STEP_INVALID", "event_verification");
+  }
+
+  const eventAttempts = stepStarted.map(eventAttempt);
+  let attemptObservation;
+  if (eventAttempts.every(Number.isInteger) && eventAttempts.join(",") === "1,2") {
+    attemptObservation = "direct_event_attempts";
+  } else if (eventAttempts.every((attempt) => attempt === undefined)) {
+    const firstStartedAt = new Date(stepStarted[0].createdAt).getTime();
+    const secondStartedAt = new Date(stepStarted[1].createdAt).getTime();
+    if (!Number.isFinite(firstStartedAt) || !Number.isFinite(secondStartedAt) ||
+      secondStartedAt <= firstStartedAt) {
+      fail("RECOVERY_REDELIVERY_SEQUENCE_INVALID", "event_verification");
+    }
+    attemptObservation = "derived_platform_omitted_event_attempts";
+  } else {
+    // Mixed omission, non-integer values, and any sequence other than [1,2]
+    // are ambiguous and must never be upgraded into recovery evidence.
+    fail("RECOVERY_REDELIVERY_SEQUENCE_INVALID", "event_verification");
+  }
+
+  const stepIdSha256 = sha256Text(stepId);
   assertExactOutput(output, binding, stepIdSha256);
   const startTime = new Date(startedAt);
   const finishTime = new Date(finishedAt);
@@ -641,7 +760,7 @@ export function buildRecoveryEvidence({ binding, run, events, output, startedAt,
 
   const vercelCost = estimateVercelProbeCost(events.length);
   return {
-    schema_version: "rfp-xray/workflow-redelivery-evidence@1",
+    schema_version: "rfp-xray/workflow-redelivery-evidence@2",
     generated_at: finishTime.toISOString(),
     scope: {
       environment: "preview",
@@ -654,12 +773,22 @@ export function buildRecoveryEvidence({ binding, run, events, output, startedAt,
       config_sha256: binding.configSha256
     },
     observations: {
+      verification_mode: mode,
+      remote_read_only: mode === "verify-existing",
+      workflow_start_count: mode === "verify-existing" ? 0 : 1,
       workflow_name: REDELIVERY_PROBE_WORKFLOW_ID,
       run_id_sha256: sha256Text(runRecord.runId),
       step_id_sha256: stepIdSha256,
       event_id_sha256: events.map((event) => sha256Text(event.eventId)).sort(),
       run_status: "completed",
-      step_started_attempts: [1, 2],
+      attempt_observation: attemptObservation,
+      event_step_started_attempts: attemptObservation === "direct_event_attempts"
+        ? [1, 2]
+        : [null, null],
+      established_attempt_sequence: [1, 2],
+      materialized_step_status: "completed",
+      materialized_step_attempt: 2,
+      output_attempt: 2,
       step_completed_count: 1,
       step_retrying_count: 0,
       step_failed_count: 0,
@@ -672,6 +801,9 @@ export function buildRecoveryEvidence({ binding, run, events, output, startedAt,
       first_attempt_hard_killed: true,
       same_step_redelivered_once: true,
       second_attempt_completed: true,
+      event_attempts_directly_observed: attemptObservation === "direct_event_attempts",
+      attempt_sequence_derived_from_materialized_state:
+        attemptObservation === "derived_platform_omitted_event_attempts",
       no_retry_event_emitted: true,
       no_third_attempt: true,
       run_completed: true
@@ -717,6 +849,9 @@ async function runStartChild() {
   let message;
   try {
     const options = parseRecoveryProbeOptions(process.env);
+    if (options.mode !== "start") {
+      fail("RECOVERY_START_CHILD_MODE_REJECTED", "workflow_start");
+    }
     const [{ createVercelWorld }, { start }, { setWorld }] = await Promise.all([
       import("@workflow/world-vercel"),
       import("workflow/api"),
@@ -757,7 +892,10 @@ export async function runRecoveryProbe(environment = process.env) {
     "preview_preflight"
   );
 
-  const runId = await startWorkflowExactlyOnce(() => spawnStartChildOnce(options));
+  const runId = await resolveRecoveryProbeRunId(
+    options,
+    () => spawnStartChildOnce(options)
+  );
   const [{ createVercelWorld }, { getRun }, { setWorld }] = await Promise.all([
     import("@workflow/world-vercel"),
     import("workflow/api"),
@@ -775,20 +913,25 @@ export async function runRecoveryProbe(environment = process.env) {
 
   const run = await pollTerminalRun(world, runId, options, deadline);
   if (run.status !== "completed") fail("RECOVERY_RUN_DID_NOT_COMPLETE", "run_poll");
-  const events = await listAllEvents(world, runId, deadline);
-  const output = await withDeadline(
-    getRun(runId).returnValue,
-    deadline,
-    "RECOVERY_OUTPUT_TIMEOUT",
-    "event_verification"
-  );
+  const [events, steps, output] = await Promise.all([
+    listAllEvents(world, runId, deadline),
+    listAllSteps(world, runId, deadline),
+    withDeadline(
+      getRun(runId).returnValue,
+      deadline,
+      "RECOVERY_OUTPUT_TIMEOUT",
+      "event_verification"
+    )
+  ]);
   const evidence = buildRecoveryEvidence({
     binding: options.binding,
     run,
     events,
+    steps,
     output,
     startedAt,
-    finishedAt: new Date()
+    finishedAt: new Date(),
+    mode: options.mode
   });
   const evidencePath = await writeEvidence(evidence);
   return { evidence, evidencePath };
@@ -801,7 +944,9 @@ async function main() {
       ok: true,
       evidence_path: path.relative(REPOSITORY_ROOT, result.evidencePath),
       run_id_sha256: result.evidence.observations.run_id_sha256,
-      step_started_attempts: result.evidence.observations.step_started_attempts,
+      verification_mode: result.evidence.observations.verification_mode,
+      attempt_observation: result.evidence.observations.attempt_observation,
+      established_attempt_sequence: result.evidence.observations.established_attempt_sequence,
       provider_actual_micro_usd: result.evidence.costs.provider.actual_micro_usd,
       vercel_estimated_micro_usd: result.evidence.costs.vercel.estimated_micro_usd
     })}\n`);

@@ -14,6 +14,8 @@ interface ProbeBinding {
 }
 
 interface ProbeOptions {
+  mode: "start" | "verify-existing";
+  existingRunId: string | null;
   environment: "preview";
   token: string;
   binding: ProbeBinding;
@@ -42,6 +44,10 @@ const runnerPromise = import(
   startWorkflowExactlyOnce: (
     startAttempt: () => Promise<Record<string, unknown>>
   ) => Promise<string>;
+  resolveRecoveryProbeRunId: (
+    options: ProbeOptions,
+    startAttempt: () => Promise<Record<string, unknown>>
+  ) => Promise<string>;
   estimateVercelProbeCost: (eventCount: number) => {
     actual_micro_usd: null;
     estimated_micro_usd: number;
@@ -51,9 +57,11 @@ const runnerPromise = import(
     binding: ProbeBinding;
     run: Record<string, unknown>;
     events: Array<Record<string, unknown>>;
+    steps: Array<Record<string, unknown>>;
     output: Record<string, unknown>;
     startedAt: Date;
     finishedAt: Date;
+    mode?: "start" | "verify-existing";
   }) => Record<string, unknown>;
 }>;
 
@@ -86,15 +94,29 @@ function event(
   eventId: string,
   eventType: string,
   correlationId?: string,
-  attempt?: number
+  attempt?: number,
+  createdAt = "2026-09-03T12:00:00.000Z"
 ) {
   return {
     runId,
     eventId,
     eventType,
-    createdAt: new Date("2026-09-03T12:00:00.000Z"),
+    createdAt: new Date(createdAt),
     ...(correlationId ? { correlationId } : {}),
     ...(attempt === undefined ? {} : { eventData: { attempt } })
+  };
+}
+
+function materializedStep(runId: string, stepId: string, overrides: Record<string, unknown> = {}) {
+  return {
+    runId,
+    stepId,
+    stepName: "step//./src/workflows/redelivery-probe-step//redeliveryProbeStep",
+    status: "completed",
+    attempt: 2,
+    createdAt: new Date("2026-09-03T12:00:00.000Z"),
+    updatedAt: new Date("2026-09-03T12:00:01.000Z"),
+    ...overrides
   };
 }
 
@@ -103,6 +125,8 @@ describe("provider-free live Workflow recovery verifier", () => {
     const runner = await runnerPromise;
     const parsed = runner.parseRecoveryProbeOptions(environment());
     expect(parsed).toMatchObject({
+      mode: "start",
+      existingRunId: null,
       environment: "preview",
       binding,
       timeoutMs: 420_000,
@@ -122,6 +146,17 @@ describe("provider-free live Workflow recovery verifier", () => {
     expect(() => runner.parseRecoveryProbeOptions(environment({
       RFP_XRAY_RECOVERY_GIT_COMMIT_SHA: "A".repeat(40)
     }))).toThrowError(expect.objectContaining({ code: "RECOVERY_GIT_COMMIT_SHA_INVALID" }));
+
+    expect(() => runner.parseRecoveryProbeOptions(environment({
+      RFP_XRAY_RECOVERY_MODE: "verify-existing",
+      RFP_XRAY_RECOVERY_EXISTING_RUN_ID: "wrun_01CanaryRun"
+    }))).toThrowError(expect.objectContaining({
+      code: "RECOVERY_EXISTING_RUN_OPT_IN_REQUIRED"
+    }));
+    expect(() => runner.parseRecoveryProbeOptions(environment({
+      RFP_XRAY_RECOVERY_MODE: "start",
+      RFP_XRAY_RECOVERY_EXISTING_RUN_ID: "wrun_01CanaryRun"
+    }))).toThrowError(expect.objectContaining({ code: "RECOVERY_EXISTING_RUN_MODE_REQUIRED" }));
   });
 
   it("constructs a clean child environment without application/provider secrets", async () => {
@@ -222,6 +257,24 @@ describe("provider-free live Workflow recovery verifier", () => {
     expect(calls).toBe(1);
   });
 
+  it("selects an opted-in existing run without ever evaluating start", async () => {
+    const runner = await runnerPromise;
+    const existingRunId = "wrun_01ExistingCanaryRun";
+    const options = runner.parseRecoveryProbeOptions(environment({
+      RFP_XRAY_RECOVERY_MODE: "verify-existing",
+      RFP_XRAY_ALLOW_EXISTING_RUN_VERIFICATION: "true",
+      RFP_XRAY_RECOVERY_EXISTING_RUN_ID: existingRunId
+    }));
+    const startAttempt = vi.fn(async () => ({
+      type: "rfp_xray_recovery_start_ack",
+      runId: "wrun_MustNotStart"
+    }));
+
+    await expect(runner.resolveRecoveryProbeRunId(options, startAttempt))
+      .resolves.toBe(existingRunId);
+    expect(startAttempt).toHaveBeenCalledTimes(0);
+  });
+
   it("requires the exact [1,2] same-step sequence and emits only hashed IDs", async () => {
     const runner = await runnerPromise;
     const runId = "wrun_01CanaryRun";
@@ -245,6 +298,7 @@ describe("provider-free live Workflow recovery verifier", () => {
         workflowName: runner.REDELIVERY_PROBE_WORKFLOW_ID
       },
       events,
+      steps: [materializedStep(runId, stepId)],
       output: {
         ...binding,
         environment: "preview",
@@ -260,7 +314,13 @@ describe("provider-free live Workflow recovery verifier", () => {
     expect(evidence).toMatchObject({
       observations: {
         run_status: "completed",
-        step_started_attempts: [1, 2],
+        verification_mode: "start",
+        attempt_observation: "direct_event_attempts",
+        event_step_started_attempts: [1, 2],
+        established_attempt_sequence: [1, 2],
+        materialized_step_status: "completed",
+        materialized_step_attempt: 2,
+        output_attempt: 2,
         step_completed_count: 1,
         step_retrying_count: 0,
         step_failed_count: 0,
@@ -301,6 +361,7 @@ describe("provider-free live Workflow recovery verifier", () => {
         workflowName: runner.REDELIVERY_PROBE_WORKFLOW_ID
       },
       events: withRetry,
+      steps: [materializedStep(runId, stepId)],
       output: {
         ...binding,
         environment: "preview",
@@ -312,6 +373,167 @@ describe("provider-free live Workflow recovery verifier", () => {
       startedAt: new Date("2026-09-03T12:00:00.000Z"),
       finishedAt: new Date("2026-09-03T12:00:02.000Z")
     })).toThrowError(expect.objectContaining({ code: "RECOVERY_EVENT_CARDINALITY_INVALID" }));
+  });
+
+  it("derives omitted event attempts only from ordered starts and exact materialized state", async () => {
+    const runner = await runnerPromise;
+    const runId = "wrun_01ExistingCanaryRun";
+    const stepId = "step-existing-internal-identifier";
+    const events = [
+      event(runId, "event-derived-1", "run_created"),
+      event(runId, "event-derived-2", "run_started"),
+      event(runId, "event-derived-3", "step_created", stepId),
+      event(runId, "event-derived-4", "step_started", stepId, undefined,
+        "2026-09-03T12:00:00.100Z"),
+      event(runId, "event-derived-5", "step_started", stepId, undefined,
+        "2026-09-03T12:00:00.200Z"),
+      event(runId, "event-derived-6", "step_completed", stepId),
+      event(runId, "event-derived-7", "run_completed")
+    ];
+    const stepIdSha256 = createHash("sha256").update(stepId).digest("hex");
+    const evidence = runner.buildRecoveryEvidence({
+      binding,
+      run: {
+        runId,
+        status: "completed",
+        deploymentId: binding.deploymentId,
+        workflowName: runner.REDELIVERY_PROBE_WORKFLOW_ID
+      },
+      events,
+      steps: [materializedStep(runId, stepId)],
+      output: {
+        ...binding,
+        environment: "preview",
+        platform: "linux",
+        attempt: 2,
+        stepIdSha256,
+        completedAt: "2026-09-03T12:00:01.000Z"
+      },
+      startedAt: new Date("2026-09-03T12:00:00.000Z"),
+      finishedAt: new Date("2026-09-03T12:00:02.000Z"),
+      mode: "verify-existing"
+    });
+
+    expect(evidence).toMatchObject({
+      schema_version: "rfp-xray/workflow-redelivery-evidence@2",
+      observations: {
+        verification_mode: "verify-existing",
+        remote_read_only: true,
+        workflow_start_count: 0,
+        attempt_observation: "derived_platform_omitted_event_attempts",
+        event_step_started_attempts: [null, null],
+        established_attempt_sequence: [1, 2],
+        materialized_step_attempt: 2,
+        output_attempt: 2
+      },
+      assertions: {
+        event_attempts_directly_observed: false,
+        attempt_sequence_derived_from_materialized_state: true,
+        second_attempt_completed: true,
+        no_third_attempt: true
+      }
+    });
+  });
+
+  it.each([
+    [1, undefined],
+    [undefined, 2],
+    [1, 3],
+    [2, 2],
+    [2, 1],
+    [1, "2"],
+    [1, null]
+  ])("rejects mixed or incorrect event attempts %j then %j", async (firstAttempt, secondAttempt) => {
+    const runner = await runnerPromise;
+    const runId = "wrun_01ExistingCanaryRun";
+    const stepId = "step-existing-internal-identifier";
+    const stepIdSha256 = createHash("sha256").update(stepId).digest("hex");
+    const startedEvent = (eventId: string, attempt: unknown, createdAt: string) => ({
+      runId,
+      eventId,
+      eventType: "step_started",
+      correlationId: stepId,
+      createdAt: new Date(createdAt),
+      eventData: attempt === undefined ? { stepName: "redeliveryProbeStep" } : {
+        stepName: "redeliveryProbeStep",
+        attempt
+      }
+    });
+    const events = [
+      event(runId, "event-invalid-1", "run_created"),
+      startedEvent("event-invalid-2", firstAttempt, "2026-09-03T12:00:00.100Z"),
+      startedEvent("event-invalid-3", secondAttempt, "2026-09-03T12:00:00.200Z"),
+      event(runId, "event-invalid-4", "step_completed", stepId),
+      event(runId, "event-invalid-5", "run_completed")
+    ];
+
+    expect(() => runner.buildRecoveryEvidence({
+      binding,
+      run: {
+        runId,
+        status: "completed",
+        deploymentId: binding.deploymentId,
+        workflowName: runner.REDELIVERY_PROBE_WORKFLOW_ID
+      },
+      events,
+      steps: [materializedStep(runId, stepId)],
+      output: {
+        ...binding,
+        environment: "preview",
+        platform: "linux",
+        attempt: 2,
+        stepIdSha256,
+        completedAt: "2026-09-03T12:00:01.000Z"
+      },
+      startedAt: new Date("2026-09-03T12:00:00.000Z"),
+      finishedAt: new Date("2026-09-03T12:00:02.000Z"),
+      mode: "verify-existing"
+    })).toThrowError(expect.objectContaining({ code: "RECOVERY_REDELIVERY_SEQUENCE_INVALID" }));
+  });
+
+  it("rejects omitted attempts without strict event time order or materialized attempt two", async () => {
+    const runner = await runnerPromise;
+    const runId = "wrun_01ExistingCanaryRun";
+    const stepId = "step-existing-internal-identifier";
+    const stepIdSha256 = createHash("sha256").update(stepId).digest("hex");
+    const makeInput = (steps: Array<Record<string, unknown>>, secondStartedAt: string) => ({
+      binding,
+      run: {
+        runId,
+        status: "completed",
+        deploymentId: binding.deploymentId,
+        workflowName: runner.REDELIVERY_PROBE_WORKFLOW_ID
+      },
+      events: [
+        event(runId, "event-state-1", "run_created"),
+        event(runId, "event-state-2", "step_started", stepId, undefined,
+          "2026-09-03T12:00:00.100Z"),
+        event(runId, "event-state-3", "step_started", stepId, undefined, secondStartedAt),
+        event(runId, "event-state-4", "step_completed", stepId),
+        event(runId, "event-state-5", "run_completed")
+      ],
+      steps,
+      output: {
+        ...binding,
+        environment: "preview",
+        platform: "linux",
+        attempt: 2,
+        stepIdSha256,
+        completedAt: "2026-09-03T12:00:01.000Z"
+      },
+      startedAt: new Date("2026-09-03T12:00:00.000Z"),
+      finishedAt: new Date("2026-09-03T12:00:02.000Z"),
+      mode: "verify-existing" as const
+    });
+
+    expect(() => runner.buildRecoveryEvidence(makeInput(
+      [materializedStep(runId, stepId)],
+      "2026-09-03T12:00:00.100Z"
+    ))).toThrowError(expect.objectContaining({ code: "RECOVERY_REDELIVERY_SEQUENCE_INVALID" }));
+    expect(() => runner.buildRecoveryEvidence(makeInput(
+      [materializedStep(runId, stepId, { attempt: 1 })],
+      "2026-09-03T12:00:00.200Z"
+    ))).toThrowError(expect.objectContaining({ code: "RECOVERY_MATERIALIZED_STEP_INVALID" }));
   });
 
   it("marks every Vercel cost component estimated and keeps provider actual at zero", async () => {
