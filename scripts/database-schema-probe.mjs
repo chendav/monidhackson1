@@ -1,7 +1,7 @@
 import { neon } from "@neondatabase/serverless";
 
-const EXPECTED_SCHEMA_VERSION = 8;
-const EXPECTED_MARKER = "rfp-xray-schema-v8";
+const EXPECTED_SCHEMA_VERSION = 9;
+const EXPECTED_MARKER = "rfp-xray-schema-v9";
 
 if (!process.env.DATABASE_URL) {
   console.error("database_schema_probe_failed: DATABASE_URL is not configured");
@@ -10,14 +10,24 @@ if (!process.env.DATABASE_URL) {
 
 try {
   const sql = neon(process.env.DATABASE_URL);
-  const [tables, migrations, markers] = await Promise.all([
+  const [tables, migrations, markers, dispatchColumns] = await Promise.all([
     sql`SELECT count(*)::int AS count
         FROM information_schema.tables
         WHERE table_schema = 'public'`,
     sql`SELECT count(*)::int AS count FROM drizzle.__drizzle_migrations`,
     sql`SELECT schema_version, marker
         FROM app_schema_meta
-        WHERE id = 'current'`
+        WHERE id = 'current'`,
+    sql`SELECT column_name
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'runs'
+          AND column_name IN (
+            'analysis_dispatch_claim_id',
+            'analysis_dispatch_claimed_at',
+            'analysis_dispatch_status',
+            'analysis_dispatch_uncertain_at'
+          )`
   ]);
   const marker = markers[0];
   if (markers.length !== 1 || marker.schema_version !== EXPECTED_SCHEMA_VERSION ||
@@ -25,10 +35,15 @@ try {
     console.error("database_schema_probe_failed: schema marker mismatch");
     process.exit(1);
   }
+  if (dispatchColumns.length !== 4) {
+    console.error("database_schema_probe_failed: analysis dispatch fence missing");
+    process.exit(1);
+  }
   console.log(JSON.stringify({
     status: "ready",
     public_tables: tables[0].count,
     migration_rows: migrations[0].count,
+    analysis_dispatch_fence: "ready",
     schema_version: marker.schema_version,
     marker: marker.marker
   }));

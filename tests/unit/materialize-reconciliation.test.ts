@@ -171,6 +171,45 @@ describe("server-owned materialization and reconciliation", () => {
     expect(result.blocking_unknowns).toContain("No substantive source-backed analysis could be verified.");
   });
 
+  it("withholds OCR text that cannot be bound to the native physical-page index", () => {
+    const ocrDraft = addMinimumCoverage(draft([]));
+    const imageOnlyIndex = index(baseSha, [""]);
+    const result = materializeAnalysis({
+      draft: ocrDraft,
+      documents: [{
+        name: "image-only.pdf",
+        sourceUrl: null,
+        index: imageOnlyIndex,
+        role: "base",
+        amendmentNumber: null
+      }],
+      manifests: [{ ...manifests[0], source_name: "image-only.pdf", pages: 1 }],
+      costs: [],
+      expiresAt: new Date("2026-09-03T00:00:00Z")
+    }).result;
+
+    expect(result.requirements.find((item) => item.id === "signed-form")).toBeUndefined();
+    expect(result.evaluation.mandatory_gate).toBeNull();
+    expect(result.quality.citations_verified).toBe(0);
+    expect(result.decision_readiness).toBe("incomplete");
+    expect(result.blocking_unknowns).toContain("No substantive source-backed analysis could be verified.");
+  });
+
+  it("accounts for the selected private-storage provider without hardcoding Railway", () => {
+    const result = materializeAnalysis({
+      draft: draft([]),
+      documents: [{ name: "base.pdf", sourceUrl: null, index: baseIndex, role: "base", amendmentNumber: null }],
+      manifests: [manifests[0]],
+      costs: [],
+      storageProvider: "vercel_blob",
+      expiresAt: new Date("2026-09-03T00:00:00Z")
+    }).result;
+
+    expect(result.costs.unpriced_providers).toContain("vercel_blob");
+    expect(result.costs.unpriced_providers).not.toContain("railway_s3");
+    expect(result.costs.not_applicable_providers).toEqual(["railway_s3"]);
+  });
+
   it("does not treat an uncited unknown as substantive evidence", () => {
     const unknownOnly = draft([]);
     unknownOnly.claims = [{

@@ -1,7 +1,11 @@
 import { getRunStore } from "@/lib/runs/store";
 import { expireDueRuns, expireRun } from "@/lib/runs/expiry";
+import {
+  CLEANUP_STEP_MAX_RETRIES,
+  WORKFLOW_HELPER_MAX_DURATION_SECONDS
+} from "@/lib/workflow-cost-policy";
 
-export const maxDuration = 50;
+export const maxDuration = WORKFLOW_HELPER_MAX_DURATION_SECONDS;
 export const EXPIRY_STEP_BATCH_SIZE = 1;
 
 export async function expireRunStep(runId: string) {
@@ -28,3 +32,6 @@ export async function expireDueRunsStep() {
   );
   return { expiredRunIds: expired.map((record) => record.id) };
 }
+
+expireRunStep.maxRetries = CLEANUP_STEP_MAX_RETRIES;
+expireDueRunsStep.maxRetries = CLEANUP_STEP_MAX_RETRIES;

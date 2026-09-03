@@ -304,8 +304,12 @@ export function createEdmontonSampleResult(): AnalysisResult {
     costs: {
       currency: "USD",
       events: [],
+      completeness: "partial",
+      unpriced_providers: ["monid", "openai", "railway_s3", "vercel", "neon"],
+      not_applicable_providers: ["vercel_blob"],
       actual_micro_usd: 0,
       estimated_micro_usd: 0,
+      known_subtotal_micro_usd: 0,
       total_micro_usd: 0,
       includes_failed_attempts: false
     },

@@ -337,7 +337,12 @@ describe("versioned public API contract", () => {
     expect(first.record.reservedMicroUsd).toBe(config.MAX_RUN_COST_MICRO_USD);
     expect(replay.created).toBe(false);
     expect(replay.record.id).toBe(first.record.id);
-    expect(schedule).toHaveBeenCalledTimes(2);
+    expect(schedule).toHaveBeenCalledTimes(1);
+    expect(replay.record).toMatchObject({
+      analysisDispatchStatus: "not_dispatched",
+      workflowRunId: null
+    });
+    expect(replay.record.analysisDispatchClaimId).not.toBeNull();
     expect(RunStatusResponseSchema.parse(toRunStatusResponse(first.record)).cleanup_confirmed).toBe(false);
     await expect(createRun(input, principal, "contract-request-2", {
       config, store, budget, schedule: async () => null
@@ -404,7 +409,12 @@ describe("versioned public API contract", () => {
 
     expect(schedule).toHaveBeenCalledOnce();
     expect(await store.get(replay.record.id)).toMatchObject({
-      id: replay.record.id, status: "queued", cleanupConfirmed: false
+      id: replay.record.id,
+      status: "queued",
+      cleanupConfirmed: false,
+      analysisDispatchStatus: "dispatch_uncertain",
+      workflowRunId: null
     });
+    expect((await store.get(replay.record.id))?.analysisDispatchClaimId).not.toBeNull();
   });
 });

@@ -3,6 +3,7 @@ import type { PresignUploadResponse } from "@/contracts";
 import { LocalDeterministicModel } from "@/lib/analysis/local-model";
 import { getConfig } from "@/lib/config";
 import { sha256Hex } from "@/lib/crypto";
+import { infrastructureCostCommitmentMicroUsd } from "@/lib/cost-estimates";
 import { AppError } from "@/lib/errors";
 import {
   LIVE_NETWORK_BUDGET_MS,
@@ -20,7 +21,7 @@ import type { AnalysisModel, ModelDocumentInput } from "@/lib/providers/openai";
 import { InMemoryRunStore } from "@/lib/runs/store";
 import { toRunStatusResponse } from "@/lib/runs/types";
 import { runSourceCleanupWatchdog } from "@/lib/runs/source-cleanup-watchdog";
-import { InMemoryBudgetGuard } from "@/lib/security/budget";
+import { InMemoryBudgetGuard, type BudgetGuard } from "@/lib/security/budget";
 import type { UploadStorage } from "@/lib/storage/uploads";
 import { makeMinimalPdf } from "../unit/minimal-pdf";
 
@@ -103,6 +104,16 @@ class ParallelUploadStorage implements UploadStorage {
   }
 }
 
+class RecordingBudgetGuard implements BudgetGuard {
+  readonly settlements: Array<{ runId: string; actualMicroUsd: number }> = [];
+
+  async reserve(): Promise<void> {}
+
+  async settle(runId: string, actualMicroUsd: number): Promise<void> {
+    this.settlements.push({ runId, actualMicroUsd });
+  }
+}
+
 const liveConfig = getConfig({
   NODE_ENV: "test",
   SESSION_SIGNING_SECRET: "parallel-monid-test-session-secret-is-long-enough",
@@ -179,6 +190,37 @@ async function seededRun(store: InMemoryRunStore, documents: Uint8Array[]) {
 }
 
 describe("bounded parallel Monid parsing", () => {
+  it("retains the full daily-budget reservation and infrastructure ledger after an early failure", async () => {
+    const documents = [new TextEncoder().encode("not a PDF")];
+    const store = new InMemoryRunStore();
+    const { record, incomingPaths } = await seededRun(store, documents);
+    const budget = new RecordingBudgetGuard();
+
+    const result = await processRun(record.id, {
+      store,
+      uploadStorage: new ParallelUploadStorage(incomingPaths, documents),
+      budget,
+      config: liveConfig,
+      cleanupWatchdogScheduler: async () => "must-not-run"
+    });
+
+    expect(result.status).toBe("failed");
+    expect(result.costs.map((event) => event.provider)).toEqual(expect.arrayContaining([
+      "vercel",
+      "neon"
+    ]));
+    expect(result.costMicroUsd).toBe(infrastructureCostCommitmentMicroUsd({
+      documentCount: 1,
+      storageProvider: null,
+      neonCostCuCeiling: liveConfig.NEON_COST_CU_CEILING,
+      runTtlHours: liveConfig.RUN_TTL_HOURS
+    }));
+    expect(budget.settlements).toEqual([{
+      runId: record.id,
+      actualMicroUsd: record.reservedMicroUsd
+    }]);
+  });
+
   it("rejects a misconfigured whole-run commitment before any paid provider dispatch", async () => {
     const documents = fixtureDocuments(1);
     const store = new InMemoryRunStore();
@@ -187,7 +229,13 @@ describe("bounded parallel Monid parsing", () => {
       ...current,
       reservedMicroUsd:
         liveConfig.MONID_PARSE_RESERVE_MICRO_USD +
-        liveConfig.OPENAI_RUN_RESERVE_MICRO_USD - 1
+        liveConfig.OPENAI_RUN_RESERVE_MICRO_USD +
+        infrastructureCostCommitmentMicroUsd({
+          documentCount: 1,
+          storageProvider: null,
+          neonCostCuCeiling: liveConfig.NEON_COST_CU_CEILING,
+          runTtlHours: liveConfig.RUN_TTL_HOURS
+        }) - 1
     }));
     const storage = new ParallelUploadStorage(incomingPaths, documents);
     let monidPaidDispatches = 0;
@@ -221,7 +269,12 @@ describe("bounded parallel Monid parsing", () => {
     expect(result.status).toBe("failed");
     expect(result.error?.code).toBe("BUDGET_EXCEEDED");
     expect(result.paidProviderAttemptStartedAt).toBeNull();
-    expect(result.costs).toEqual([]);
+    expect(result.costs.filter((event) => ["monid", "openai"].includes(event.provider)))
+      .toEqual([]);
+    expect(result.costs.map((event) => event.provider)).toEqual(expect.arrayContaining([
+      "vercel",
+      "neon"
+    ]));
     expect(monidPaidDispatches).toBe(0);
     expect(openAiPaidDispatches).toBe(0);
   });
@@ -299,7 +352,12 @@ describe("bounded parallel Monid parsing", () => {
       status: "failed",
       result: null,
       cleanupConfirmed: true,
-      costMicroUsd: 3_495_000
+      costMicroUsd: 3_495_000 + infrastructureCostCommitmentMicroUsd({
+        documentCount: 1,
+        storageProvider: null,
+        neonCostCuCeiling: liveConfig.NEON_COST_CU_CEILING,
+        runTtlHours: liveConfig.RUN_TTL_HOURS
+      })
     });
   });
 
@@ -360,9 +418,9 @@ describe("bounded parallel Monid parsing", () => {
       config: liveConfig,
       monid,
       model,
-      cleanupWatchdogScheduler: async (_runId, registrationId) => {
-        scheduledWatchdogs.push(registrationId);
-        return `cleanup-workflow-${registrationId}`;
+      cleanupWatchdogScheduler: async (_runId, registrationIds) => {
+        scheduledWatchdogs.push(...registrationIds);
+        return `cleanup-workflow-${registrationIds.join("-")}`;
       }
     });
 
@@ -402,6 +460,13 @@ describe("bounded parallel Monid parsing", () => {
       cost.cost_provenance?.inspect_schema_sha256 === "a".repeat(64) &&
       cost.cost_provenance.value_unit === "currency_major"
     )).toBe(true);
+    expect(result.result?.costs).toMatchObject({
+      completeness: "complete",
+      unpriced_providers: [],
+      not_applicable_providers: ["railway_s3", "vercel_blob"]
+    });
+    expect(result.result?.costs.events.map((event) => event.provider))
+      .toEqual(expect.arrayContaining(["monid", "openai", "vercel", "neon"]));
     expect(result.cleanupReceipts.filter((receipt) => receipt.resourceKind === "provider_artifact"))
       .toEqual([0, 1, 2, 3].map((index) => expect.objectContaining({
         resourceId: `provider-artifact:sha256:${sha256Hex(`monid-run-${index}`)}`,
@@ -564,8 +629,8 @@ describe("bounded parallel Monid parsing", () => {
       budget: new InMemoryBudgetGuard(liveConfig),
       config: liveConfig,
       monid,
-      cleanupWatchdogScheduler: async (_runId, registrationId) =>
-        `cleanup-workflow-${registrationId}`
+      cleanupWatchdogScheduler: async (_runId, registrationIds) =>
+        `cleanup-workflow-${registrationIds.join("-")}`
     });
 
     expect(result.status).toBe("failed");
@@ -588,6 +653,8 @@ describe("bounded parallel Monid parsing", () => {
         source_currency: "USD"
       }
     });
-    expect(toRunStatusResponse(result).cost_accounting_status).toBe("actual_complete");
+    // Provider failure cost is actual, while the deliberately
+    // failure-inclusive infrastructure ledger remains estimated.
+    expect(toRunStatusResponse(result).cost_accounting_status).toBe("estimated_complete");
   });
 });

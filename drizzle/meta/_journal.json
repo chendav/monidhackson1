@@ -57,6 +57,13 @@
       "when": 1788393607000,
       "tag": "0007_release_attestations",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1788393608000,
+      "tag": "0008_cleanup_retry_dedupe",
+      "breakpoints": true
     }
   ]
 }

@@ -10,8 +10,9 @@ import type {
   SourceCleanupWatchdog
 } from "@/lib/runs/types";
 import { stagingBlobPath, type UploadStorage } from "@/lib/storage/uploads";
+import { SOURCE_CLEANUP_WATCHDOG_POLL_DELAY_MS } from "@/lib/workflow-cost-policy";
 
-export const SOURCE_CLEANUP_WATCHDOG_POLL_MS = 10_000;
+export const SOURCE_CLEANUP_WATCHDOG_POLL_MS = SOURCE_CLEANUP_WATCHDOG_POLL_DELAY_MS;
 export const SOURCE_CLEANUP_CAPTURE_SLA_MS = 60_000;
 
 interface ProcessingClaim {

@@ -138,6 +138,13 @@ export const HealthResponseSchema = z.strictObject({
   mode: z.enum(["live", "local_fallback", "unavailable"]),
   dependencies: z.strictObject({
     database: z.enum(["ready", "missing", "unreachable", "schema_mismatch", "memory_fallback"]),
+    neon_capacity: z.enum([
+      "attested",
+      "configured_unattested",
+      "mismatch",
+      "unreachable",
+      "not_applicable"
+    ]),
     maintenance: z.enum(["fresh", "missing", "stale", "unreachable", "not_applicable"]),
     private_storage: z.enum(["attested", "configured", "missing", "memory_fallback"]),
     workflow: z.enum([
@@ -176,6 +183,9 @@ export const HealthResponseSchema = z.strictObject({
   }),
   missing: z.array(z.string()),
   source_scope: z.literal("document_only"),
-  provider_retention: z.literal("unknown")
+  provider_retention: z.enum([
+    "unknown",
+    "context_dev_zdr_unavailable_artifact_expiry_observed_7d"
+  ])
 });
 export type HealthResponse = z.infer<typeof HealthResponseSchema>;

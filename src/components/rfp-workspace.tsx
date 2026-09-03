@@ -300,7 +300,7 @@ function SourceBuilder({
       <header className="builder-heading">
         <p className="eyebrow">Procurement analysis workspace</p>
         <h1 id="source-builder-title">Analyze a tender pack</h1>
-        <p>Build a source-linked brief from one base RFP and up to four amendments.</p>
+        <p><strong>Upstream retention:</strong> Context.dev zero-data retention is not enabled. A verified parse reported a seven-day artifact expiry; do not submit confidential material unless that is acceptable.</p>
       </header>
 
       <button className="mobile-sample-shortcut" onClick={onLoadSample} type="button"><FileCheck2 aria-hidden="true" size={16} />Preview Edmonton sample<ArrowRight aria-hidden="true" size={15} /></button>

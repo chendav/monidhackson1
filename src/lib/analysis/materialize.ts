@@ -6,6 +6,7 @@ import {
   type DocumentManifest
 } from "@/contracts";
 import type { DraftAnalysis } from "@/lib/analysis/draft";
+import { hasCompleteInfrastructureCostCoverage } from "@/lib/cost-estimates";
 import {
   deriveDeadlineFactKey,
   deriveSourceFactKey,
@@ -27,6 +28,7 @@ export interface MaterializeInput {
   documents: Array<CitationDocument & { role: "base" | "amendment"; amendmentNumber: string | null }>;
   manifests: DocumentManifest[];
   costs: CostEvent[];
+  storageProvider?: "railway_s3" | "vercel_blob" | null;
   generatedAt?: Date;
   expiresAt: Date;
 }
@@ -1387,6 +1389,31 @@ export function materializeAnalysis(input: MaterializeInput): {
     (total, event) => total + (event.actual_micro_usd === null ? event.estimated_micro_usd ?? 0 : 0),
     0
   );
+  const pricedProviders = new Set(input.costs.flatMap((event) =>
+    event.actual_micro_usd !== null || event.estimated_micro_usd !== null
+      ? [event.provider]
+      : []
+  ));
+  const selectedStorageProvider = input.storageProvider === undefined
+    ? "railway_s3"
+    : input.storageProvider;
+  const expectedCostProviders = [
+    "monid",
+    "openai",
+    "vercel",
+    "neon",
+    ...(selectedStorageProvider ? [selectedStorageProvider] : [])
+  ] as const;
+  const unpricedProviders = expectedCostProviders.filter((provider) => {
+    if (!pricedProviders.has(provider)) return true;
+    if (provider === "vercel" || provider === "neon" || provider === "railway_s3") {
+      return !hasCompleteInfrastructureCostCoverage(input.costs, provider);
+    }
+    return false;
+  });
+  const notApplicableProviders = (["railway_s3", "vercel_blob"] as const)
+    .filter((provider) => provider !== selectedStorageProvider);
+  const knownSubtotalMicroUsd = actualMicroUsd + estimatedMicroUsd;
 
   const result: AnalysisResult = {
     schema_version: "1.0",
@@ -1417,15 +1444,19 @@ export function materializeAnalysis(input: MaterializeInput): {
       follow_embedded_link_events: 0,
       warnings: [
         "Analysis is restricted to the supplied documents.",
-        "Provider-side Monid run and artifact retention is unknown."
+        "Context.dev zero-data retention is not enabled; an upstream artifact expiry of seven days was observed in the release contract spike."
       ]
     },
     costs: {
       currency: "USD",
       events: input.costs,
+      completeness: unpricedProviders.length === 0 ? "complete" : "partial",
+      unpriced_providers: unpricedProviders,
+      not_applicable_providers: notApplicableProviders,
       actual_micro_usd: actualMicroUsd,
       estimated_micro_usd: estimatedMicroUsd,
-      total_micro_usd: actualMicroUsd + estimatedMicroUsd,
+      known_subtotal_micro_usd: knownSubtotalMicroUsd,
+      total_micro_usd: knownSubtotalMicroUsd,
       includes_failed_attempts: input.costs.some((event) => event.status === "failed")
     },
     generated_at: generatedAt.toISOString(),

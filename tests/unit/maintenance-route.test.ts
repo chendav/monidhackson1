@@ -155,7 +155,7 @@ describe("maintenance cron route", () => {
     expect((await store.get(stranded.record.id))?.workflowRunId).toBe("workflow-from-maintenance");
   });
 
-  it("reschedules a stale queued run whose earlier workflow died before processing claim", async () => {
+  it("terminally cleans a stale queued run instead of dispatching a second analysis Workflow", async () => {
     const store = new InMemoryRunStore();
     const createdAt = new Date("2026-09-02T00:00:00Z");
     const now = new Date("2026-09-02T00:05:00Z");
@@ -174,17 +174,25 @@ describe("maintenance cron route", () => {
       config,
       store,
       budget: new InMemoryBudgetGuard(config),
-      storage: { sweepExpiredIncoming: vi.fn(async () => []) } as unknown as UploadStorage,
+      storage: {
+        remove: vi.fn(async () => undefined),
+        sweepExpiredIncoming: vi.fn(async () => [])
+      } as unknown as UploadStorage,
       schedule,
       now
     });
     expect(response.status).toBe(200);
-    expect(await response.json()).toMatchObject({ recovered_run_count: 1, admission_failure_count: 0 });
-    expect(schedule).toHaveBeenCalledExactlyOnceWith(stranded.record.id);
-    expect((await store.get(stranded.record.id))?.workflowRunId).toBe("replacement-workflow");
+    expect(await response.json()).toMatchObject({ recovered_run_count: 0, admission_failure_count: 1 });
+    expect(schedule).not.toHaveBeenCalled();
+    expect(await store.get(stranded.record.id)).toMatchObject({
+      status: "failed",
+      workflowRunId: "workflow-that-died-before-claim",
+      cleanupConfirmed: true,
+      error: { code: "ANALYSIS_INCOMPLETE", retryable: false }
+    });
   });
 
-  it("keeps a delayed old workflow viable when replacement scheduling is uncertain", async () => {
+  it("does not blind-redispatch a delayed legacy Workflow", async () => {
     const store = new InMemoryRunStore();
     const createdAt = new Date("2026-09-02T00:00:00Z");
     const now = new Date("2026-09-02T00:05:00Z");
@@ -203,20 +211,24 @@ describe("maintenance cron route", () => {
       config,
       store,
       budget: new InMemoryBudgetGuard(config),
-      storage: { sweepExpiredIncoming: vi.fn(async () => []) } as unknown as UploadStorage,
+      storage: {
+        remove: vi.fn(async () => undefined),
+        sweepExpiredIncoming: vi.fn(async () => [])
+      } as unknown as UploadStorage,
       schedule,
       now
     });
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({
       recovered_run_count: 0,
-      admission_failure_count: 0,
-      admission_deferred_count: 1
+      admission_failure_count: 1,
+      admission_deferred_count: 0
     });
+    expect(schedule).not.toHaveBeenCalled();
     expect(await store.get(stranded.record.id)).toMatchObject({
-      status: "queued",
+      status: "failed",
       workflowRunId: "workflow-still-delayed",
-      cleanupConfirmed: false
+      cleanupConfirmed: true
     });
   });
 

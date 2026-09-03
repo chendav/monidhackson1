@@ -8,6 +8,7 @@ import {
 } from "@/lib/config";
 import { probeDatabaseSchema } from "@/lib/health/database";
 import { probeMaintenanceHeartbeat } from "@/lib/health/maintenance";
+import { probeNeonCapacity } from "@/lib/health/neon-capacity";
 import { probeProviderContractsAttestation } from "@/lib/health/provider-contracts";
 import { probeWorkflowRuntimeAttestation } from "@/lib/health/workflow-runtime";
 
@@ -18,12 +19,15 @@ export async function GET() {
   const livePipeline = hasLivePipelineConfig(config);
   const readiness = getProductionReadiness(config);
   const privateStorageProvider = getPrivateStorageProvider(config);
-  const [database, maintenance, workflowRuntime, providerContracts] = await Promise.all([
+  const [database, neonCapacity, maintenance, workflowRuntime, providerContracts] = await Promise.all([
     config.DATABASE_URL
       ? probeDatabaseSchema(config.DATABASE_URL)
       : Promise.resolve({
           status: config.NODE_ENV === "production" ? "missing" as const : "memory_fallback" as const
         }),
+    config.NODE_ENV === "production"
+      ? probeNeonCapacity(config.DATABASE_URL, config)
+      : Promise.resolve({ status: "not_applicable" as const }),
     config.NODE_ENV === "production"
       ? probeMaintenanceHeartbeat(config.DATABASE_URL)
       : Promise.resolve({ status: "not_applicable" as const }),
@@ -48,7 +52,8 @@ export async function GET() {
     : privateStorageProvider === "vercel_blob"
       ? config.BLOB_REPLAY_FENCE_VALIDATED ? "current" as const : "invalid" as const
       : config.NODE_ENV === "production" ? "missing" as const : "not_applicable" as const;
-  const activeReady = database.status === "ready" && storageSafety === "current" &&
+  const activeReady = database.status === "ready" && neonCapacity.status === "attested" &&
+    storageSafety === "current" &&
     maintenance.status === "fresh" && workflowRuntime.status === "attested_300s" &&
     providerContracts.status === "actively_verified";
   const status = config.NODE_ENV === "production"
@@ -57,6 +62,13 @@ export async function GET() {
   const missing = [...readiness.missing];
   if (config.NODE_ENV === "production" && database.status !== "ready") {
     missing.push("DATABASE_SCHEMA_READY");
+  }
+  if (config.NODE_ENV === "production" && neonCapacity.status !== "attested") {
+    missing.push(neonCapacity.status === "configured_unattested"
+      ? "NEON_CAPACITY_ATTESTATION"
+      : neonCapacity.status === "unreachable"
+        ? "NEON_CAPACITY_REACHABLE"
+        : "NEON_CAPACITY_MATCH");
   }
   if (config.NODE_ENV === "production" && maintenance.status !== "fresh") {
     missing.push("MAINTENANCE_HEARTBEAT_FRESH");
@@ -82,6 +94,7 @@ export async function GET() {
     mode: status === "not_ready" ? "unavailable" : livePipeline ? "live" : "local_fallback",
     dependencies: {
       database: database.status,
+      neon_capacity: neonCapacity.status,
       maintenance: maintenance.status,
       private_storage: privateStorageProvider
         ? storageSafety === "current" ? "attested" : "configured"
@@ -104,6 +117,6 @@ export async function GET() {
     },
     missing: [...new Set(missing)],
     source_scope: "document_only",
-    provider_retention: "unknown"
+    provider_retention: "context_dev_zdr_unavailable_artifact_expiry_observed_7d"
   }, { status: status === "not_ready" ? 503 : 200 });
 }

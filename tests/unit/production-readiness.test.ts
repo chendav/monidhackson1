@@ -46,6 +46,7 @@ describe("production dependency readiness", () => {
     expect(readiness.ready).toBe(false);
     expect(readiness.missing).toEqual(expect.arrayContaining([
       "DATABASE_URL", "PRIVATE_STORAGE", "PRIVATE_STORAGE_SAFETY_ATTESTATION", "VERCEL_WORKFLOW",
+      "NEON_EXPECTED_MAX_WORKER_PROCESSES",
       "MONID_RESULT_URL_PATH", "MONID_COST_VALUE_UNIT", "MONID_INSPECT_SCHEMA_SHA256",
       "MONID_ARTIFACT_HOST_ALLOWLIST",
       "SESSION_SIGNING_SECRET", "IP_HASH_SECRET", "TURNSTILE_SECRET_KEY",
@@ -58,6 +59,8 @@ describe("production dependency readiness", () => {
     const config = getConfig({
       NODE_ENV: "production",
       DATABASE_URL: "postgresql://example.invalid/database",
+      NEON_COST_CU_CEILING: "1",
+      NEON_EXPECTED_MAX_WORKER_PROCESSES: "13",
       S3_ENDPOINT: railwayTarget.endpoint,
       S3_REGION: "auto",
       S3_BUCKET: "rfp-xray-private",
@@ -67,8 +70,8 @@ describe("production dependency readiness", () => {
       S3_SAFETY_ATTESTATION: safetyAttestation(),
       S3_REPLAY_FENCE_VALIDATED: "false",
       MONID_API_KEY: "monid-key",
-      MONID_PARSE_PROVIDER: "context-dev",
-      MONID_PARSE_ENDPOINT: "parse",
+      MONID_PARSE_PROVIDER: "context.dev",
+      MONID_PARSE_ENDPOINT: "/parse",
       MONID_RUN_ID_PATH: "id",
       MONID_RUN_STATUS_PATH: "status",
       MONID_PROVIDER_STATUS_PATH: "result.status",
@@ -101,6 +104,14 @@ describe("production dependency readiness", () => {
     expect(Math.ceil(
       config.OPENAI_MAX_INPUT_TOKENS * 0.75 + config.OPENAI_MAX_OUTPUT_TOKENS * 4.5
     )).toBeLessThanOrEqual(config.OPENAI_RUN_RESERVE_MICRO_USD);
+    expect(getProductionReadiness({ ...config, MONID_PARSE_PROVIDER: "different" }, { VERCEL: "1" }, safetyNow).missing)
+      .toContain("MONID_PARSE_PROVIDER");
+    expect(getProductionReadiness({ ...config, MONID_PARSE_ENDPOINT: "/different" }, { VERCEL: "1" }, safetyNow).missing)
+      .toContain("MONID_PARSE_ENDPOINT");
+    expect(getProductionReadiness({
+      ...config,
+      NEON_COST_CU_CEILING: 0.99
+    }, { VERCEL: "1" }, safetyNow).missing).toContain("NEON_COST_CU_CEILING");
   });
 
   it.each([
@@ -175,8 +186,8 @@ describe("production dependency readiness", () => {
       BLOB_READ_WRITE_TOKEN: "blob-token",
       BLOB_REPLAY_FENCE_VALIDATED: "true",
       MONID_API_KEY: "monid-key",
-      MONID_PARSE_PROVIDER: "context-dev",
-      MONID_PARSE_ENDPOINT: "parse",
+      MONID_PARSE_PROVIDER: "context.dev",
+      MONID_PARSE_ENDPOINT: "/parse",
       MONID_RUN_ID_PATH: "id",
       MONID_RUN_STATUS_PATH: "status",
       MONID_PROVIDER_STATUS_PATH: "result.status",

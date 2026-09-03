@@ -61,6 +61,11 @@ const EnvironmentSchema = z.object({
   DAILY_COST_CAP_MICRO_USD: z.coerce.number().int().positive().default(20_000_000),
   OPENAI_RUN_RESERVE_MICRO_USD: z.coerce.number().int().nonnegative().max(500_000).default(495_000),
   MONID_PARSE_RESERVE_MICRO_USD: z.coerce.number().int().nonnegative().default(4_500),
+  // Costing uses a deliberately rounded-up CU ceiling. Production also pins
+  // the live Postgres max_worker_processes value so a compute-size change
+  // fails closed before another paid analysis starts.
+  NEON_COST_CU_CEILING: z.coerce.number().positive().max(56).default(1),
+  NEON_EXPECTED_MAX_WORKER_PROCESSES: z.coerce.number().int().min(12).max(124).optional(),
   RUN_TTL_HOURS: z.coerce.number().int().positive().max(168).default(24),
   GUEST_RUNS_PER_DAY: z.coerce.number().int().positive().default(3),
   API_RUNS_PER_DAY: z.coerce.number().int().positive().default(30),
@@ -122,6 +127,18 @@ export function hasLivePipelineConfig(config = getConfig()) {
 export interface ProductionReadiness {
   ready: boolean;
   missing: string[];
+}
+
+export function hasConservativeNeonCapacityConfig(config = getConfig()) {
+  if (config.NEON_EXPECTED_MAX_WORKER_PROCESSES === undefined) return false;
+  // Neon publishes: max_worker_processes = 12 + floor(2 * max_compute_size).
+  // Therefore the observed integer proves max_compute_size is strictly below
+  // (workers - 11) / 2. Cap the boundary at Neon's published 56-CU maximum.
+  const requiredCeiling = Math.min(
+    56,
+    (config.NEON_EXPECTED_MAX_WORKER_PROCESSES - 11) / 2
+  );
+  return config.NEON_COST_CU_CEILING >= requiredCeiling;
 }
 
 export function hasPrivateBlobConfig(
@@ -214,13 +231,18 @@ export function getProductionReadiness(
     && publicOrigin.hostname !== "localhost";
   const checks: Array<[string, unknown]> = [
     ["DATABASE_URL", config.DATABASE_URL],
+    ["NEON_EXPECTED_MAX_WORKER_PROCESSES", config.NEON_EXPECTED_MAX_WORKER_PROCESSES],
+    ["NEON_COST_CU_CEILING", hasConservativeNeonCapacityConfig(config)],
     ["PRIVATE_STORAGE", privateStorageProvider],
     ["PRIVATE_STORAGE_SAFETY_ATTESTATION", storageSafetyValidated],
     ["VERCEL_WORKFLOW", environment.VERCEL],
     ["MONID_API_KEY", config.MONID_API_KEY],
     ["MONID_API_BASE_URL", hasPinnedMonidApiOrigin(config)],
-    ["MONID_PARSE_PROVIDER", config.MONID_PARSE_PROVIDER],
-    ["MONID_PARSE_ENDPOINT", config.MONID_PARSE_ENDPOINT],
+    // The public retention disclosure is evidence-bound to this exact
+    // Context.dev contract. A provider/endpoint change must fail closed until
+    // its retention behavior is reverified and the disclosure is updated.
+    ["MONID_PARSE_PROVIDER", config.MONID_PARSE_PROVIDER === "context.dev"],
+    ["MONID_PARSE_ENDPOINT", config.MONID_PARSE_ENDPOINT === "/parse"],
     ["MONID_RUN_ID_PATH", config.MONID_RUN_ID_PATH],
     ["MONID_RUN_STATUS_PATH", config.MONID_RUN_STATUS_PATH],
     ["MONID_PROVIDER_STATUS_PATH", config.MONID_PROVIDER_STATUS_PATH],

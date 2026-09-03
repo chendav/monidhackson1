@@ -2,7 +2,11 @@ import { describe, expect, it } from "vitest";
 import { NeonRunStore } from "@/db/neon-store";
 import { getConfig } from "@/lib/config";
 import { AppError } from "@/lib/errors";
-import type { CreateRunRecordInput } from "@/lib/runs/store";
+import { transitionRun } from "@/lib/runs/state-machine";
+import {
+  CLEANUP_RETRY_DISPATCH_GRACE_MS,
+  type CreateRunRecordInput
+} from "@/lib/runs/store";
 import { NeonBudgetGuard } from "@/lib/security/budget";
 
 const LIVE_PROBE_ENABLED = process.env.NEON_LIVE_CONCURRENCY_PROBE === "true";
@@ -211,6 +215,88 @@ describe.skipIf(!LIVE_PROBE_ENABLED)("Neon live concurrency contract", () => {
       throw sanitizedProbeFailure(error, databaseUrl!);
     } finally {
       if (runId) await setupStore.remove(runId);
+    }
+  }, 30_000);
+
+  it("allows only one durable cleanup-retry claim and recovers an orphaned dispatch", async () => {
+    const databaseUrl = process.env.DATABASE_URL;
+    expect(databaseUrl, "DATABASE_URL must be set for the explicit Neon live probe").toBeTruthy();
+
+    const store = new NeonRunStore(databaseUrl!);
+    const namespace = `probe:${crypto.randomUUID()}`;
+    let runId: string | undefined;
+    try {
+      const claimedAt = new Date("2026-09-03T18:10:00.000Z");
+      const created = await store.create(runInput(
+        `${namespace}:cleanup-owner`,
+        `${namespace}:cleanup-quota`,
+        "cleanup-retry-claim"
+      ));
+      runId = created.record.id;
+      await store.update(runId, (record) => ({
+        ...transitionRun(record, "cleanup_pending", claimedAt),
+        terminalAfterCleanup: "expired"
+      }));
+
+      const claims = await Promise.all(Array.from({ length: 16 }, () =>
+        store.claimCleanupRetry(runId!, claimedAt)
+      ));
+      expect(claims.filter(Boolean)).toHaveLength(1);
+      expect(await store.get(runId)).toMatchObject({
+        cleanupRetryClaimedAt: claimedAt.toISOString(),
+        cleanupRetryDispatchStatus: "dispatching",
+        cleanupRetryWorkflowRunId: null
+      });
+      expect((await store.listCleanupCandidates(
+        new Date(claimedAt.getTime() + CLEANUP_RETRY_DISPATCH_GRACE_MS - 1),
+        100
+      )).map((record) => record.id)).not.toContain(runId);
+      expect((await store.listCleanupCandidates(
+        new Date(claimedAt.getTime() + CLEANUP_RETRY_DISPATCH_GRACE_MS),
+        100
+      )).map((record) => record.id)).toContain(runId);
+    } catch (error) {
+      throw sanitizedProbeFailure(error, databaseUrl!);
+    } finally {
+      if (runId) await store.remove(runId);
+    }
+  }, 30_000);
+
+  it("allows only one durable analysis Workflow dispatch claim", async () => {
+    const databaseUrl = process.env.DATABASE_URL;
+    expect(databaseUrl, "DATABASE_URL must be set for the explicit Neon live probe").toBeTruthy();
+
+    const store = new NeonRunStore(databaseUrl!);
+    const namespace = `probe:${crypto.randomUUID()}`;
+    let runId: string | undefined;
+    try {
+      const claimedAt = new Date("2026-09-03T18:20:00.000Z");
+      const created = await store.create(runInput(
+        `${namespace}:analysis-owner`,
+        `${namespace}:analysis-quota`,
+        "analysis-dispatch-claim"
+      ));
+      runId = created.record.id;
+      const admission = await store.claimAdmission(runId, claimedAt);
+      expect(admission).not.toBeNull();
+
+      const claims = await Promise.all(Array.from({ length: 16 }, () =>
+        store.claimAnalysisDispatch(runId!, admission!.admissionLeaseId, claimedAt)
+      ));
+      expect(claims.filter(Boolean)).toHaveLength(1);
+      expect(await store.get(runId)).toMatchObject({
+        analysisDispatchClaimedAt: claimedAt.toISOString(),
+        analysisDispatchStatus: "dispatching",
+        workflowRunId: null
+      });
+      expect(await store.claimAdmission(
+        runId,
+        new Date(claimedAt.getTime() + 10 * 60_000)
+      )).toBeNull();
+    } catch (error) {
+      throw sanitizedProbeFailure(error, databaseUrl!);
+    } finally {
+      if (runId) await store.remove(runId);
     }
   }, 30_000);
 });

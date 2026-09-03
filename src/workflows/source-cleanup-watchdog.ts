@@ -1,39 +1,34 @@
 import { sleep } from "workflow";
-import {
-  SOURCE_CLEANUP_WATCHDOG_STEP_MAX_RETRIES,
-  sourceCleanupWatchdogStep
-} from "@/workflows/source-cleanup-watchdog-step";
+import { sourceCleanupWatchdogStep } from "@/workflows/source-cleanup-watchdog-step";
+import { SOURCE_CLEANUP_WATCHDOG_MAX_POLLS } from "@/lib/workflow-cost-policy";
 
-// Poll quickly through the first capture-SLA window, then back off while the
-// five-minute signed source URL may still be in use. The bounded loop consumes
-// at most 421 Workflow lifecycle events even if every step consumes all three
-// retries (three events per attempt, two per sleep, plus three run events). If
-// deletion is still unconfirmed, the run remains fail-closed and recurring
-// maintenance owns the tail.
-export const SOURCE_CLEANUP_WATCHDOG_FAST_POLLS = 7;
-export const SOURCE_CLEANUP_WATCHDOG_MAX_POLLS = 30;
-export const SOURCE_CLEANUP_WATCHDOG_BACKOFF_MS = 30_000;
-export const SOURCE_CLEANUP_WATCHDOG_MAX_LIFECYCLE_EVENTS =
-  SOURCE_CLEANUP_WATCHDOG_MAX_POLLS *
-    (SOURCE_CLEANUP_WATCHDOG_STEP_MAX_RETRIES + 1) * 3 +
-  (SOURCE_CLEANUP_WATCHDOG_MAX_POLLS - 1) * 2 +
-  3;
+export {
+  SOURCE_CLEANUP_WATCHDOG_MAX_LIFECYCLE_EVENTS,
+  SOURCE_CLEANUP_WATCHDOG_MAX_POLLS,
+  SOURCE_CLEANUP_WATCHDOG_POLL_DELAY_MS
+} from "@/lib/workflow-cost-policy";
 
-export function sourceCleanupWatchdogPollDelayMs(attempt: number) {
-  return attempt < SOURCE_CLEANUP_WATCHDOG_FAST_POLLS - 1
-    ? 10_000
-    : SOURCE_CLEANUP_WATCHDOG_BACKOFF_MS;
-}
-
-export async function sourceCleanupWatchdogWorkflow(runId: string, registrationId: string) {
+// One package watchdog covers a parser batch of up to four documents. It checks
+// immediately and at 60 and 120 seconds, placing the final attempt after the
+// provider's attested 105-second network deadline. If cleanup is still
+// unconfirmed, the run remains fail-closed and recurring maintenance owns the
+// tail.
+export async function sourceCleanupWatchdogWorkflow(runId: string, registrationIds: string[]) {
   "use workflow";
 
+  let lastOutcome: Awaited<ReturnType<typeof sourceCleanupWatchdogStep>> = {
+    runId,
+    registrations: registrationIds.map((registrationId) => ({
+      runId,
+      registrationId,
+      outcome: "cleanup_pending" as const
+    })),
+    allTerminal: false
+  };
   for (let attempt = 0; attempt < SOURCE_CLEANUP_WATCHDOG_MAX_POLLS; attempt += 1) {
-    const outcome = await sourceCleanupWatchdogStep(runId, registrationId);
-    if (["missing", "complete", "cancelled"].includes(outcome.outcome)) return outcome;
-    if (attempt < SOURCE_CLEANUP_WATCHDOG_MAX_POLLS - 1) {
-      await sleep(sourceCleanupWatchdogPollDelayMs(attempt) === 10_000 ? "10s" : "30s");
-    }
+    if (attempt > 0) await sleep("60s");
+    lastOutcome = await sourceCleanupWatchdogStep(runId, registrationIds);
+    if (lastOutcome.allTerminal) return lastOutcome;
   }
-  return { runId, registrationId, outcome: "cleanup_pending" as const };
+  return lastOutcome;
 }

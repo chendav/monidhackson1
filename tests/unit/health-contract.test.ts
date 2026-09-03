@@ -7,6 +7,7 @@ const response = {
   mode: "live" as const,
   dependencies: {
     database: "ready" as const,
+    neon_capacity: "attested" as const,
     maintenance: "fresh" as const,
     private_storage: "attested" as const,
     workflow: "attested_300s" as const,
@@ -21,7 +22,7 @@ const response = {
   },
   missing: [] as string[],
   source_scope: "document_only" as const,
-  provider_retention: "unknown" as const
+  provider_retention: "context_dev_zdr_unavailable_artifact_expiry_observed_7d" as const
 };
 
 describe("health response contract", () => {
@@ -53,6 +54,18 @@ describe("health response contract", () => {
         mode: "unavailable",
         dependencies: { ...response.dependencies, workflow }
       }).dependencies.workflow).toBe(workflow);
+    }
+  );
+
+  it.each(["configured_unattested", "mismatch", "unreachable", "not_applicable"] as const)(
+    "accepts the fail-closed %s Neon-capacity state",
+    (neonCapacity) => {
+      expect(HealthResponseSchema.parse({
+        ...response,
+        status: neonCapacity === "not_applicable" ? "degraded" : "not_ready",
+        mode: neonCapacity === "not_applicable" ? "local_fallback" : "unavailable",
+        dependencies: { ...response.dependencies, neon_capacity: neonCapacity }
+      }).dependencies.neon_capacity).toBe(neonCapacity);
     }
   );
 

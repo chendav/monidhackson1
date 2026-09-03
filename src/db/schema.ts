@@ -13,10 +13,16 @@ import {
 import { sql } from "drizzle-orm";
 import type { AnalysisResult, CostEvent, CreateRunRequest, DocumentManifest } from "@/contracts";
 import type { QuoteVerificationReceipt } from "@/lib/evidence/citations";
-import type { CleanupReceipt, RunFailure, SourceCleanupWatchdog } from "@/lib/runs/types";
+import type {
+  AnalysisDispatchStatus,
+  CleanupReceipt,
+  CleanupRetryDispatchStatus,
+  RunFailure,
+  SourceCleanupWatchdog
+} from "@/lib/runs/types";
 
-export const APP_SCHEMA_VERSION = 8;
-export const APP_SCHEMA_MARKER = "rfp-xray-schema-v8";
+export const APP_SCHEMA_VERSION = 9;
+export const APP_SCHEMA_MARKER = "rfp-xray-schema-v9";
 
 export const appSchemaMeta = pgTable("app_schema_meta", {
   id: text("id").primaryKey(),
@@ -91,6 +97,20 @@ export const runs = pgTable(
     result: jsonb("result").$type<AnalysisResult>(),
     error: jsonb("error").$type<RunFailure>(),
     workflowRunId: text("workflow_run_id"),
+    analysisDispatchClaimId: uuid("analysis_dispatch_claim_id"),
+    analysisDispatchClaimedAt: timestamp("analysis_dispatch_claimed_at", { withTimezone: true }),
+    analysisDispatchStatus: text("analysis_dispatch_status").$type<AnalysisDispatchStatus>(),
+    analysisDispatchUncertainAt: timestamp("analysis_dispatch_uncertain_at", {
+      withTimezone: true
+    }),
+    cleanupRetryClaimId: uuid("cleanup_retry_claim_id"),
+    cleanupRetryClaimedAt: timestamp("cleanup_retry_claimed_at", { withTimezone: true }),
+    cleanupRetryWorkflowRunId: text("cleanup_retry_workflow_run_id"),
+    cleanupRetryDispatchStatus: text("cleanup_retry_dispatch_status")
+      .$type<CleanupRetryDispatchStatus>(),
+    cleanupRetryDispatchUncertainAt: timestamp("cleanup_retry_dispatch_uncertain_at", {
+      withTimezone: true
+    }),
     admissionLeaseId: uuid("admission_lease_id"),
     admissionLeaseExpiresAt: timestamp("admission_lease_expires_at", { withTimezone: true }),
     processingLeaseId: uuid("processing_lease_id"),
@@ -115,6 +135,18 @@ export const runs = pgTable(
     index("runs_queued_admission_idx")
       .on(table.updatedAt)
       .where(sql`${table.status} = 'queued'`),
+    index("runs_analysis_dispatch_recovery_idx")
+      .on(table.analysisDispatchClaimedAt)
+      .where(sql`${table.status} = 'queued' AND ${table.analysisDispatchClaimId} IS NOT NULL`),
+    index("runs_cleanup_retry_uncertain_idx")
+      .on(table.cleanupRetryDispatchUncertainAt)
+      .where(sql`${table.status} = 'cleanup_pending' AND ${table.cleanupRetryDispatchUncertainAt} IS NOT NULL`),
+    index("runs_cleanup_pending_updated_idx")
+      .on(table.updatedAt)
+      .where(sql`${table.status} = 'cleanup_pending'`),
+    index("runs_cleanup_retry_dispatching_idx")
+      .on(table.cleanupRetryClaimedAt)
+      .where(sql`${table.status} = 'cleanup_pending' AND ${table.cleanupRetryDispatchStatus} = 'dispatching'`),
     index("runs_quota_created_idx").on(table.quotaKey, table.createdAt)
   ]
 );

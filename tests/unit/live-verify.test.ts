@@ -48,6 +48,22 @@ const runnerPromise = import(new URL("../../scripts/live-verify.mjs", import.met
     costs: Record<string, unknown>,
     expectedDocumentCount: number
   ) => number;
+  validateAnalysisEnvelope: (
+    analysis: Record<string, unknown>,
+    expectedDocuments: Array<Record<string, unknown>>,
+    pages: Map<string, string[]>,
+    options?: { requireLiveCosts?: boolean }
+  ) => Record<string, unknown>;
+  summarizeAttemptCost: (
+    costs: Record<string, unknown> | null,
+    terminalReportedMicroUsd: number | null,
+    declaredPerRunCapMicroUsd: number
+  ) => {
+    accountingComplete: boolean;
+    reportedTotalMicroUsd: number | null;
+    pessimisticReservedMicroUsd: number;
+    totalMicroUsd: number;
+  };
   assertSanitizedMetrics: (value: unknown) => true;
   buildRunCases: (manifest: { documents: Array<Record<string, unknown>> }) => Array<{
     caseId: string;
@@ -410,6 +426,14 @@ describe("paid-live verifier safety policy", () => {
       events: [{ ...event, status: "failed" }],
       includes_failed_attempts: true
     }, 1)).toThrow("FAILED_PROVIDER_ATTEMPT_PRESENT");
+    expect(() => runner.validateMonidCostAccounting({
+      events: [{ ...event, status: "pending" }],
+      includes_failed_attempts: false
+    }, 1)).toThrow("INCOMPLETE_PROVIDER_ATTEMPT_PRESENT");
+    expect(() => runner.validateMonidCostAccounting({
+      events: [{ ...event, status: "unexpected" }],
+      includes_failed_attempts: false
+    }, 1)).toThrow("INCOMPLETE_PROVIDER_ATTEMPT_PRESENT");
   });
 
   it("requires server-reported hard budget limits before any paid phase", async () => {
@@ -426,6 +450,7 @@ describe("paid-live verifier safety policy", () => {
       mode: "live",
       dependencies: {
         database: "ready",
+        neon_capacity: "attested",
         maintenance: "fresh",
         private_storage: "attested",
         workflow: "attested_300s",
@@ -437,7 +462,7 @@ describe("paid-live verifier safety policy", () => {
       limits: { max_run_cost_micro_usd: 2_000_000, daily_cost_cap_micro_usd: 20_000_000 },
       missing: [],
       source_scope: "document_only",
-      provider_retention: "unknown"
+      provider_retention: "context_dev_zdr_unavailable_artifact_expiry_observed_7d"
     };
     const openapi = {
       openapi: "3.1.0",
@@ -478,11 +503,117 @@ describe("paid-live verifier safety policy", () => {
     });
     expect(fetchMock).toHaveBeenCalledTimes(3);
 
+    responses.set("/api/health", { ...health, provider_retention: "unknown" });
+    await expect(runner.runReadOnlyPreflight("https://rfp-xray.example", manifest, {
+      declaredPerRunCapMicroUsd: 2_000_000,
+      totalBudgetMicroUsd: 20_000_000
+    }, sourcePages)).rejects.toThrow("HEALTH_NOT_LIVE_READY");
+
     responses.set("/api/health", { ...health, limits: undefined });
     await expect(runner.runReadOnlyPreflight("https://rfp-xray.example", manifest, {
       declaredPerRunCapMicroUsd: 2_000_000,
       totalBudgetMicroUsd: 20_000_000
     }, sourcePages)).rejects.toThrow("HEALTH_LIMITS_MISSING");
+  });
+
+  it("validates complete and partial cost coverage and pessimistically reserves partial ledgers", async () => {
+    const runner = await runnerPromise;
+    const sample = createEdmontonSampleResult() as unknown as Record<string, unknown>;
+    const expectedDocuments = [{ sha256: EDMONTON_SHA256, role: "base", physical_pages: 55 }];
+    const sourcePages = sourcePagesFromAnalysis(sample);
+
+    const partial = structuredClone(sample);
+    const partialCosts = partial.costs as Record<string, unknown>;
+    expect(runner.validateAnalysisEnvelope(
+      partial,
+      expectedDocuments,
+      sourcePages,
+      { requireLiveCosts: false }
+    ).costs).toMatchObject({ completeness: "partial", known_subtotal_micro_usd: 0 });
+    expect(runner.summarizeAttemptCost(partialCosts, 0, 2_000_000)).toEqual({
+      accountingComplete: false,
+      reportedTotalMicroUsd: 0,
+      pessimisticReservedMicroUsd: 2_000_000,
+      totalMicroUsd: 2_000_000
+    });
+
+    const complete = structuredClone(sample);
+    const pricedProviders = ["monid", "openai", "railway_s3", "vercel", "neon"];
+    complete.costs = {
+      currency: "USD",
+      events: pricedProviders.map((provider, index) => ({
+        provider,
+        operation: "release accounting",
+        status: "succeeded",
+        actual_micro_usd: index + 1,
+        estimated_micro_usd: null,
+        latency_ms: 1,
+        retry_of: null
+      })),
+      completeness: "complete",
+      unpriced_providers: [],
+      not_applicable_providers: ["vercel_blob"],
+      actual_micro_usd: 15,
+      estimated_micro_usd: 0,
+      known_subtotal_micro_usd: 15,
+      total_micro_usd: 15,
+      includes_failed_attempts: false
+    };
+    expect(runner.validateAnalysisEnvelope(
+      complete,
+      expectedDocuments,
+      sourcePages,
+      { requireLiveCosts: false }
+    ).costs).toMatchObject({ completeness: "complete", known_subtotal_micro_usd: 15 });
+    expect(runner.summarizeAttemptCost(complete.costs as Record<string, unknown>, 15, 2_000_000)).toEqual({
+      accountingComplete: true,
+      reportedTotalMicroUsd: 15,
+      pessimisticReservedMicroUsd: 0,
+      totalMicroUsd: 15
+    });
+
+    const malformedTotal = structuredClone(partial);
+    (malformedTotal.costs as Record<string, unknown>).known_subtotal_micro_usd = 1;
+    expect(() => runner.validateAnalysisEnvelope(
+      malformedTotal,
+      expectedDocuments,
+      sourcePages,
+      { requireLiveCosts: false }
+    )).toThrow("ANALYSIS_COST_INVALID");
+
+    const overlapping = structuredClone(complete);
+    (overlapping.costs as Record<string, unknown>).unpriced_providers = ["monid"];
+    (overlapping.costs as Record<string, unknown>).completeness = "partial";
+    expect(() => runner.validateAnalysisEnvelope(
+      overlapping,
+      expectedDocuments,
+      sourcePages,
+      { requireLiveCosts: false }
+    )).toThrow("ANALYSIS_COST_INVALID");
+
+    const missingProviders = structuredClone(partial);
+    (missingProviders.costs as Record<string, unknown>).unpriced_providers = ["monid"];
+    expect(() => runner.validateAnalysisEnvelope(
+      missingProviders,
+      expectedDocuments,
+      sourcePages,
+      { requireLiveCosts: false }
+    )).toThrow("ANALYSIS_COST_INVALID");
+
+    const activeProviderMarkedNotApplicable = structuredClone(complete);
+    const activeCosts = activeProviderMarkedNotApplicable.costs as Record<string, unknown>;
+    activeCosts.events = (activeCosts.events as Array<Record<string, unknown>>)
+      .filter((event) => event.provider !== "openai");
+    activeCosts.not_applicable_providers = ["openai", "vercel_blob"];
+    activeCosts.actual_micro_usd = 13;
+    activeCosts.known_subtotal_micro_usd = 13;
+    activeCosts.total_micro_usd = 13;
+    expect(() => runner.validateAnalysisEnvelope(
+      activeProviderMarkedNotApplicable,
+      expectedDocuments,
+      sourcePages,
+      { requireLiveCosts: false }
+    )).toThrow("ANALYSIS_COST_INVALID");
   });
 
   it("cleans a syntactically valid run id even when create metadata is malformed", async () => {

@@ -1,6 +1,10 @@
 import { getUploadStorage } from "@/lib/storage/uploads";
+import {
+  CLEANUP_STEP_MAX_RETRIES,
+  WORKFLOW_HELPER_MAX_DURATION_SECONDS
+} from "@/lib/workflow-cost-policy";
 
-export const maxDuration = 50;
+export const maxDuration = WORKFLOW_HELPER_MAX_DURATION_SECONDS;
 export const UPLOAD_SWEEP_STEP_BATCH_SIZE = 1;
 
 export async function sweepIncomingUploadsStep() {
@@ -16,4 +20,4 @@ export async function sweepIncomingUploadsStep() {
   return { deletedCount: deleted.length };
 }
 
-sweepIncomingUploadsStep.maxRetries = 3;
+sweepIncomingUploadsStep.maxRetries = CLEANUP_STEP_MAX_RETRIES;

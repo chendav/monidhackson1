@@ -6,12 +6,18 @@ import { AppError } from "@/lib/errors";
 import {
   newRunRecord,
   ACTIVE_RUN_STATUSES,
+  CLEANUP_PENDING_MAINTENANCE_CADENCE_MS,
+  CLEANUP_RETRY_DISPATCH_GRACE_MS,
   LEASED_RUN_STATUSES,
   PROCESSING_LEASE_MS,
   type CreateRunRecordInput,
   type RunStore
 } from "@/lib/runs/store";
-import type { RunRecord } from "@/lib/runs/types";
+import type {
+  AnalysisDispatchStatus,
+  CleanupRetryDispatchStatus,
+  RunRecord
+} from "@/lib/runs/types";
 
 type RunRow = typeof runs.$inferSelect;
 
@@ -41,6 +47,23 @@ function toRow(record: RunRecord): typeof runs.$inferInsert {
     result: record.result,
     error: record.error,
     workflowRunId: record.workflowRunId,
+    analysisDispatchClaimId: record.analysisDispatchClaimId,
+    analysisDispatchClaimedAt: record.analysisDispatchClaimedAt
+      ? new Date(record.analysisDispatchClaimedAt)
+      : null,
+    analysisDispatchStatus: record.analysisDispatchStatus,
+    analysisDispatchUncertainAt: record.analysisDispatchUncertainAt
+      ? new Date(record.analysisDispatchUncertainAt)
+      : null,
+    cleanupRetryClaimId: record.cleanupRetryClaimId,
+    cleanupRetryClaimedAt: record.cleanupRetryClaimedAt
+      ? new Date(record.cleanupRetryClaimedAt)
+      : null,
+    cleanupRetryWorkflowRunId: record.cleanupRetryWorkflowRunId,
+    cleanupRetryDispatchStatus: record.cleanupRetryDispatchStatus,
+    cleanupRetryDispatchUncertainAt: record.cleanupRetryDispatchUncertainAt
+      ? new Date(record.cleanupRetryDispatchUncertainAt)
+      : null,
     admissionLeaseId: record.admissionLeaseId,
     admissionLeaseExpiresAt: record.admissionLeaseExpiresAt
       ? new Date(record.admissionLeaseExpiresAt)
@@ -87,6 +110,16 @@ function fromRow(row: RunRow): RunRecord {
     result: row.result,
     error: row.error,
     workflowRunId: row.workflowRunId,
+    analysisDispatchClaimId: row.analysisDispatchClaimId,
+    analysisDispatchClaimedAt: row.analysisDispatchClaimedAt?.toISOString() ?? null,
+    analysisDispatchStatus: row.analysisDispatchStatus,
+    analysisDispatchUncertainAt: row.analysisDispatchUncertainAt?.toISOString() ?? null,
+    cleanupRetryClaimId: row.cleanupRetryClaimId,
+    cleanupRetryClaimedAt: row.cleanupRetryClaimedAt?.toISOString() ?? null,
+    cleanupRetryWorkflowRunId: row.cleanupRetryWorkflowRunId,
+    cleanupRetryDispatchStatus: row.cleanupRetryDispatchStatus,
+    cleanupRetryDispatchUncertainAt:
+      row.cleanupRetryDispatchUncertainAt?.toISOString() ?? null,
     admissionLeaseId: row.admissionLeaseId,
     admissionLeaseExpiresAt: row.admissionLeaseExpiresAt?.toISOString() ?? null,
     processingLeaseId: row.processingLeaseId,
@@ -246,13 +279,9 @@ export class NeonRunStore implements RunStore {
   async claimAdmission(
     id: string,
     now = new Date(),
-    leaseMs = 2 * 60_000,
-    rescheduleBefore?: Date
+    leaseMs = 2 * 60_000
   ) {
     const admissionLeaseId = crypto.randomUUID();
-    const schedulingGuard = rescheduleBefore
-      ? or(isNull(runs.workflowRunId), lte(runs.updatedAt, rescheduleBefore))
-      : isNull(runs.workflowRunId);
     const [claimed] = await this.db
       .update(runs)
       .set({
@@ -264,7 +293,8 @@ export class NeonRunStore implements RunStore {
       .where(and(
         eq(runs.id, id),
         eq(runs.status, "queued"),
-        schedulingGuard,
+        isNull(runs.workflowRunId),
+        isNull(runs.analysisDispatchClaimId),
         or(isNull(runs.admissionLeaseId), lte(runs.admissionLeaseExpiresAt, now))
       ))
       .returning();
@@ -335,6 +365,123 @@ export class NeonRunStore implements RunStore {
     return updated ? fromRow(updated) : null;
   }
 
+  async claimAnalysisDispatch(
+    id: string,
+    admissionLeaseId: string,
+    now = new Date()
+  ) {
+    const analysisDispatchClaimId = crypto.randomUUID();
+    const [claimed] = await this.db
+      .update(runs)
+      .set({
+        analysisDispatchClaimId,
+        analysisDispatchClaimedAt: now,
+        analysisDispatchStatus: "dispatching",
+        updatedAt: now,
+        version: sql`${runs.version} + 1`
+      })
+      .where(and(
+        eq(runs.id, id),
+        eq(runs.status, "queued"),
+        eq(runs.admissionLeaseId, admissionLeaseId),
+        isNull(runs.analysisDispatchClaimId),
+        isNull(runs.workflowRunId)
+      ))
+      .returning();
+    if (!claimed) {
+      const existing = await this.get(id);
+      if (!existing) {
+        throw new AppError("ANALYSIS_INCOMPLETE", "The run was not found.", { httpStatus: 404 });
+      }
+      return null;
+    }
+    return { record: fromRow(claimed), analysisDispatchClaimId };
+  }
+
+  async settleAnalysisDispatch(
+    id: string,
+    analysisDispatchClaimId: string,
+    outcome: {
+      status: Exclude<AnalysisDispatchStatus, "dispatching">;
+      workflowRunId: string | null;
+      uncertainAt: Date | null;
+    },
+    now = new Date()
+  ): Promise<RunRecord | null> {
+    const [updated] = await this.db
+      .update(runs)
+      .set({
+        workflowRunId: outcome.workflowRunId,
+        analysisDispatchStatus: outcome.status,
+        analysisDispatchUncertainAt: outcome.uncertainAt,
+        admissionLeaseId: null,
+        admissionLeaseExpiresAt: null,
+        updatedAt: now,
+        version: sql`${runs.version} + 1`
+      })
+      .where(and(
+        eq(runs.id, id),
+        eq(runs.analysisDispatchClaimId, analysisDispatchClaimId),
+        eq(runs.analysisDispatchStatus, "dispatching")
+      ))
+      .returning();
+    return updated ? fromRow(updated) : null;
+  }
+
+  async claimCleanupRetry(id: string, now = new Date()) {
+    const cleanupRetryClaimId = crypto.randomUUID();
+    const [claimed] = await this.db
+      .update(runs)
+      .set({
+        cleanupRetryClaimId,
+        cleanupRetryClaimedAt: now,
+        cleanupRetryDispatchStatus: "dispatching",
+        updatedAt: now,
+        version: sql`${runs.version} + 1`
+      })
+      .where(and(
+        eq(runs.id, id),
+        eq(runs.status, "cleanup_pending"),
+        isNull(runs.cleanupRetryClaimId)
+      ))
+      .returning();
+    if (!claimed) {
+      const existing = await this.get(id);
+      if (!existing) {
+        throw new AppError("ANALYSIS_INCOMPLETE", "The run was not found.", { httpStatus: 404 });
+      }
+      return null;
+    }
+    return { record: fromRow(claimed), cleanupRetryClaimId };
+  }
+
+  async settleCleanupRetryDispatch(
+    id: string,
+    cleanupRetryClaimId: string,
+    outcome: {
+      status: Exclude<CleanupRetryDispatchStatus, "dispatching">;
+      workflowRunId: string | null;
+      uncertainAt: Date | null;
+    },
+    now = new Date()
+  ): Promise<RunRecord | null> {
+    const [updated] = await this.db
+      .update(runs)
+      .set({
+        cleanupRetryWorkflowRunId: outcome.workflowRunId,
+        cleanupRetryDispatchStatus: outcome.status,
+        cleanupRetryDispatchUncertainAt: outcome.uncertainAt,
+        updatedAt: now,
+        version: sql`${runs.version} + 1`
+      })
+      .where(and(
+        eq(runs.id, id),
+        eq(runs.cleanupRetryClaimId, cleanupRetryClaimId)
+      ))
+      .returning();
+    return updated ? fromRow(updated) : null;
+  }
+
   async remove(id: string): Promise<void> {
     await this.db.delete(runs).where(eq(runs.id, id));
   }
@@ -360,6 +507,10 @@ export class NeonRunStore implements RunStore {
 
   async listCleanupCandidates(now = new Date(), limit = 100): Promise<RunRecord[]> {
     const boundedLimit = Math.min(Math.max(Math.trunc(limit), 1), 1_000);
+    const orphanedDispatchBefore = new Date(now.getTime() - CLEANUP_RETRY_DISPATCH_GRACE_MS);
+    const staleCleanupBefore = new Date(
+      now.getTime() - CLEANUP_PENDING_MAINTENANCE_CADENCE_MS
+    );
     const rows = await this.db
       .select()
       .from(runs)
@@ -374,6 +525,21 @@ export class NeonRunStore implements RunStore {
           inArray(runs.status, [...LEASED_RUN_STATUSES]),
           isNotNull(runs.processingLeaseExpiresAt),
           lte(runs.processingLeaseExpiresAt, now)
+        ),
+        and(
+          eq(runs.status, "cleanup_pending"),
+          isNotNull(runs.cleanupRetryDispatchUncertainAt),
+          lte(runs.cleanupRetryDispatchUncertainAt, now)
+        ),
+        and(
+          eq(runs.status, "cleanup_pending"),
+          eq(runs.cleanupRetryDispatchStatus, "dispatching"),
+          isNotNull(runs.cleanupRetryClaimedAt),
+          lte(runs.cleanupRetryClaimedAt, orphanedDispatchBefore)
+        ),
+        and(
+          eq(runs.status, "cleanup_pending"),
+          lte(runs.updatedAt, staleCleanupBefore)
         )
       ))
       .orderBy(asc(runs.updatedAt), asc(runs.id))

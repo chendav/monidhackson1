@@ -1,8 +1,12 @@
 import { cleanupRun } from "@/lib/runs/expiry";
 import { getRunStore } from "@/lib/runs/store";
 import { getUploadStorage } from "@/lib/storage/uploads";
+import {
+  CLEANUP_STEP_MAX_RETRIES,
+  WORKFLOW_HELPER_MAX_DURATION_SECONDS
+} from "@/lib/workflow-cost-policy";
 
-export const maxDuration = 50;
+export const maxDuration = WORKFLOW_HELPER_MAX_DURATION_SECONDS;
 
 export async function retryCleanupStep(runId: string) {
   "use step";
@@ -20,4 +24,4 @@ export async function retryCleanupStep(runId: string) {
   return { runId, status: cleaned.status };
 }
 
-retryCleanupStep.maxRetries = 3;
+retryCleanupStep.maxRetries = CLEANUP_STEP_MAX_RETRIES;

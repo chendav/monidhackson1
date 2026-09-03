@@ -31,6 +31,14 @@ export type SourceCleanupWatchdogStatus =
   | "cleanup_confirmed"
   | "cancelled";
 
+export type CleanupRetryDispatchStatus =
+  | "dispatching"
+  | "scheduled"
+  | "not_dispatched"
+  | "dispatch_uncertain";
+
+export type AnalysisDispatchStatus = CleanupRetryDispatchStatus;
+
 /**
  * Durable, deliberately sanitized state for one paid parse attempt. Resource
  * identifiers are opaque application storage keys only; provider payloads,
@@ -89,6 +97,15 @@ export interface RunRecord {
   result: AnalysisResult | null;
   error: RunFailure | null;
   workflowRunId: string | null;
+  analysisDispatchClaimId: string | null;
+  analysisDispatchClaimedAt: string | null;
+  analysisDispatchStatus: AnalysisDispatchStatus | null;
+  analysisDispatchUncertainAt: string | null;
+  cleanupRetryClaimId: string | null;
+  cleanupRetryClaimedAt: string | null;
+  cleanupRetryWorkflowRunId: string | null;
+  cleanupRetryDispatchStatus: CleanupRetryDispatchStatus | null;
+  cleanupRetryDispatchUncertainAt: string | null;
   admissionLeaseId: string | null;
   admissionLeaseExpiresAt: string | null;
   processingLeaseId: string | null;

@@ -30,6 +30,7 @@ const MANIFEST_PATH = path.join(
 );
 const EVIDENCE_DIRECTORY = path.join(REPOSITORY_ROOT, ".data", "release-evidence");
 const PRODUCTION_RELEASE_ORIGIN = "https://rfp-xray.vercel.app";
+const EXPECTED_PROVIDER_RETENTION = "context_dev_zdr_unavailable_artifact_expiry_observed_7d";
 const TERMINAL_STATUSES = new Set(["ready", "partial", "failed", "cleanup_pending", "expired"]);
 const RUN_STATUSES = new Set([
   "queued", "validating", "staging", "page_indexing", "parsing", "purging_source",
@@ -53,6 +54,21 @@ const EXPECTED_DOCUMENT_IDS = new Set([
   "cer-84084-26-0009-a-amendment-002",
   "cer-84084-26-0009-a-amendment-003"
 ]);
+const COST_PROVIDERS = Object.freeze([
+  "monid", "openai", "railway_s3", "vercel_blob", "vercel", "neon"
+]);
+const COST_PROVIDER_SET = new Set(COST_PROVIDERS);
+const REQUIRED_LIVE_INFRASTRUCTURE_COST_OPERATIONS = Object.freeze({
+  vercel: Object.freeze([
+    "fluid_compute_conservative_usage_allocation",
+    "workflow_events_conservative_usage_allocation",
+    "workflow_data_written_conservative_usage_allocation",
+    "workflow_data_retained_conservative_usage_allocation",
+    "workflow_queue_conservative_usage_allocation"
+  ]),
+  neon: Object.freeze(["serverless_postgres_conservative_usage_allocation"]),
+  railway_s3: Object.freeze(["temporary_bucket_conservative_usage_allocation"])
+});
 const FIXTURE_FILENAMES = Object.freeze({
   "edmonton-100022184-a": "edmonton.pdf",
   "cer-84084-26-0009-a-base": "cer-main.pdf",
@@ -649,7 +665,14 @@ export function validateMonidCostAccounting(costs, expectedDocumentCount) {
   const monidEvents = [];
   for (const raw of costs.events) {
     const event = asRecord(raw, "ANALYSIS_COST_EVENT_INVALID", "analysis_validation");
-    if (event.status === "failed") fail("FAILED_PROVIDER_ATTEMPT_PRESENT", "analysis_validation");
+    if (event.status !== "succeeded") {
+      fail(
+        event.status === "failed"
+          ? "FAILED_PROVIDER_ATTEMPT_PRESENT"
+          : "INCOMPLETE_PROVIDER_ATTEMPT_PRESENT",
+        "analysis_validation"
+      );
+    }
     if (event.actual_micro_usd === null && event.estimated_micro_usd === null) {
       fail("UNRESOLVED_PROVIDER_COST", "analysis_validation");
     }
@@ -708,7 +731,7 @@ function factHasCitation(fact, predicate) {
   return Array.isArray(fact.citations) && fact.citations.some(predicate);
 }
 
-function validateAnalysisEnvelope(
+export function validateAnalysisEnvelope(
   analysis,
   expectedDocuments,
   sourcePagesBySha,
@@ -753,15 +776,80 @@ function validateAnalysisEnvelope(
   }
   verifySourceCitations(value, expectedDocuments, sourcePagesBySha);
   const costs = asRecord(value.costs, "ANALYSIS_COST_INVALID", "analysis_validation");
+  const costEvents = Array.isArray(costs.events) ? costs.events : [];
+  const unpricedProviders = Array.isArray(costs.unpriced_providers) ? costs.unpriced_providers : [];
+  const notApplicableProviders = Array.isArray(costs.not_applicable_providers)
+    ? costs.not_applicable_providers
+    : [];
+  const validProviderList = (providers) => providers.every((provider) =>
+    typeof provider === "string" && COST_PROVIDER_SET.has(provider)
+  ) && new Set(providers).size === providers.length;
+  const pricedProviders = new Set();
+  const pricedOperationsByProvider = new Map();
+  let computedActualMicroUsd = 0;
+  let computedEstimatedMicroUsd = 0;
+  let costEventsValid = true;
+  for (const rawEvent of costEvents) {
+    if (!rawEvent || typeof rawEvent !== "object" || Array.isArray(rawEvent)) {
+      costEventsValid = false;
+      continue;
+    }
+    const event = rawEvent;
+    const actualValid = event.actual_micro_usd === null || isNonNegativeInteger(event.actual_micro_usd);
+    const estimatedValid = event.estimated_micro_usd === null || isNonNegativeInteger(event.estimated_micro_usd);
+    if (
+      !COST_PROVIDER_SET.has(event.provider) ||
+      !["pending", "succeeded", "failed"].includes(event.status) ||
+      !actualValid ||
+      !estimatedValid
+    ) {
+      costEventsValid = false;
+      continue;
+    }
+    if (event.actual_micro_usd !== null || event.estimated_micro_usd !== null) {
+      pricedProviders.add(event.provider);
+      const operations = pricedOperationsByProvider.get(event.provider) ?? new Set();
+      operations.add(event.operation);
+      pricedOperationsByProvider.set(event.provider, operations);
+    }
+    computedActualMicroUsd += event.actual_micro_usd ?? 0;
+    if (event.actual_micro_usd === null) computedEstimatedMicroUsd += event.estimated_micro_usd ?? 0;
+  }
+  const unpricedSet = new Set(unpricedProviders);
+  const notApplicableSet = new Set(notApplicableProviders);
+  const allProvidersAccountedFor = COST_PROVIDERS.every((provider) =>
+    pricedProviders.has(provider) || unpricedSet.has(provider) || notApplicableSet.has(provider)
+  );
   if (
     costs.currency !== "USD" || !isNonNegativeInteger(costs.actual_micro_usd) ||
-    !isNonNegativeInteger(costs.estimated_micro_usd) || !isNonNegativeInteger(costs.total_micro_usd) ||
-    costs.total_micro_usd !== costs.actual_micro_usd + costs.estimated_micro_usd ||
+    !isNonNegativeInteger(costs.estimated_micro_usd) ||
+    !isNonNegativeInteger(costs.known_subtotal_micro_usd) ||
+    !isNonNegativeInteger(costs.total_micro_usd) ||
+    costs.known_subtotal_micro_usd !== costs.actual_micro_usd + costs.estimated_micro_usd ||
+    costs.total_micro_usd !== costs.known_subtotal_micro_usd ||
+    costs.actual_micro_usd !== computedActualMicroUsd ||
+    costs.estimated_micro_usd !== computedEstimatedMicroUsd ||
+    !["complete", "partial"].includes(costs.completeness) ||
+    (costs.completeness === "complete") !== (unpricedProviders.length === 0) ||
+    !validProviderList(unpricedProviders) || !validProviderList(notApplicableProviders) ||
+    notApplicableProviders.length !== 1 || notApplicableProviders[0] !== "vercel_blob" ||
+    !costEventsValid || !allProvidersAccountedFor ||
+    [...pricedProviders].some((provider) => unpricedSet.has(provider) || notApplicableSet.has(provider)) ||
+    unpricedProviders.some((provider) => notApplicableSet.has(provider)) ||
     typeof costs.includes_failed_attempts !== "boolean" || !Array.isArray(costs.events)
   ) {
     fail("ANALYSIS_COST_INVALID", "analysis_validation");
   }
-  if (requireLiveCosts) validateMonidCostAccounting(costs, expectedDocuments.length);
+  if (requireLiveCosts) {
+    for (const [provider, requiredOperations] of
+      Object.entries(REQUIRED_LIVE_INFRASTRUCTURE_COST_OPERATIONS)) {
+      const pricedOperations = pricedOperationsByProvider.get(provider) ?? new Set();
+      if (requiredOperations.some((operation) => !pricedOperations.has(operation))) {
+        fail("INFRASTRUCTURE_COST_DIMENSIONS_MISSING", "analysis_validation");
+      }
+    }
+    validateMonidCostAccounting(costs, expectedDocuments.length);
+  }
   return value;
 }
 
@@ -1113,6 +1201,7 @@ export async function runReadOnlyPreflight(baseUrl, manifest, budgetPolicy, sour
   const limits = asRecord(health.limits, "HEALTH_LIMITS_MISSING", "health_preflight");
   const expectedDependencies = {
     database: "ready",
+    neon_capacity: "attested",
     maintenance: "fresh",
     private_storage: "attested",
     workflow: "attested_300s",
@@ -1137,7 +1226,7 @@ export async function runReadOnlyPreflight(baseUrl, manifest, budgetPolicy, sour
     storage_safety: health.storage_safety,
     missing_count: Array.isArray(health.missing) ? health.missing.length : -1,
     document_only: health.source_scope === "document_only",
-    provider_retention_disclosed_unknown: health.provider_retention === "unknown",
+    provider_retention_disclosed: health.provider_retention === EXPECTED_PROVIDER_RETENTION,
     server_max_run_cost_micro_usd: limits.max_run_cost_micro_usd,
     server_daily_cost_cap_micro_usd: limits.daily_cost_cap_micro_usd
   };
@@ -1147,7 +1236,7 @@ export async function runReadOnlyPreflight(baseUrl, manifest, budgetPolicy, sour
     !["railway_s3", "vercel_blob"].includes(health.storage_provider) ||
     health.storage_safety !== "current" ||
     healthMetrics.missing_count !== 0 || !healthMetrics.document_only ||
-    !healthMetrics.provider_retention_disclosed_unknown
+    !healthMetrics.provider_retention_disclosed
   ) {
     fail("HEALTH_NOT_LIVE_READY", "health_preflight");
   }
@@ -1617,6 +1706,22 @@ export async function materializeRunCaseInput({ runCase, baseUrl, apiKey, fixtur
   }
 }
 
+export function summarizeAttemptCost(cost, terminalReportedMicroUsd, declaredPerRunCapMicroUsd) {
+  const reportedTotalMicroUsd = cost?.total_micro_usd ?? terminalReportedMicroUsd ?? null;
+  const accountingComplete = cost?.completeness === "complete";
+  const pessimisticReservedMicroUsd = accountingComplete
+    ? 0
+    : Math.max(reportedTotalMicroUsd ?? 0, declaredPerRunCapMicroUsd);
+  return {
+    accountingComplete,
+    reportedTotalMicroUsd,
+    pessimisticReservedMicroUsd,
+    totalMicroUsd: accountingComplete
+      ? reportedTotalMicroUsd ?? 0
+      : pessimisticReservedMicroUsd
+  };
+}
+
 export async function executeRunCase({
   runCase,
   attemptIndex,
@@ -1734,13 +1839,14 @@ export async function executeRunCase({
   }
 
   const cost = analysis?.costs ?? null;
-  const reportedTotalMicroUsd = cost?.total_micro_usd ?? terminal?.status.cost_micro_usd ?? null;
-  // Status totals have no per-provider provenance. Only a validated analysis
-  // cost ledger is complete; every other outcome reserves the full cap.
-  const costAccountingComplete = Boolean(cost);
-  const pessimisticReservedMicroUsd = costAccountingComplete
-    ? 0
-    : Math.max(reportedTotalMicroUsd ?? 0, options.declaredPerRunCapMicroUsd);
+  // Status totals and explicitly partial analysis ledgers lack complete
+  // per-provider provenance. They reserve the full cap and cannot satisfy the
+  // campaign's cost-accounting gate.
+  const costSummary = summarizeAttemptCost(
+    cost,
+    terminal?.status.cost_micro_usd ?? null,
+    options.declaredPerRunCapMicroUsd
+  );
   const metric = {
     case_id: runCase.caseId,
     attempt_index: attemptIndex,
@@ -1757,23 +1863,21 @@ export async function executeRunCase({
     elapsed_ms: Math.round(performance.now() - started),
     ready_latency_ms: readyLatencyMs,
     stage_timeline: terminal?.stageTimeline ?? [],
-    cost_accounting_complete: costAccountingComplete,
+    cost_accounting_complete: costSummary.accountingComplete,
     cost: cost ? {
       actual_micro_usd: cost.actual_micro_usd,
       estimated_micro_usd: cost.estimated_micro_usd,
       reported_total_micro_usd: cost.total_micro_usd,
-      pessimistic_reserved_micro_usd: 0,
-      total_micro_usd: cost.total_micro_usd,
+      pessimistic_reserved_micro_usd: costSummary.pessimisticReservedMicroUsd,
+      total_micro_usd: costSummary.totalMicroUsd,
       includes_failed_attempts: cost.includes_failed_attempts,
       providers: aggregateProviderCosts(cost.events)
     } : {
       actual_micro_usd: null,
       estimated_micro_usd: null,
-      reported_total_micro_usd: reportedTotalMicroUsd,
-      pessimistic_reserved_micro_usd: pessimisticReservedMicroUsd,
-      total_micro_usd: costAccountingComplete
-        ? reportedTotalMicroUsd ?? 0
-        : pessimisticReservedMicroUsd,
+      reported_total_micro_usd: costSummary.reportedTotalMicroUsd,
+      pessimistic_reserved_micro_usd: costSummary.pessimisticReservedMicroUsd,
+      total_micro_usd: costSummary.totalMicroUsd,
       includes_failed_attempts: terminal?.status.status === "failed",
       providers: {}
     },
@@ -1812,7 +1916,8 @@ function percentile(values, percentileValue) {
 export function aggregateMetrics(metrics) {
   const completedByCase = new Map();
   for (const run of metrics.runs) {
-    if (run.validation?.passed && run.cleanup?.confirmed && !run.failure) {
+    if (run.validation?.passed && run.cleanup?.confirmed &&
+      run.cost_accounting_complete === true && !run.failure) {
       completedByCase.set(run.case_id, run);
     }
   }
@@ -2175,17 +2280,21 @@ function mergeExistingMetrics(current, existing) {
     if (run.validation.passed === true && (
       run.terminal_status !== "ready" || run.cleanup_gate_confirmed_before_result !== true ||
       run.cleanup.confirmed !== true || run.failure !== null ||
-      run.cost_accounting_complete !== true ||
       !isNonNegativeInteger(run.cost.actual_micro_usd) || !isNonNegativeInteger(run.cost.estimated_micro_usd) ||
-      run.cost.total_micro_usd !== run.cost.actual_micro_usd + run.cost.estimated_micro_usd ||
-      run.cost.reported_total_micro_usd !== run.cost.total_micro_usd ||
+      run.cost.reported_total_micro_usd !== run.cost.actual_micro_usd + run.cost.estimated_micro_usd ||
+      run.cost.total_micro_usd !== (run.cost_accounting_complete
+        ? run.cost.reported_total_micro_usd
+        : run.cost.pessimistic_reserved_micro_usd) ||
+      (run.cost_accounting_complete
+        ? run.cost.pessimistic_reserved_micro_usd !== 0
+        : run.cost.pessimistic_reserved_micro_usd <= 0) ||
       run.cost.includes_failed_attempts !== false ||
       !run.cost.providers.monid ||
       run.cost.providers.monid.succeeded_calls !== (isCer ? 4 : 1) ||
       run.cost.providers.monid.failed_calls !== 0 ||
       run.cost.providers.monid.estimated_micro_usd !== 0 ||
       Object.values(run.cost.providers).some((bucket) => bucket.failed_calls !== 0) ||
-      run.cost.pessimistic_reserved_micro_usd !== 0 || run.obtained_run_count < 1 ||
+      run.obtained_run_count < 1 ||
       typeof run.validation.critical_structure_sha256 !== "string" ||
       !/^[a-f0-9]{64}$/.test(run.validation.critical_structure_sha256) ||
       run.validation.golden_checks_passed !== (isCer ? 8 : 7) ||
@@ -2326,7 +2435,8 @@ export async function main(environment = process.env) {
     const cases = buildRunCases(fixtures.manifest);
     for (const caseDefinition of cases) {
       if (runAbort.signal.aborted) fail("INTERRUPTED", "run_sequence");
-      if (metrics.runs.some((run) => run.case_id === caseDefinition.caseId && run.validation?.passed && run.cleanup?.confirmed)) {
+      if (metrics.runs.some((run) => run.case_id === caseDefinition.caseId &&
+        run.validation?.passed && run.cleanup?.confirmed && run.cost_accounting_complete === true)) {
         continue;
       }
       const priorAttempts = metrics.runs.filter((run) => run.case_id === caseDefinition.caseId);
@@ -2409,7 +2519,10 @@ export async function main(environment = process.env) {
       metrics.aggregate = aggregateMetrics(metrics);
       metrics.generated_at = new Date().toISOString();
       await atomicWriteMetrics(evidencePath, metrics);
-      if (runMetric.failure || !runMetric.validation.passed || !runMetric.cleanup.confirmed) {
+      if (
+        runMetric.failure || !runMetric.validation.passed || !runMetric.cleanup.confirmed ||
+        !runMetric.cost_accounting_complete
+      ) {
         fail("LIVE_RUN_GATE_FAILED", currentStage);
       }
       if (caseDefinition.packageId === "edmonton") {

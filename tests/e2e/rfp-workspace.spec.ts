@@ -80,7 +80,7 @@ const sampleResult = {
       claim_type: "source",
       status: "superseded",
       confidence: 0.98,
-      citations: [citation({ document_sha256: SHA_AMENDMENT, document_name: "Amendment 001.pdf", pdf_page_1based: 1 })],
+      citations: [citation({ document_sha256: SHA_AMENDMENT, document_name: "Amendment 001.pdf", source_url: null, pdf_page_1based: 1 })],
       formula_and_inputs: null,
     },
     {
@@ -128,7 +128,7 @@ const sampleResult = {
       text: "Submit by the original closing date.",
       evidence_needed: null,
       consequence: "Replaced by amendment",
-      citations: [citation({ document_sha256: SHA_AMENDMENT, document_name: "Amendment 001.pdf", pdf_page_1based: 1 })],
+      citations: [citation({ document_sha256: SHA_AMENDMENT, document_name: "Amendment 001.pdf", source_url: null, pdf_page_1based: 1 })],
     },
     {
       id: "security",
@@ -212,10 +212,17 @@ const sampleResult = {
         estimated_micro_usd: 9300,
         latency_ms: 2380,
         retry_of: null,
+        estimation_basis: "Token-derived usage estimate; plan credits excluded.",
+        pricing_source_url: "https://platform.openai.com/docs/pricing",
+        pricing_observed_at: "2026-09-03T00:00:00.000Z",
       },
     ],
+    completeness: "partial",
+    unpriced_providers: ["railway_s3", "vercel", "neon"],
+    not_applicable_providers: ["vercel_blob"],
     actual_micro_usd: 4210,
     estimated_micro_usd: 9300,
+    known_subtotal_micro_usd: 13510,
     total_micro_usd: 13510,
     includes_failed_attempts: true,
   },
@@ -307,6 +314,7 @@ test("keeps source input and the verified sample useful in the first desktop vie
   await expect(page.getByRole("button", { name: "CanadaBuys URL" })).toHaveAttribute("aria-pressed", "true");
   await expect(page.getByRole("heading", { name: "Repair & Maintenance on various File Bays", level: 2 })).toBeVisible();
   await expect(page.getByText("Document-only. No search.")).toBeVisible();
+  await expect(page.getByText(/Context\.dev zero-data retention is not enabled.*seven-day artifact expiry/i)).toBeVisible();
 
   if (!isMobile) {
     await expect(page.getByRole("button", { name: "Analyze pack" })).toBeInViewport();
@@ -326,6 +334,7 @@ test("loads the Edmonton result across desktop and mobile with trust labels inta
   await page.getByRole("button", { name: "Open Edmonton sample" }).click();
 
   await expect(page.getByRole("heading", { name: "File Bay Repair & Maintenance", level: 1 })).toBeVisible();
+  await expect(page.getByText(/Frozen public sample generated.*retained separately/i)).toBeVisible();
   await expect(page.getByRole("tab", { name: "Executive Brief" })).toHaveAttribute("aria-selected", "true");
   await expect(page.getByText("Superseded", { exact: true }).first()).toBeVisible();
   await expect(page.getByText("Conflicted", { exact: true }).first()).toBeVisible();
@@ -334,16 +343,33 @@ test("loads the Edmonton result across desktop and mobile with trust labels inta
   const evidence = page.locator("summary").filter({ hasText: "PDF page 17" }).first();
   await evidence.click();
   await expect(evidence.locator("..").getByText("The Bidder shall submit the completed Security Requirements Check List identified as Annex E.")).toBeVisible();
+  const sourceLink = evidence.locator("..").getByRole("link", { name: "Open official source at PDF page 17" });
+  await expect(sourceLink).toHaveAttribute("href", "https://canadabuys.canada.ca/en/tender-opportunities/opportunity-listing/example#page=17");
+  await expect(sourceLink).toHaveAttribute("target", "_blank");
+
+  const uploadedEvidence = page.locator("summary").filter({ hasText: /PDF page 1.*Amendment 001\.pdf/ }).first();
+  await uploadedEvidence.click();
+  await expect(uploadedEvidence.locator("..").getByText("Uploaded source was deleted after analysis. Verify PDF page 1 against your original file.")).toBeVisible();
+  await expect(uploadedEvidence.locator("..").getByRole("link")).toHaveCount(0);
 
   await page.getByRole("tab", { name: "Evaluation & Pricing" }).click();
   await expect(page.getByText("Blank pricing fields remain unknown, never zero.")).toBeVisible();
 
   await page.getByRole("tab", { name: "Audit & Cost" }).click();
   await expect(page.getByRole("heading", { name: "Provider retention disclosure" })).toBeVisible();
+  await expect(page.getByText(/Context\.dev zero-data retention is not enabled.*seven days/i)).toBeVisible();
+  await expect(page.getByText(/This frozen public sample is retained separately; user-run structured output expires after 24 hours/i)).toBeVisible();
   await expect(page.getByText("App-controlled cleanup confirmed")).toBeVisible();
   await expect(page.getByText("No search", { exact: true })).toBeVisible();
   await expect(page.getByText("Actual", { exact: true }).first()).toBeVisible();
   await expect(page.getByText("Estimated", { exact: true }).first()).toBeVisible();
+  await expect(page.getByText("Known provider subtotal", { exact: true })).toBeVisible();
+  await expect(page.getByText(/Cost completeness:\s*Partial/i)).toBeVisible();
+  await expect(page.getByText(/Unavailable per-run pricing: Railway S3, Vercel, Neon/i)).toBeVisible();
+  const pricingSource = page.getByRole("link", { name: "Pricing source" });
+  await expect(pricingSource).toHaveAttribute("href", "https://platform.openai.com/docs/pricing");
+  await expect(pricingSource).toHaveAttribute("target", "_blank");
+  await expect(page.getByText(/Not applicable to this architecture: Vercel Blob/i)).toBeVisible();
   await expect(page.getByText("Not reported", { exact: true })).toBeVisible();
 });
 

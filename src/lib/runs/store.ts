@@ -2,7 +2,11 @@ import type { CreateRunRequest } from "@/contracts";
 import { getConfig } from "@/lib/config";
 import { stableJson, sha256Hex } from "@/lib/crypto";
 import { AppError } from "@/lib/errors";
-import type { RunRecord } from "@/lib/runs/types";
+import type {
+  AnalysisDispatchStatus,
+  CleanupRetryDispatchStatus,
+  RunRecord
+} from "@/lib/runs/types";
 
 export const ACTIVE_RUN_STATUSES = [
   "queued",
@@ -33,6 +37,16 @@ export const LEASED_RUN_STATUSES = [
 // fence; a dead worker cannot.
 export const PROCESSING_LEASE_MS = 45_000;
 export const PROCESSING_HEARTBEAT_INTERVAL_MS = 10_000;
+// Once this claim is committed, this product run may contact Workflow `start`
+// at most once. An ACK-lost claim/start is terminally reconciled by recurring
+// maintenance after the grace period; the claim is never cleared or reused.
+export const ANALYSIS_DISPATCH_RECOVERY_GRACE_MS = 60_000;
+// If the cleanup-claim UPDATE commits but its response is lost, the caller
+// cannot safely dispatch. Maintenance treats the orphaned `dispatching` claim
+// as due after this short grace without ever clearing it or starting a second
+// standalone Workflow.
+export const CLEANUP_RETRY_DISPATCH_GRACE_MS = 60_000;
+export const CLEANUP_PENDING_MAINTENANCE_CADENCE_MS = 5 * 60_000;
 
 export function isActiveRunStatus(status: RunRecord["status"]): boolean {
   return (ACTIVE_RUN_STATUSES as readonly RunRecord["status"][]).includes(status);
@@ -64,8 +78,7 @@ export interface RunStore {
   claimAdmission(
     id: string,
     now?: Date,
-    leaseMs?: number,
-    rescheduleBefore?: Date
+    leaseMs?: number
   ): Promise<{ record: RunRecord; admissionLeaseId: string } | null>;
   claimProcessing(
     id: string,
@@ -77,6 +90,35 @@ export interface RunStore {
     claim: { leaseId: string; fence: number },
     now?: Date,
     leaseMs?: number
+  ): Promise<RunRecord | null>;
+  claimAnalysisDispatch(
+    id: string,
+    admissionLeaseId: string,
+    now?: Date
+  ): Promise<{ record: RunRecord; analysisDispatchClaimId: string } | null>;
+  settleAnalysisDispatch(
+    id: string,
+    analysisDispatchClaimId: string,
+    outcome: {
+      status: Exclude<AnalysisDispatchStatus, "dispatching">;
+      workflowRunId: string | null;
+      uncertainAt: Date | null;
+    },
+    now?: Date
+  ): Promise<RunRecord | null>;
+  claimCleanupRetry(
+    id: string,
+    now?: Date
+  ): Promise<{ record: RunRecord; cleanupRetryClaimId: string } | null>;
+  settleCleanupRetryDispatch(
+    id: string,
+    cleanupRetryClaimId: string,
+    outcome: {
+      status: Exclude<CleanupRetryDispatchStatus, "dispatching">;
+      workflowRunId: string | null;
+      uncertainAt: Date | null;
+    },
+    now?: Date
   ): Promise<RunRecord | null>;
   remove(id: string): Promise<void>;
   listExpired(now?: Date): Promise<RunRecord[]>;
@@ -123,6 +165,15 @@ export function newRunRecord(input: CreateRunRecordInput): RunRecord {
     result: null,
     error: null,
     workflowRunId: null,
+    analysisDispatchClaimId: null,
+    analysisDispatchClaimedAt: null,
+    analysisDispatchStatus: null,
+    analysisDispatchUncertainAt: null,
+    cleanupRetryClaimId: null,
+    cleanupRetryClaimedAt: null,
+    cleanupRetryWorkflowRunId: null,
+    cleanupRetryDispatchStatus: null,
+    cleanupRetryDispatchUncertainAt: null,
     admissionLeaseId: null,
     admissionLeaseExpiresAt: null,
     processingLeaseId: null,
@@ -245,8 +296,7 @@ export class InMemoryRunStore implements RunStore {
   async claimAdmission(
     id: string,
     now = new Date(),
-    leaseMs = 2 * 60_000,
-    rescheduleBefore?: Date
+    leaseMs = 2 * 60_000
   ) {
     const current = this.records.get(id);
     if (!current) {
@@ -254,8 +304,8 @@ export class InMemoryRunStore implements RunStore {
     }
     const leaseAvailable = current.admissionLeaseId === null ||
       (current.admissionLeaseExpiresAt !== null && new Date(current.admissionLeaseExpiresAt) <= now);
-    const schedulingAllowed = current.workflowRunId === null ||
-      Boolean(rescheduleBefore && new Date(current.updatedAt) <= rescheduleBefore);
+    const schedulingAllowed = current.workflowRunId === null &&
+      current.analysisDispatchClaimId === null;
     if (current.status !== "queued" || !leaseAvailable || !schedulingAllowed) return null;
     const admissionLeaseId = crypto.randomUUID();
     const record: RunRecord = {
@@ -327,6 +377,114 @@ export class InMemoryRunStore implements RunStore {
     return clone(record);
   }
 
+  async claimAnalysisDispatch(
+    id: string,
+    admissionLeaseId: string,
+    now = new Date()
+  ) {
+    const current = this.records.get(id);
+    if (!current) {
+      throw new AppError("ANALYSIS_INCOMPLETE", "The run was not found.", { httpStatus: 404 });
+    }
+    if (
+      current.status !== "queued" ||
+      current.admissionLeaseId !== admissionLeaseId ||
+      current.analysisDispatchClaimId !== null ||
+      current.workflowRunId !== null
+    ) return null;
+    const analysisDispatchClaimId = crypto.randomUUID();
+    const record: RunRecord = {
+      ...current,
+      analysisDispatchClaimId,
+      analysisDispatchClaimedAt: now.toISOString(),
+      analysisDispatchStatus: "dispatching",
+      updatedAt: now.toISOString(),
+      version: current.version + 1
+    };
+    this.records.set(id, clone(record));
+    return { record: clone(record), analysisDispatchClaimId };
+  }
+
+  async settleAnalysisDispatch(
+    id: string,
+    analysisDispatchClaimId: string,
+    outcome: {
+      status: Exclude<AnalysisDispatchStatus, "dispatching">;
+      workflowRunId: string | null;
+      uncertainAt: Date | null;
+    },
+    now = new Date()
+  ): Promise<RunRecord | null> {
+    const current = this.records.get(id);
+    if (!current) {
+      throw new AppError("ANALYSIS_INCOMPLETE", "The run was not found.", { httpStatus: 404 });
+    }
+    if (
+      current.analysisDispatchClaimId !== analysisDispatchClaimId ||
+      current.analysisDispatchStatus !== "dispatching"
+    ) return null;
+    const record: RunRecord = {
+      ...current,
+      workflowRunId: outcome.workflowRunId,
+      analysisDispatchStatus: outcome.status,
+      analysisDispatchUncertainAt: outcome.uncertainAt?.toISOString() ?? null,
+      admissionLeaseId: null,
+      admissionLeaseExpiresAt: null,
+      updatedAt: now.toISOString(),
+      version: current.version + 1
+    };
+    this.records.set(id, clone(record));
+    return clone(record);
+  }
+
+  async claimCleanupRetry(id: string, now = new Date()) {
+    const current = this.records.get(id);
+    if (!current) {
+      throw new AppError("ANALYSIS_INCOMPLETE", "The run was not found.", { httpStatus: 404 });
+    }
+    if (current.status !== "cleanup_pending" || current.cleanupRetryClaimId !== null) {
+      return null;
+    }
+    const cleanupRetryClaimId = crypto.randomUUID();
+    const record: RunRecord = {
+      ...current,
+      cleanupRetryClaimId,
+      cleanupRetryClaimedAt: now.toISOString(),
+      cleanupRetryDispatchStatus: "dispatching",
+      updatedAt: now.toISOString(),
+      version: current.version + 1
+    };
+    this.records.set(id, clone(record));
+    return { record: clone(record), cleanupRetryClaimId };
+  }
+
+  async settleCleanupRetryDispatch(
+    id: string,
+    cleanupRetryClaimId: string,
+    outcome: {
+      status: Exclude<CleanupRetryDispatchStatus, "dispatching">;
+      workflowRunId: string | null;
+      uncertainAt: Date | null;
+    },
+    now = new Date()
+  ): Promise<RunRecord | null> {
+    const current = this.records.get(id);
+    if (!current) {
+      throw new AppError("ANALYSIS_INCOMPLETE", "The run was not found.", { httpStatus: 404 });
+    }
+    if (current.cleanupRetryClaimId !== cleanupRetryClaimId) return null;
+    const record: RunRecord = {
+      ...current,
+      cleanupRetryWorkflowRunId: outcome.workflowRunId,
+      cleanupRetryDispatchStatus: outcome.status,
+      cleanupRetryDispatchUncertainAt: outcome.uncertainAt?.toISOString() ?? null,
+      updatedAt: now.toISOString(),
+      version: current.version + 1
+    };
+    this.records.set(id, clone(record));
+    return clone(record);
+  }
+
   async remove(id: string): Promise<void> {
     const record = this.records.get(id);
     if (record?.idempotencyKey) {
@@ -362,6 +520,33 @@ export class InMemoryRunStore implements RunStore {
         return record.auditExpiresAt ? new Date(record.auditExpiresAt).getTime() : Number.POSITIVE_INFINITY;
       }
       const retentionDueAt = new Date(record.expiresAt).getTime();
+      const cleanupCadenceDueAt = record.status === "cleanup_pending"
+        ? new Date(record.updatedAt).getTime() + CLEANUP_PENDING_MAINTENANCE_CADENCE_MS
+        : Number.POSITIVE_INFINITY;
+      if (
+        record.status === "cleanup_pending" &&
+        record.cleanupRetryDispatchUncertainAt !== null
+      ) {
+        return Math.min(
+          retentionDueAt,
+          cleanupCadenceDueAt,
+          new Date(record.cleanupRetryDispatchUncertainAt).getTime()
+        );
+      }
+      if (
+        record.status === "cleanup_pending" &&
+        record.cleanupRetryDispatchStatus === "dispatching" &&
+        record.cleanupRetryClaimedAt !== null
+      ) {
+        return Math.min(
+          retentionDueAt,
+          cleanupCadenceDueAt,
+          new Date(record.cleanupRetryClaimedAt).getTime() + CLEANUP_RETRY_DISPATCH_GRACE_MS
+        );
+      }
+      if (record.status === "cleanup_pending") {
+        return Math.min(retentionDueAt, cleanupCadenceDueAt);
+      }
       if (
         (LEASED_RUN_STATUSES as readonly RunRecord["status"][]).includes(record.status) &&
         record.processingLeaseExpiresAt !== null

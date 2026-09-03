@@ -3,6 +3,7 @@ import type { PresignUploadResponse } from "@/contracts";
 import { LocalDeterministicModel } from "@/lib/analysis/local-model";
 import { getConfig } from "@/lib/config";
 import { sha256Hex } from "@/lib/crypto";
+import { infrastructureCostCommitmentMicroUsd } from "@/lib/cost-estimates";
 import { processRun } from "@/lib/pipeline";
 import type { MonidAdapter } from "@/lib/providers/monid";
 import { cleanupRun, expireDueRuns, expireRun } from "@/lib/runs/expiry";
@@ -292,10 +293,17 @@ describe("active-worker cancellation and stale-lease cleanup", () => {
     const storage = new RevocationStorage(bytes);
     const budget = new RecordingBudgetGuard();
     const { record } = await createUploadRun(store, bytes, "guest:paid-cancel", claimedAt);
+    const failureReservationMicroUsd =
+      liveConfig.MONID_PARSE_RESERVE_MICRO_USD + liveConfig.OPENAI_RUN_RESERVE_MICRO_USD +
+      infrastructureCostCommitmentMicroUsd({
+        documentCount: 1,
+        storageProvider: null,
+        neonCostCuCeiling: liveConfig.NEON_COST_CU_CEILING,
+        runTtlHours: liveConfig.RUN_TTL_HOURS
+      });
     await store.update(record.id, (current) => ({
       ...current,
-      reservedMicroUsd:
-        liveConfig.MONID_PARSE_RESERVE_MICRO_USD + liveConfig.OPENAI_RUN_RESERVE_MICRO_USD
+      reservedMicroUsd: failureReservationMicroUsd
     }));
     const local = new LocalDeterministicModel();
     const received = { input: null as Parameters<typeof local.extract>[0] | null };
@@ -364,8 +372,9 @@ describe("active-worker cancellation and stale-lease cleanup", () => {
     });
     expect(budget.settlements).toEqual([{
       runId: record.id,
-      // Monid actual 4,500 + model estimate (1,000 * .75 + 500 * 4.5).
-      actualMicroUsd: 7_500
+      // Terminal failures retain the full safety reservation so repeated
+      // failures cannot reopen the daily budget after chargeable work began.
+      actualMicroUsd: failureReservationMicroUsd
     }]);
   });
 

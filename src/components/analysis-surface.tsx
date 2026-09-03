@@ -106,10 +106,47 @@ function StatusBadge({ status }: { status: StatusValue }) {
   );
 }
 
+function citationSourcePageUrl(citation: Citation) {
+  if (!citation.verified || !citation.source_url || citation.pdf_page_1based === null) {
+    return null;
+  }
+
+  try {
+    const source = new URL(citation.source_url);
+    if (source.protocol !== "https:" || source.hostname.toLowerCase() !== "canadabuys.canada.ca") {
+      return null;
+    }
+    source.hash = `page=${citation.pdf_page_1based}`;
+    return source.toString();
+  } catch {
+    return null;
+  }
+}
+
+const PRICING_SOURCE_HOSTS = new Set([
+  "vercel.com",
+  "neon.com",
+  "docs.railway.com",
+  "platform.openai.com",
+]);
+
+function safePricingSourceUrl(value: string | null | undefined) {
+  if (!value) return null;
+  try {
+    const source = new URL(value);
+    return source.protocol === "https:" && PRICING_SOURCE_HOSTS.has(source.hostname.toLowerCase())
+      ? source.toString()
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 function CitationDisclosure({ citation }: { citation: Citation }) {
   const pageLabel = citation.pdf_page_1based
     ? `PDF page ${citation.pdf_page_1based}`
     : "Physical page unverified";
+  const sourcePageUrl = citationSourcePageUrl(citation);
 
   return (
     <details className="citation-disclosure">
@@ -127,6 +164,21 @@ function CitationDisclosure({ citation }: { citation: Citation }) {
       </summary>
       <div className="citation-body">
         <blockquote>{citation.evidence_quote}</blockquote>
+        {sourcePageUrl ? (
+          <a
+            className="citation-source-link"
+            href={sourcePageUrl}
+            rel="noopener noreferrer"
+            target="_blank"
+          >
+            <ExternalLink aria-hidden="true" size={14} strokeWidth={ICON_STROKE} />
+            Open official source at PDF page {citation.pdf_page_1based}
+          </a>
+        ) : citation.source_url === null && citation.pdf_page_1based !== null ? (
+          <p className="citation-source-note">
+            Uploaded source was deleted after analysis. Verify PDF page {citation.pdf_page_1based} against your original file.
+          </p>
+        ) : null}
         <dl className="citation-meta">
           <div>
             <dt>Document SHA-256</dt>
@@ -535,14 +587,14 @@ function DocumentStatus({ document }: { document: DocumentManifest }) {
   );
 }
 
-function AuditCost({ result, runStatus }: { result: AnalysisResult; runStatus: RunStatusResponse | null }) {
+function AuditCost({ result, runStatus, isSample }: { result: AnalysisResult; runStatus: RunStatusResponse | null; isSample: boolean }) {
   const quality = result.quality;
   const cleanupConfirmed = runStatus?.cleanup_confirmed ?? result.document_manifest.every((document) => document.cleanup_status === "deleted");
 
   return (
     <div className="surface-stack">
       <SectionHeading title="Audit and cost">
-        Processing scope, deletion evidence, source provenance, and measured run cost are kept together.
+        Processing scope, deletion evidence, source provenance, and clearly separated actual and estimated run costs are kept together.
       </SectionHeading>
       <section className="boundary-panel" aria-labelledby="source-boundary-title">
         <div className="boundary-icon"><LockKeyhole aria-hidden="true" size={22} /></div>
@@ -556,7 +608,7 @@ function AuditCost({ result, runStatus }: { result: AnalysisResult; runStatus: R
         <TriangleAlert aria-hidden="true" size={20} />
         <div>
           <h3 id="retention-title">Provider retention disclosure</h3>
-          <p>App-controlled source files and temporary parse artifacts must be deleted before a run is ready. Early deletion and zero-data-retention for upstream processing providers have not been verified. Structured, redacted output expires after 24 hours.</p>
+          <p>App-controlled source files and temporary parse artifacts must be deleted before a run is ready. Context.dev zero-data retention is not enabled for this workspace; a verified parse reported an upstream artifact expiry of seven days. {isSample ? "This frozen public sample is retained separately; user-run structured output expires after 24 hours." : "Structured, redacted output expires after 24 hours."}</p>
           <strong className={cleanupConfirmed ? "cleanup-confirmed" : "cleanup-unconfirmed"}>{cleanupConfirmed ? "App-controlled cleanup confirmed" : "App-controlled cleanup is not confirmed"}</strong>
         </div>
       </section>
@@ -577,9 +629,23 @@ function AuditCost({ result, runStatus }: { result: AnalysisResult; runStatus: R
           <dl className="cost-totals">
             <div><dt>Actual</dt><dd>{formatUsd(result.costs.actual_micro_usd)}</dd></div>
             <div><dt>Estimated</dt><dd>{formatUsd(result.costs.estimated_micro_usd)}</dd></div>
-            <div><dt>Combined ledger</dt><dd>{formatUsd(result.costs.total_micro_usd)}</dd></div>
+            <div><dt>Known provider subtotal</dt><dd>{formatUsd(result.costs.known_subtotal_micro_usd)}</dd></div>
           </dl>
-          <p className="cost-note">USD. {result.costs.includes_failed_attempts ? "Failed attempts are included." : "Failed attempts are not included."}</p>
+          <p className="cost-note">
+            USD. Cost completeness: <strong>{humanize(result.costs.completeness)}</strong>.
+            {result.costs.includes_failed_attempts
+              ? " Failed provider attempts are recorded in this ledger; available prices are included in the subtotal."
+              : " No failed provider attempts are recorded for this run."}
+          </p>
+          <p className="cost-note">
+            Per-run marginal allocation excludes shared subscription minimums and the fixed Railway/GitHub maintenance triggers. Those shared costs are not yet invoice-verified and are not included in this subtotal.
+          </p>
+          {result.costs.unpriced_providers.length ? (
+            <p className="cost-note">Unavailable per-run pricing: {result.costs.unpriced_providers.map(humanize).join(", ")}. These providers are excluded from the known subtotal, not treated as zero.</p>
+          ) : null}
+          {result.costs.not_applicable_providers.length ? (
+            <p className="cost-note">Not applicable to this architecture: {result.costs.not_applicable_providers.map(humanize).join(", ")}.</p>
+          ) : null}
         </section>
       </div>
       <section className="content-section" aria-labelledby="manifest-title">
@@ -603,7 +669,14 @@ function AuditCost({ result, runStatus }: { result: AnalysisResult; runStatus: R
               <thead><tr><th>Provider</th><th>Operation</th><th>Status</th><th>Actual</th><th>Estimated</th><th>Latency</th></tr></thead>
               <tbody>{result.costs.events.map((event, index) => (
                 <tr key={`${event.provider}-${event.operation}-${index}`}>
-                  <th scope="row">{humanize(event.provider)}</th><td>{event.operation}</td><td>{humanize(event.status)}</td>
+                  <th scope="row">{humanize(event.provider)}</th><td>
+                    {event.operation}
+                    {event.estimation_basis ? <small className="cost-basis">
+                      {event.estimation_basis}{" "}
+                      {safePricingSourceUrl(event.pricing_source_url) ? <a href={safePricingSourceUrl(event.pricing_source_url)!} target="_blank" rel="noopener noreferrer">Pricing source</a> : null}
+                      {event.pricing_observed_at ? ` · observed ${event.pricing_observed_at.slice(0, 10)}` : null}
+                    </small> : null}
+                  </td><td>{humanize(event.status)}</td>
                   <td>{event.actual_micro_usd === null ? <span className="not-reported">Not reported</span> : <><span className="cost-kind">Actual</span>{formatUsd(event.actual_micro_usd)}</>}</td>
                   <td>{event.estimated_micro_usd === null ? <span className="not-reported">Not estimated</span> : <><span className="cost-kind">Estimated</span>{formatUsd(event.estimated_micro_usd)}</>}</td>
                   <td>{event.latency_ms.toLocaleString("en-CA")} ms</td>
@@ -670,7 +743,7 @@ export function AnalysisSurface({ result, runId, runStatus, isSample, onReset, o
         <div className="analysis-heading-copy">
           <div className="result-state"><FileCheck2 aria-hidden="true" size={16} /><span>{readyLabel}</span><span aria-hidden="true">/</span><span>Document-only</span></div>
           <h1 id="analysis-title" ref={titleRef} tabIndex={-1}>{result.summary.title || "Tender analysis"}</h1>
-          <p>Generated {formatDate(result.generated_at)}. Expires {formatDate(result.expires_at)}.</p>
+          <p>{isSample ? `Frozen public sample generated ${formatDate(result.generated_at)}; retained separately.` : `Generated ${formatDate(result.generated_at)}. Expires ${formatDate(result.expires_at)}.`}</p>
         </div>
         <div className="analysis-actions">
           <a className="secondary-button" href="/api/openapi.json" target="_blank" rel="noreferrer">API schema <ExternalLink aria-hidden="true" size={14} /></a>
@@ -719,7 +792,7 @@ export function AnalysisSurface({ result, runId, runStatus, isSample, onReset, o
         <AskRfp isSample={isSample} runId={runId} />
       </div>
       <div className="result-panel" id="panel-audit" aria-labelledby="tab-audit" hidden={activeTab !== "audit"} role="tabpanel" tabIndex={0}>
-        <AuditCost result={result} runStatus={runStatus} />
+        <AuditCost isSample={isSample} result={result} runStatus={runStatus} />
       </div>
     </article>
   );

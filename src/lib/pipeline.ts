@@ -2,9 +2,19 @@ import type { CostEvent, DocumentManifest } from "@/contracts";
 import { materializeAnalysis } from "@/lib/analysis/materialize";
 import { LocalDeterministicModel } from "@/lib/analysis/local-model";
 import { cleanupGate, executeCleanup, type CleanupTarget } from "@/lib/cleanup";
-import { getConfig, getProductionReadiness, hasLivePipelineConfig, type AppConfig } from "@/lib/config";
+import {
+  getConfig,
+  getPrivateStorageProvider,
+  getProductionReadiness,
+  hasLivePipelineConfig,
+  type AppConfig
+} from "@/lib/config";
 import { asAppError, AppError } from "@/lib/errors";
 import { sha256Hex } from "@/lib/crypto";
+import {
+  buildInfrastructureCostEstimateEvents,
+  infrastructureCostCommitmentMicroUsd
+} from "@/lib/cost-estimates";
 import { auditLog } from "@/lib/logging";
 import {
   assertWorkflowRuntimeAttested,
@@ -17,6 +27,10 @@ import {
   type ProviderContractsCapability,
   type ProviderContractsAttestationHealth
 } from "@/lib/health/provider-contracts";
+import {
+  assertNeonCapacityAttested,
+  type NeonCapacityHealth
+} from "@/lib/health/neon-capacity";
 import { buildPdfPageIndex, type PdfPageIndex } from "@/lib/pdf/page-index";
 import {
   MonidAdapter,
@@ -55,6 +69,7 @@ import { getBudgetGuard, type BudgetGuard } from "@/lib/security/budget";
 import { assertAggregatePages } from "@/lib/source-validation";
 import { loadSource, type LoadedSource } from "@/lib/storage/source-reader";
 import { getUploadStorage, stagingBlobPath, type UploadStorage } from "@/lib/storage/uploads";
+import { SOURCE_CLEANUP_WATCHDOG_REGISTRATIONS_PER_BATCH } from "@/lib/workflow-cost-policy";
 
 interface IndexedSource {
   source: LoadedSource;
@@ -73,7 +88,7 @@ interface ParsedSource extends IndexedSource {
 export const LIVE_NETWORK_BUDGET_MS = WORKFLOW_INTERNAL_DEADLINES_MS.live_network;
 export const PRE_MODEL_DEADLINE_MS = WORKFLOW_INTERNAL_DEADLINES_MS.pre_model;
 export const RESULT_COMMIT_DEADLINE_MS = WORKFLOW_INTERNAL_DEADLINES_MS.result_commit;
-export const MONID_PARSE_CONCURRENCY = 4;
+export const MONID_PARSE_CONCURRENCY = SOURCE_CLEANUP_WATCHDOG_REGISTRATIONS_PER_BATCH;
 export const MONID_MIN_PAID_CALL_WINDOW_MS = 60_000;
 
 export interface PipelineDependencies {
@@ -87,12 +102,13 @@ export interface PipelineDependencies {
   now?: () => Date;
   cleanupWatchdogScheduler?: (
     runId: string,
-    registrationId: string
+    registrationIds: string[]
   ) => Promise<string | null>;
   workflowRuntimeAttestationProbe?: () => Promise<WorkflowRuntimeAttestationHealth>;
   workflowRuntimeCapability?: WorkflowRuntimeCapability;
   providerContractsAttestationProbe?: () => Promise<ProviderContractsAttestationHealth>;
   providerContractsCapability?: ProviderContractsCapability;
+  neonCapacityProbe?: () => Promise<NeonCapacityHealth>;
 }
 
 function amendmentFromIndex(index: PdfPageIndex): string | null {
@@ -153,7 +169,7 @@ function parsedTargets(parsed: ParsedSource[]): CleanupTarget[] {
         resourceId: `provider-artifact:sha256:${item.monid.runIdSha256}`,
         resourceKind: "provider_artifact",
         controlScope: "provider",
-        unknownDetail: "No provider artifact deletion API or retention TTL has been verified."
+        unknownDetail: "No provider early-delete endpoint was found or verified; the release contract spike observed a seven-day upstream artifact expiry with ZDR disabled."
       });
     }
     return targets;
@@ -367,7 +383,16 @@ export function assertMonidPaidCallStartWindow(deadlineAt: number, nowMs = perfo
 export function assertPaidProviderPlan(record: RunRecord, config: AppConfig) {
   const documentCount = record.input?.documents.length ?? 0;
   const monidCommitment = documentCount * config.MONID_PARSE_RESERVE_MICRO_USD;
-  const plannedCommitment = monidCommitment + config.OPENAI_RUN_RESERVE_MICRO_USD;
+  const infrastructureCommitment = documentCount > 0
+      ? infrastructureCostCommitmentMicroUsd({
+          documentCount,
+          storageProvider: getPrivateStorageProvider(config),
+          neonCostCuCeiling: config.NEON_COST_CU_CEILING,
+          runTtlHours: config.RUN_TTL_HOURS
+      })
+    : 0;
+  const plannedCommitment = monidCommitment + config.OPENAI_RUN_RESERVE_MICRO_USD +
+    infrastructureCommitment;
   if (
     documentCount < 1 ||
     !Number.isSafeInteger(monidCommitment) ||
@@ -402,6 +427,9 @@ export async function processRun(runId: string, dependencies: PipelineDependenci
     probe: dependencies.providerContractsAttestationProbe,
     capability: dependencies.providerContractsCapability
   });
+  await assertNeonCapacityAttested(config, {
+    probe: dependencies.neonCapacityProbe
+  });
   const live = hasLivePipelineConfig(config);
   const fetcher = fetchWithDeadline(
     dependencies.fetcher ?? fetch,
@@ -428,12 +456,31 @@ export async function processRun(runId: string, dependencies: PipelineDependenci
   if (!initial.input) {
     throw new AppError("ANALYSIS_INCOMPLETE", "The run input has already been scrubbed.", { httpStatus: 410 });
   }
+  const infrastructureCostTemplate = live
+    ? buildInfrastructureCostEstimateEvents({
+        documentCount: initial.input.documents.length,
+        storageProvider: getPrivateStorageProvider(config),
+        neonCostCuCeiling: config.NEON_COST_CU_CEILING,
+        runTtlHours: config.RUN_TTL_HOURS,
+        observedPipelineLatencyMs: 0
+      })
+    : [];
+  let infrastructureCostsRecorded = false;
+  const recordInfrastructureCosts = () => {
+    if (infrastructureCostsRecorded || infrastructureCostTemplate.length === 0) return;
+    const latencyMs = Math.max(0, Math.round(performance.now() - workflowStarted));
+    costs.push(...infrastructureCostTemplate.map((event) => ({
+      ...event,
+      latency_ms: latencyMs
+    })));
+    infrastructureCostsRecorded = true;
+  };
   cleanupTargets = plannedInputTargets(initial, uploadStorage);
   const heartbeat = startProcessingHeartbeat({ store, runId, claim, now });
   const scheduleWatchdog = dependencies.cleanupWatchdogScheduler ??
-    (async (targetRunId: string, registrationId: string) => {
+    (async (targetRunId: string, registrationIds: string[]) => {
       const { scheduleSourceCleanupWatchdog } = await import("@/lib/runs/scheduler");
-      return scheduleSourceCleanupWatchdog(targetRunId, registrationId);
+      return scheduleSourceCleanupWatchdog(targetRunId, registrationIds);
     });
 
   try {
@@ -667,10 +714,12 @@ export async function processRun(runId: string, dependencies: PipelineDependenci
       const batch = indexed.slice(batchStart, batchStart + MONID_PARSE_CONCURRENCY);
       const batchWatchdogs: Array<SourceCleanupWatchdog | null> = [];
       if (monid) {
-        // Register and durably schedule every watchdog in the batch before any
-        // corresponding paid call may start. Sequential registration avoids
-        // optimistic-row conflicts while the parse calls themselves remain
-        // bounded and parallel.
+        // Register every source before scheduling one package watchdog for the
+        // bounded parse batch. This preserves independent per-document state
+        // while limiting the actual Workflow count to ceil(documents / 4).
+        // Sequential registration avoids optimistic-row conflicts; no paid
+        // call starts until the shared Workflow acknowledgement is durable on
+        // every registration.
         for (const [offset, item] of batch.entries()) {
           heartbeat.assertHealthy();
           const documentIndex = batchStart + offset;
@@ -686,23 +735,26 @@ export async function processRun(runId: string, dependencies: PipelineDependenci
             claim,
             now: now()
           });
-          const workflowRunId = await scheduleWatchdog(runId, armed.registrationId);
-          if (config.NODE_ENV === "production" && !workflowRunId) {
-            throw new AppError(
-              "SOURCE_CLEANUP_PENDING",
-              "The paid provider call was blocked because its independent cleanup watchdog was not acknowledged.",
-              { retryable: true }
-            );
-          }
+          batchWatchdogs.push(armed);
+        }
+        const registrationIds = batchWatchdogs.map((watchdog) => watchdog!.registrationId);
+        const workflowRunId = await scheduleWatchdog(runId, registrationIds);
+        if (config.NODE_ENV === "production" && !workflowRunId) {
+          throw new AppError(
+            "SOURCE_CLEANUP_PENDING",
+            "The paid provider calls were blocked because their independent cleanup watchdog was not acknowledged.",
+            { retryable: true }
+          );
+        }
+        for (const armed of batchWatchdogs) {
           await recordSourceCleanupWatchdogScheduled({
             store,
             runId,
-            registrationId: armed.registrationId,
+            registrationId: armed!.registrationId,
             workflowRunId,
             claim,
             now: now()
           });
-          batchWatchdogs.push(armed);
         }
       } else {
         batchWatchdogs.push(...batch.map(() => null));
@@ -982,6 +1034,8 @@ export async function processRun(runId: string, dependencies: PipelineDependenci
     assertBeforeDeadline(workflowStarted + RESULT_COMMIT_DEADLINE_MS, "result-commit");
 
     await stage(store, runId, "reconciling", claim);
+    const storageProvider = getPrivateStorageProvider(config);
+    recordInfrastructureCosts();
     const materialized = materializeAnalysis({
       draft: extraction.analysis,
       documents: indexed.map((item) => ({
@@ -993,6 +1047,7 @@ export async function processRun(runId: string, dependencies: PipelineDependenci
       })),
       manifests: cleanedManifests,
       costs,
+      storageProvider,
       generatedAt: now(),
       expiresAt: new Date(initial.expiresAt)
     });
@@ -1059,6 +1114,9 @@ export async function processRun(runId: string, dependencies: PipelineDependenci
   } catch (error) {
     await heartbeat.stop({ suppressFailure: true });
     const appError = asAppError(error);
+    // Failure-inclusive infrastructure allocations belong in the audit ledger
+    // even when validation, staging, parsing, or extraction terminates early.
+    recordInfrastructureCosts();
     auditLog("run_pipeline_failed", {
       run_id: runId,
       error_code: appError.code,
@@ -1138,7 +1196,14 @@ export async function processRun(runId: string, dependencies: PipelineDependenci
     // in flight. The guarded run write must remain fenced, but its separate
     // budget reservation still has to retain at least the observed/estimated
     // spend so cancel-and-repeat cannot bypass the daily cap.
-    await budget.settle(runId, Math.max(failed.costMicroUsd, incurredCostMicroUsd), now());
+    // A failed live run keeps its full admission reservation. Infrastructure
+    // estimates are failure-inclusive, while an interrupted provider request
+    // may not have an invoice-grade receipt yet. Releasing that uncertainty as
+    // zero would let repeated failures bypass the daily USD 20 circuit.
+    const failureSettlementMicroUsd = live
+      ? Math.max(failed.costMicroUsd, incurredCostMicroUsd, initial.reservedMicroUsd)
+      : Math.max(failed.costMicroUsd, incurredCostMicroUsd);
+    await budget.settle(runId, failureSettlementMicroUsd, now());
     return failed;
   }
 }

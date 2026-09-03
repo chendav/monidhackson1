@@ -285,6 +285,10 @@ h1, h2, h3, h4, p { margin-top: 0; }
 .citation-disclosure[open] .citation-chevron { transform: rotate(180deg); }
 .citation-body { padding: 0 10px 11px; }
 .citation-body blockquote { margin: 3px 0 10px; padding: 9px 11px; border-left: 3px solid var(--accent); background: rgba(255, 255, 255, 0.72); color: var(--ink-soft); font-size: 0.72rem; line-height: 1.5; }
+.citation-source-link { display: inline-flex; align-items: center; gap: 6px; margin: 0 0 10px; color: var(--accent-dark); font-size: 0.68rem; font-weight: 800; text-underline-offset: 3px; }
+.citation-source-link:hover { color: var(--accent); }
+.citation-source-link:focus-visible { border-radius: 3px; outline: 2px solid var(--accent); outline-offset: 3px; }
+.citation-source-note { margin: 0 0 10px; color: var(--muted-strong); font-size: 0.66rem; line-height: 1.45; }
 .citation-meta { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; margin: 0; }
 .citation-meta dd { overflow-wrap: anywhere; margin: 0; color: var(--muted-strong); font-family: var(--font-mono); font-size: 0.6rem; }
 .missing-evidence { display: flex; align-items: center; gap: 6px; margin: 0; color: var(--danger); font-size: 0.7rem; font-weight: 750; }
@@ -380,6 +384,8 @@ h1, h2, h3, h4, p { margin-top: 0; }
 .cleanup-failed { border-color: #dfa9a3; background: var(--danger-soft); color: #812f29; }
 .cost-table { min-width: 820px; }
 .cost-kind { display: block; margin-bottom: 2px; color: var(--muted); font-size: 0.54rem; font-weight: 800; text-transform: uppercase; }
+.cost-basis { display: block; max-width: 42rem; margin-top: 0.35rem; color: var(--muted); font-size: 0.72rem; line-height: 1.45; }
+.cost-basis a { color: inherit; text-decoration: underline; text-underline-offset: 0.15em; }
 .not-reported { color: var(--muted); }
 
 .turnstile-facility { position: fixed; right: 18px; bottom: 18px; z-index: 20; width: min(420px, calc(100vw - 24px)); padding: 15px; border: 1px solid #b8d0df; border-radius: var(--radius); background: rgba(255, 255, 255, 0.98); box-shadow: 0 20px 55px rgba(18, 42, 56, 0.18); }

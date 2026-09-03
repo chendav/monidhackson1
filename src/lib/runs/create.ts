@@ -10,7 +10,11 @@ import {
   type ProviderContractsAttestationHealth
 } from "@/lib/health/provider-contracts";
 import { transitionRun } from "@/lib/runs/state-machine";
-import { getRunStore, type RunStore } from "@/lib/runs/store";
+import {
+  ANALYSIS_DISPATCH_RECOVERY_GRACE_MS,
+  getRunStore,
+  type RunStore
+} from "@/lib/runs/store";
 import { scheduleCleanupRetry, scheduleRun } from "@/lib/runs/scheduler";
 import { cleanupRun } from "@/lib/runs/expiry";
 import type { RunRecord } from "@/lib/runs/types";
@@ -70,7 +74,7 @@ class AdmissionAttemptError extends Error {
     readonly attemptError: unknown,
     readonly record: RunRecord,
     readonly claim: AdmissionClaim,
-    readonly phase: "preflight" | "schedule_uncertain"
+    readonly phase: "preflight" | "dispatch_claim_uncertain" | "schedule_uncertain"
   ) {
     super("Run admission failed while holding the single-writer lease.");
   }
@@ -83,7 +87,7 @@ function principalKindFor(record: RunRecord): Principal["kind"] {
 async function admitQueuedRun(
   record: RunRecord,
   dependencies: AdmissionDependencies,
-  options: { now?: Date; rescheduleBefore?: Date } = {}
+  options: { now?: Date } = {}
 ): Promise<RunRecord> {
   if (record.status !== "queued") return record;
   if (!record.input) {
@@ -94,13 +98,13 @@ async function admitQueuedRun(
   const acquired = await dependencies.store.claimAdmission(
     record.id,
     options.now ?? new Date(),
-    ADMISSION_LEASE_MS,
-    options.rescheduleBefore
+    ADMISSION_LEASE_MS
   );
   if (!acquired) return (await dependencies.store.get(record.id)) ?? record;
   const claim: AdmissionClaim = { admissionLeaseId: acquired.admissionLeaseId };
   let claimedRecord = acquired.record;
-  let schedulingStarted = false;
+  let failurePhase: AdmissionAttemptError["phase"] = "preflight";
+  let analysisDispatchClaimId: string | null = null;
   try {
     if (claimedRecord.reservedMicroUsd < dependencies.config.MAX_RUN_COST_MICRO_USD) {
       claimedRecord = await dependencies.store.update(claimedRecord.id, (current) => ({
@@ -125,25 +129,62 @@ async function admitQueuedRun(
       principalKind: principalKindFor(claimedRecord),
       amountMicroUsd: claimedRecord.reservedMicroUsd
     });
-    // Once scheduler delivery begins, an exception is not proof that enqueue
-    // failed. Keep the durable queued record and lease for maintenance retry;
-    // the processing CAS ensures delayed/duplicate workflows cannot both run
-    // the paid pipeline.
-    schedulingStarted = true;
+
+    // Permanently fence this product run before contacting Workflow. If this
+    // CAS commits but its acknowledgement is lost, start() is deliberately
+    // never called: recurring maintenance will terminate and clean the queued
+    // run after the recovery grace period.
+    failurePhase = "dispatch_claim_uncertain";
+    const dispatchClaim = await dependencies.store.claimAnalysisDispatch(
+      claimedRecord.id,
+      claim.admissionLeaseId,
+      options.now ?? new Date()
+    );
+    if (!dispatchClaim) {
+      return (await dependencies.store.get(claimedRecord.id)) ?? claimedRecord;
+    }
+    analysisDispatchClaimId = dispatchClaim.analysisDispatchClaimId;
+    claimedRecord = dispatchClaim.record;
+
+    // A thrown start() can mean Vercel accepted the Workflow and only its ACK
+    // was lost. The permanent claim therefore survives every outcome; neither
+    // API replay nor maintenance may issue another analysis dispatch.
+    failurePhase = "schedule_uncertain";
     const workflowRunId = await dependencies.schedule(claimedRecord.id);
-    return dependencies.store.update(claimedRecord.id, (current) => ({
-      ...current,
-      workflowRunId: workflowRunId ?? current.workflowRunId,
-      admissionLeaseId: null,
-      admissionLeaseExpiresAt: null,
-      updatedAt: new Date().toISOString()
-    }), claim);
+    const settled = await dependencies.store.settleAnalysisDispatch(
+      claimedRecord.id,
+      dispatchClaim.analysisDispatchClaimId,
+      {
+        status: workflowRunId === null ? "not_dispatched" : "scheduled",
+        workflowRunId,
+        uncertainAt: workflowRunId === null ? options.now ?? new Date() : null
+      },
+      options.now ?? new Date()
+    );
+    return settled ?? (await dependencies.store.get(claimedRecord.id)) ?? claimedRecord;
   } catch (error) {
+    if (failurePhase === "schedule_uncertain" && analysisDispatchClaimId !== null) {
+      try {
+        await dependencies.store.settleAnalysisDispatch(
+          claimedRecord.id,
+          analysisDispatchClaimId,
+          {
+            status: "dispatch_uncertain",
+            workflowRunId: null,
+            uncertainAt: options.now ?? new Date()
+          },
+          options.now ?? new Date()
+        );
+      } catch {
+        // The original claim remains permanent even if recording the outcome
+        // also loses its ACK. Maintenance recognizes stale `dispatching` rows.
+      }
+    }
     throw new AdmissionAttemptError(
       error,
       claimedRecord,
       claim,
-      schedulingStarted ? "schedule_uncertain" : "preflight"
+      failurePhase
     );
   }
 }
@@ -193,6 +234,61 @@ async function failAdmission(
   return { record: failed, failureApplied: true };
 }
 
+function hasPermanentAnalysisDispatchFence(record: RunRecord): boolean {
+  // workflowRunId covers rows created by the pre-fence release. Migration 0008
+  // backfills those rows, while this fallback keeps in-memory upgrades safe.
+  return record.analysisDispatchClaimId !== null || record.workflowRunId !== null;
+}
+
+async function failStrandedAnalysisDispatch(
+  record: RunRecord,
+  dependencies: Omit<AdmissionDependencies, "schedule">,
+  now: Date
+): Promise<{ record: RunRecord; failureApplied: boolean }> {
+  const failure = new AppError(
+    "ANALYSIS_INCOMPLETE",
+    "Analysis workflow delivery could not be confirmed. The run was not redispatched and was handed to maintenance for application-controlled source cleanup.",
+    { httpStatus: 503, retryable: false }
+  );
+  const failed = await dependencies.store.update(record.id, (current) => {
+    const sameDispatch = record.analysisDispatchClaimId !== null
+      ? current.analysisDispatchClaimId === record.analysisDispatchClaimId
+      : record.workflowRunId !== null && current.workflowRunId === record.workflowRunId;
+    if (
+      current.status !== "queued" ||
+      !sameDispatch ||
+      current.paidProviderAttemptStartedAt !== null
+    ) return current;
+    return {
+      ...transitionRun(current, "failed", now),
+      admissionLeaseId: null,
+      admissionLeaseExpiresAt: null,
+      result: null,
+      error: {
+        code: failure.code,
+        message: failure.message,
+        retryable: failure.retryable,
+        request_id: failure.requestId
+      }
+    };
+  });
+  const failureApplied = failed.status === "failed" &&
+    failed.error?.request_id === failure.requestId;
+  if (!failureApplied) return { record: failed, failureApplied: false };
+  const cleaned = await cleanupRun(failed, dependencies.store, dependencies.uploadStorage, "failed", now);
+  // Delivery was uncertain, so retain the full reservation. Releasing it as a
+  // zero-cost failure could reopen the daily budget while an ACK-lost Workflow
+  // execution is still possible, even though the failed status fences that
+  // Workflow out of the paid provider pipeline.
+  if (cleaned.status === "cleanup_pending") {
+    await scheduleCleanupRetry(cleaned.id, {
+      store: dependencies.store,
+      now: () => now
+    });
+  }
+  return { record: cleaned, failureApplied: true };
+}
+
 export interface AdmissionRecoveryDependencies {
   config?: AppConfig;
   store?: RunStore;
@@ -228,17 +324,38 @@ export async function recoverUnscheduledRuns(
   for (const candidate of candidates) {
     dependencies.assertWithinDeadline?.();
     if (new Date(candidate.expiresAt) <= now) continue;
+    if (hasPermanentAnalysisDispatchFence(candidate)) {
+      const dispatchClaimedAt = candidate.analysisDispatchClaimedAt ?? candidate.updatedAt;
+      if (
+        new Date(dispatchClaimedAt).getTime() + ANALYSIS_DISPATCH_RECOVERY_GRACE_MS >
+        now.getTime()
+      ) {
+        deferredRunIds.push(candidate.id);
+        continue;
+      }
+      const failed = await failStrandedAnalysisDispatch(
+        candidate,
+        { config, store, budget, uploadStorage },
+        now
+      );
+      if (failed.failureApplied) failedRunIds.push(candidate.id);
+      else deferredRunIds.push(candidate.id);
+      dependencies.assertWithinDeadline?.();
+      continue;
+    }
     try {
       const recovered = await admitQueuedRun(candidate, {
         config, store, budget, uploadStorage, schedule
       }, {
-        now,
-        rescheduleBefore: new Date(now.getTime() - ADMISSION_RECOVERY_DELAY_MS)
+        now
       });
       if (recovered.workflowRunId !== null) recoveredRunIds.push(recovered.id);
     } catch (error) {
       const attempt = error instanceof AdmissionAttemptError ? error : null;
-      if (attempt?.phase === "schedule_uncertain") {
+      if (
+        attempt?.phase === "dispatch_claim_uncertain" ||
+        attempt?.phase === "schedule_uncertain"
+      ) {
         deferredRunIds.push(candidate.id);
         continue;
       }
@@ -300,7 +417,14 @@ export async function createRun(
     idempotencyKey,
     reservedMicroUsd
   });
-  if (created.created || (created.record.status === "queued" && created.record.workflowRunId === null)) {
+  if (
+    created.created ||
+    (
+      created.record.status === "queued" &&
+      created.record.workflowRunId === null &&
+      created.record.analysisDispatchClaimId === null
+    )
+  ) {
     const budget = dependencies.budget ?? getBudgetGuard(config);
     const uploadStorage = dependencies.uploadStorage ?? getUploadStorage(config);
     try {
@@ -313,7 +437,10 @@ export async function createRun(
       });
     } catch (error) {
       if (!(error instanceof AdmissionAttemptError)) throw error;
-      if (error.phase === "schedule_uncertain") {
+      if (
+        error.phase === "dispatch_claim_uncertain" ||
+        error.phase === "schedule_uncertain"
+      ) {
         created.record = (await store.get(error.record.id)) ?? error.record;
         return {
           record: created.record,

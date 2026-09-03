@@ -95,6 +95,15 @@ function scrubForAudit(record: RunRecord, now: Date): RunRecord {
     citationReceipts: [],
     manifests: [],
     workflowRunId: null,
+    analysisDispatchClaimId: null,
+    analysisDispatchClaimedAt: null,
+    analysisDispatchStatus: null,
+    analysisDispatchUncertainAt: null,
+    cleanupRetryClaimId: null,
+    cleanupRetryClaimedAt: null,
+    cleanupRetryWorkflowRunId: null,
+    cleanupRetryDispatchStatus: null,
+    cleanupRetryDispatchUncertainAt: null,
     admissionLeaseId: null,
     admissionLeaseExpiresAt: null,
     cleanupExpectedResourceIds: [],
@@ -110,7 +119,7 @@ function scrubForAudit(record: RunRecord, now: Date): RunRecord {
       ...receipt,
       resourceId: `sha256:${sha256Hex(receipt.resourceId)}`,
       detail: receipt.controlScope === "provider"
-        ? "Provider retention and early-deletion capability remain unknown."
+        ? "No provider early-delete endpoint was found or verified; the release contract spike observed a seven-day upstream artifact expiry with ZDR disabled."
         : receipt.resourceKind === "source_blob"
           ? "Application-controlled source-content purge and replay fence were confirmed; the identifier was scrubbed."
           : receipt.resourceKind === "page_text" || receipt.resourceKind === "parsed_markdown"
@@ -285,7 +294,15 @@ export async function expireDueRuns(
       options.assertWithinDeadline?.();
       continue;
     }
-    results.push(await expireRun(record, store, storage, now));
+    results.push(record.status === "cleanup_pending"
+      ? await cleanupRun(
+          record,
+          store,
+          storage,
+          record.terminalAfterCleanup ?? "expired",
+          now
+        )
+      : await expireRun(record, store, storage, now));
     options.assertWithinDeadline?.();
   }
   options.assertWithinDeadline?.();

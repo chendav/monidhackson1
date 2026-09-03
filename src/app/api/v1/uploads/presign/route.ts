@@ -3,7 +3,6 @@ import { apiErrorResponse, jsonResponse, readJson } from "@/lib/api/http";
 import { AppError } from "@/lib/errors";
 import { authenticateRequest, enforceMutationChallenge, MUTATION_ACTIONS } from "@/lib/security/auth";
 import { getUploadStorage } from "@/lib/storage/uploads";
-import { scheduleIncomingUploadSweep } from "@/lib/runs/scheduler";
 import { getConfig, getProductionReadiness } from "@/lib/config";
 
 export const runtime = "nodejs";
@@ -36,7 +35,10 @@ export async function POST(request: Request) {
       principalKind: principal.kind,
       origin: new URL(request.url).origin
     });
-    await scheduleIncomingUploadSweep(response.expires_at);
+    // The authenticated five-minute maintenance sweep owns abandoned grants.
+    // Avoid one durable Workflow per presign: the production health gate
+    // already fails closed when both independent maintenance triggers are
+    // stale, and storage fences make repeated sweeps idempotent.
     return jsonResponse(PresignUploadResponseSchema.parse(response), { status: 201, principal });
   } catch (error) {
     return apiErrorResponse(error, principal);

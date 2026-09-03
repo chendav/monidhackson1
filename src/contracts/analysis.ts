@@ -134,16 +134,28 @@ export const MonidCostProvenanceSchema = z.strictObject({
 });
 export type MonidCostProvenance = z.infer<typeof MonidCostProvenanceSchema>;
 
+export const CostProviderSchema = z.enum([
+  "monid",
+  "openai",
+  "railway_s3",
+  "vercel_blob",
+  "vercel",
+  "neon"
+]);
+
 export const CostEventSchema = z.object({
   attempt_id: z.string().uuid().nullable().optional(),
-  provider: z.enum(["monid", "openai", "railway_s3", "vercel_blob", "vercel", "neon"]),
+  provider: CostProviderSchema,
   operation: z.string().min(1),
   status: z.enum(["pending", "succeeded", "failed"]),
   actual_micro_usd: z.number().int().nonnegative().nullable(),
   estimated_micro_usd: z.number().int().nonnegative().nullable(),
   latency_ms: z.number().int().nonnegative(),
   retry_of: z.string().nullable(),
-  cost_provenance: MonidCostProvenanceSchema.nullable().optional()
+  cost_provenance: MonidCostProvenanceSchema.nullable().optional(),
+  estimation_basis: z.string().min(1).max(1_000).nullable().optional(),
+  pricing_source_url: z.url().nullable().optional(),
+  pricing_observed_at: z.iso.datetime().nullable().optional()
 });
 export type CostEvent = z.infer<typeof CostEventSchema>;
 
@@ -191,8 +203,12 @@ export const AnalysisResultSchema = z.object({
   costs: z.object({
     currency: z.literal("USD"),
     events: z.array(CostEventSchema),
+    completeness: z.enum(["complete", "partial"]),
+    unpriced_providers: z.array(CostProviderSchema),
+    not_applicable_providers: z.array(CostProviderSchema),
     actual_micro_usd: z.number().int().nonnegative(),
     estimated_micro_usd: z.number().int().nonnegative(),
+    known_subtotal_micro_usd: z.number().int().nonnegative(),
     total_micro_usd: z.number().int().nonnegative(),
     includes_failed_attempts: z.boolean()
   }),
