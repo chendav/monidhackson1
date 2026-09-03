@@ -1,0 +1,63 @@
+import { describe, expect, it } from "vitest";
+import { getConfig } from "@/lib/config";
+import { sha256Hex } from "@/lib/crypto";
+import { redactForLog } from "@/lib/logging";
+import { InMemoryRunStore } from "@/lib/runs/store";
+import { authenticateRequest } from "@/lib/security/auth";
+import { InMemoryBudgetGuard } from "@/lib/security/budget";
+
+const config = getConfig({
+  NODE_ENV: "test",
+  SESSION_SIGNING_SECRET: "test-session-signing-secret-that-is-long-enough",
+  IP_HASH_SECRET: "test-ip-hash-secret",
+  MAX_RUN_COST_MICRO_USD: "1000",
+  DAILY_COST_CAP_MICRO_USD: "2000",
+  GUEST_RUNS_PER_HOUR: "2",
+  API_RUNS_PER_HOUR: "10"
+});
+
+const requestBody = {
+  documents: [{ role: "base" as const, source: { type: "url" as const, url: "https://canadabuys.canada.ca/a.pdf" } }]
+};
+
+describe("security, idempotency, quotas, and budget", () => {
+  it("authenticates configured API keys by SHA without retaining the token", () => {
+    const token = "top-secret-api-token";
+    const apiConfig = { ...config, API_KEY_SHA256: sha256Hex(token) };
+    const principal = authenticateRequest(new Request("https://app.test/api", {
+      headers: { authorization: `Bearer ${token}` }
+    }), { config: apiConfig });
+    expect(principal.kind).toBe("api");
+    expect(principal.id).not.toContain(token);
+  });
+
+  it("redacts sensitive fields and large raw strings", () => {
+    expect(redactForLog({ authorization: "Bearer secret", source_url: "signed", safe: "ok" }))
+      .toEqual({ authorization: "[REDACTED]", source_url: "[REDACTED]", safe: "ok" });
+  });
+
+  it("enforces hourly quotas, per-run caps, and daily reservation caps", async () => {
+    const guard = new InMemoryBudgetGuard(config);
+    await guard.reserve({ runId: crypto.randomUUID(), quotaKey: "ip:a", principalKind: "guest", amountMicroUsd: 800, now: new Date("2026-09-02T01:00:00Z") });
+    await guard.reserve({ runId: crypto.randomUUID(), quotaKey: "ip:a", principalKind: "guest", amountMicroUsd: 800, now: new Date("2026-09-02T01:01:00Z") });
+    await expect(guard.reserve({ runId: crypto.randomUUID(), quotaKey: "ip:a", principalKind: "guest", amountMicroUsd: 1, now: new Date("2026-09-02T01:02:00Z") }))
+      .rejects.toMatchObject({ code: "RATE_LIMITED" });
+    await expect(guard.reserve({ runId: crypto.randomUUID(), quotaKey: "ip:b", principalKind: "guest", amountMicroUsd: 1001, now: new Date("2026-09-02T01:02:00Z") }))
+      .rejects.toMatchObject({ code: "BUDGET_EXCEEDED" });
+    await expect(guard.reserve({ runId: crypto.randomUUID(), quotaKey: "ip:b", principalKind: "guest", amountMicroUsd: 500, now: new Date("2026-09-02T01:03:00Z") }))
+      .rejects.toMatchObject({ code: "BUDGET_EXCEEDED" });
+  });
+
+  it("deduplicates identical requests and rejects idempotency-key reuse with different input", async () => {
+    const store = new InMemoryRunStore();
+    const first = await store.create({ ownerId: "guest:a", quotaKey: "ip:a", input: requestBody, idempotencyKey: "request-123", reservedMicroUsd: 100 });
+    const replay = await store.create({ ownerId: "guest:a", quotaKey: "ip:a", input: requestBody, idempotencyKey: "request-123", reservedMicroUsd: 100 });
+    expect(replay.created).toBe(false);
+    expect(replay.record.id).toBe(first.record.id);
+    await expect(store.create({
+      ownerId: "guest:a", quotaKey: "ip:a",
+      input: { documents: [{ role: "base", source: { type: "url", url: "https://canadabuys.canada.ca/b.pdf" } }] },
+      idempotencyKey: "request-123", reservedMicroUsd: 100
+    })).rejects.toMatchObject({ httpStatus: 409 });
+  });
+});
