@@ -1,15 +1,48 @@
 import { AnalysisResultSchema, type AnalysisResult, type Citation } from "@/contracts";
 
 export const EDMONTON_SHA256 = "2a769c87c80d5e958b0c99d0bd0107b34cfbeddb9bb0c15c2f2b3dc609adc9c6";
+export const EDMONTON_SOURCE_URL =
+  "https://canadabuys.canada.ca/sites/default/files/webform/tender_notice/6123/100022184a---rfp.pdf";
 export const EDMONTON_PAGES = 55;
 export const EDMONTON_PRINTED_BODY_PAGES = 47;
 export const EDMONTON_FORM_PHYSICAL_PAGES = [48, 49, 50, 51, 52, 53, 54, 55] as const;
+export const EDMONTON_ACROFORM_UNIQUE_FIELDS = 221;
+export const EDMONTON_WIDGETS = 231;
+export const EDMONTON_FORM_WIDGETS_BY_PAGE = Object.freeze({
+  48: 1,
+  49: 1,
+  50: 1,
+  51: 21,
+  52: 63,
+  53: 67,
+  54: 49,
+  55: 28
+} as const);
+
+export const EDMONTON_GOLDEN_PROVENANCE = Object.freeze({
+  kind: "manually_frozen_public_sample" as const,
+  live_provider_proof: false,
+  verified_against_official_pdf_sha256: EDMONTON_SHA256,
+  verified_at: "2026-09-02"
+});
+
+const EDMONTON_PRICING_BLANK_COUNTS = Object.freeze({ 40: 14, 41: 10, 42: 12 } as const);
+export const EDMONTON_PRICING_BLANK_AMOUNTS = Object.freeze(
+  Object.entries(EDMONTON_PRICING_BLANK_COUNTS).flatMap(([page, count]) =>
+    Array.from({ length: count }, (_, index) => ({
+      id: `p${page}-blank-${String(index + 1).padStart(2, "0")}`,
+      pdf_page_1based: Number(page),
+      value: null,
+      status: "unknown" as const
+    }))
+  )
+);
 
 function citation(page: number, quote: string, section: string | null = null): Citation {
   return {
     document_sha256: EDMONTON_SHA256,
     document_name: "edmonton-100022184-A.pdf",
-    source_url: null,
+    source_url: EDMONTON_SOURCE_URL,
     pdf_page_1based: page,
     printed_page_label: page <= 47 ? `${page} of 47` : `${page - 47}/8`,
     section,
@@ -29,6 +62,7 @@ export const edmontonGolden = Object.freeze({
   mandatoryCriteria: 4,
   m3MaximumResources: 3,
   pricingValue: null,
+  pricingBlankAmounts: EDMONTON_PRICING_BLANK_AMOUNTS,
   selectionMethod: "Lowest evaluated price",
   securityAnnexReferenced: "D",
   securityAnnexPresent: "E",
@@ -92,6 +126,15 @@ export function createEdmontonSampleResult(): AnalysisResult {
       citations: [citation(1, "Solicitation Closes At 02 :00 PM / 14 h Monday - June 19, 2023", "Solicitation closes")]
     },
     {
+      id: "security-afr-registration",
+      category: "security",
+      status: "active",
+      text: "Provide the Contract Security Program Application for Registration (AFR); missing bid-closing information may be completed only within the Contracting Authority's deadline.",
+      evidence_needed: "Completed AFR form and any follow-up information requested by the Contracting Authority.",
+      consequence: "Failure to provide requested AFR information within the allowed timeframe makes the bid non-compliant.",
+      citations: [citation(15, "the Bidder must provide a completed Contract Security Program Application for Registration (AFR) form at ANNEX F", "5.2.2")]
+    },
+    {
       id: "security-organization",
       category: "security",
       status: "active",
@@ -99,6 +142,15 @@ export function createEdmontonSampleResult(): AnalysisResult {
       evidence_needed: "Valid organization security clearance.",
       consequence: "Security readiness is a bid-closing condition.",
       citations: [citation(16, "the Bidder must hold a valid organization security clearance", "6.1")]
+    },
+    {
+      id: "security-dos-contract",
+      category: "security",
+      status: "active",
+      text: "During contract performance, the contractor must continuously hold a valid Designated Organization Screening (DOS).",
+      evidence_needed: "Valid DOS issued by the Contract Security Program.",
+      consequence: "The contractor cannot satisfy the resulting contract security clause without DOS.",
+      citations: [citation(17, "The Contractor must, at all times during the performance of the Contract, hold a valid Designated Organization Screening (DOS)", "7.3.1")]
     },
     {
       id: "security-personnel",
@@ -140,20 +192,71 @@ export function createEdmontonSampleResult(): AnalysisResult {
       finding: "The source pricing cells are blank placeholders, so the tender does not state bidder prices.",
       impact: "Treating blanks as zero would create a materially false cost conclusion.",
       recommended_action: "Complete every required pricing field and retain blanks as unknown until bidder input exists.",
-      citations: [citation(40, "Total $_______________", "Annex C")]
+      citations: [citation(40, "Contract Initial Period: From Contract Award to March 31, 2024 File Bay Models Quantities Annual Inspection Cost Stream 1 - Montel 49 $_______________", "Annex C")]
     }
   ];
+
+  const claims: AnalysisResult["claims"] = [
+    {
+      claim_id: "scope-file-bays",
+      claim_text: "Service Canada requires repair and maintenance for file bays in Edmonton.",
+      claim_type: "source",
+      status: "active",
+      confidence: 1,
+      citations: [citation(4, "Service Canada requires Repair and Maintenance contract(s) for various File Bays", "1.2.1")],
+      formula_and_inputs: null
+    },
+    {
+      claim_id: "printed-vs-physical-pages",
+      claim_text: "The main solicitation is printed as 47 pages and is followed by an eight-page registration form, for 55 physical PDF pages.",
+      claim_type: "derived",
+      status: "active",
+      confidence: 1,
+      citations: [citation(47, "Page 47 of 47", null), citation(55, "Page 8/8", null)],
+      formula_and_inputs: { formula: "47 + 8", inputs: { solicitation_pages: 47, form_pages: 8 } }
+    }
+  ];
+
+  const evaluation: AnalysisResult["evaluation"] = {
+    mandatory_gate: true,
+    rated_threshold: null,
+    technical_weight: null,
+    financial_weight: null,
+    selection_method: edmontonGolden.selectionMethod,
+    citations: [citation(14, "The responsive bid with the lowest evaluated price will be recommended for award of a contract.", "4.2.1")]
+  };
+
+  const conflicts: AnalysisResult["conflicts"] = [{
+    id: "conflict-security-annex-letter",
+    topic: "Security Requirements Checklist annex letter",
+    status: "conflicted",
+    candidate_values: ["Annex D", "Annex E"],
+    safe_answer: "Treat the checklist as required but obtain written confirmation of its controlling annex letter.",
+    citations: risks[0].citations
+  }];
+
+  const criticalCitationGroups = [
+    ...claims.map((claim) => claim.citations),
+    ...requirements.map((requirement) => requirement.citations),
+    evaluation.citations,
+    ...risks.map((risk) => risk.citations),
+    ...conflicts.map((conflict) => conflict.citations)
+  ];
+  const citationInstances = criticalCitationGroups.flat();
+  const pagesCovered = new Set(
+    citationInstances.flatMap((item) => item.pdf_page_1based === null ? [] : [item.pdf_page_1based])
+  ).size;
 
   const result: AnalysisResult = {
     schema_version: "1.0",
     source_scope: "document_only",
-    package_completeness: "verified",
+    package_completeness: "unverified",
     document_manifest: [{
       document_id: "10002218-4a00-4000-8000-000000000001",
       role: "base",
       source_type: "url",
       source_name: "edmonton-100022184-A.pdf",
-      source_url: null,
+      source_url: EDMONTON_SOURCE_URL,
       sha256: EDMONTON_SHA256,
       pages: EDMONTON_PAGES,
       language: "en",
@@ -172,57 +275,27 @@ export function createEdmontonSampleResult(): AnalysisResult {
       submission_method: "Email",
       current_selection_method: edmontonGolden.selectionMethod
     },
-    claims: [
-      {
-        claim_id: "scope-file-bays",
-        claim_text: "Service Canada requires repair and maintenance for file bays in Edmonton.",
-        claim_type: "source",
-        status: "active",
-        confidence: 1,
-        citations: [citation(4, "Service Canada requires Repair and Maintenance contract(s) for various File Bays", "1.2.1")],
-        formula_and_inputs: null
-      },
-      {
-        claim_id: "printed-vs-physical-pages",
-        claim_text: "The main solicitation is printed as 47 pages and is followed by an eight-page registration form, for 55 physical PDF pages.",
-        claim_type: "derived",
-        status: "active",
-        confidence: 1,
-        citations: [citation(47, "Page 47 of 47", null), citation(55, "Page 8/8", null)],
-        formula_and_inputs: { formula: "47 + 8", inputs: { solicitation_pages: 47, form_pages: 8 } }
-      }
-    ],
+    claims,
     requirements,
-    evaluation: {
-      mandatory_gate: true,
-      rated_threshold: null,
-      technical_weight: null,
-      financial_weight: null,
-      selection_method: edmontonGolden.selectionMethod,
-      citations: [citation(14, "The responsive bid with the lowest evaluated price will be recommended for award of a contract.", "4.2.1")]
-    },
+    evaluation,
     risks,
-    conflicts: [{
-      id: "conflict-security-annex-letter",
-      topic: "Security Requirements Checklist annex letter",
-      status: "conflicted",
-      candidate_values: ["Annex D", "Annex E"],
-      safe_answer: "Treat the checklist as required but obtain written confirmation of its controlling annex letter.",
-      citations: risks[0].citations
-    }],
+    conflicts,
     clarification_questions: ["Is the Security Requirements Checklist correctly designated Annex E rather than Annex D?"],
     decision_readiness: "needs_clarification",
     blocking_unknowns: ["Bidder-specific prices remain blank.", "The security annex letter is inconsistent."],
     quality: {
       pages_total: EDMONTON_PAGES,
-      pages_covered: 8,
-      critical_claims: 12,
-      critical_claims_cited: 12,
-      citations_verified: 16,
+      pages_covered: pagesCovered,
+      critical_claims: criticalCitationGroups.length,
+      critical_claims_cited: criticalCitationGroups.filter(
+        (group) => group.length > 0 && group.every((item) => item.verified && item.pdf_page_1based !== null)
+      ).length,
+      citations_verified: citationInstances.filter((item) => item.verified).length,
       unsupported_items_removed: 0,
       search_events: 0,
       follow_embedded_link_events: 0,
       warnings: [
+        "This is a manually frozen public sample, not proof of a live provider run.",
         "Sample facts were verified against SHA-bound physical PDF pages.",
         "Source prices are blank and remain unknown, not zero.",
         "Provider retention is unknown; this sample used no provider upload."
