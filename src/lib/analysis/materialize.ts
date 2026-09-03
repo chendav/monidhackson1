@@ -6,7 +6,11 @@ import {
   type DocumentManifest
 } from "@/contracts";
 import type { DraftAnalysis } from "@/lib/analysis/draft";
-import { deriveDeadlineFactKey, reconcileVersionedFacts } from "@/lib/analysis/reconciliation";
+import {
+  deriveDeadlineFactKey,
+  deriveSourceFactKey,
+  reconcileVersionedFacts
+} from "@/lib/analysis/reconciliation";
 import {
   allCitationsVerified,
   assertionTokensSupportedByCitations,
@@ -45,16 +49,6 @@ function duplicateIds<T>(values: T[], getId: (value: T) => string): Set<string> 
   return new Set([...counts].flatMap(([id, count]) => count > 1 ? [id] : []));
 }
 
-function citationsDescribeSameSourceFact(left: Citation, right: Citation) {
-  if (
-    left.document_sha256 !== right.document_sha256 ||
-    left.pdf_page_1based === null || left.pdf_page_1based !== right.pdf_page_1based
-  ) return false;
-  const leftQuote = normalizeEvidenceText(left.evidence_quote);
-  const rightQuote = normalizeEvidenceText(right.evidence_quote);
-  return leftQuote === rightQuote || leftQuote.includes(rightQuote) || rightQuote.includes(leftQuote);
-}
-
 function significantWords(value: string) {
   const ignored = new Set([
     "a", "an", "and", "are", "as", "at", "be", "been", "by", "for", "from", "has", "have",
@@ -72,64 +66,245 @@ function significantWords(value: string) {
  */
 function proseAssertionSupportedByCitations(assertion: string, citations: Citation[]) {
   const normalizedAssertion = normalizeEvidenceText(assertion);
-  const normalizedEvidence = normalizeEvidenceText(citations.map((citation) => citation.evidence_quote).join(" "));
-  if (normalizedAssertion.length >= 3 && normalizedEvidence.includes(normalizedAssertion)) return true;
   const words = significantWords(assertion);
-  const evidenceWords = new Set(significantWords(normalizedEvidence));
-  return words.length === 0 || words.every((word) => evidenceWords.has(word));
+  const scalarKinds = new Map<string, number>();
+  for (const token of extractAssertionTokens(assertion)) {
+    const kind = token.split(":", 1)[0];
+    scalarKinds.set(kind, (scalarKinds.get(kind) ?? 0) + 1);
+  }
+  const hasMultiValueScalarRole = [...scalarKinds.values()].some((count) => count > 1);
+  const assertionIsNegative = NEGATIVE_OR_EXCLUSIVE_ASSERTION.test(normalizePolarityText(assertion));
+  const evidenceSpans = citations.flatMap((citation) =>
+    normalizePolarityText(citation.evidence_quote)
+      .split(/(?<!a\.m)(?<!p\.m)\.\s+|[;\n]+|\b(?:while|whereas|but|although|yet)\b|\s+and\s+(?=(?:the|a|an|this|that|these|those|bidder|offeror|proponent|tenderer|contractor|supplier|vendor)\s+)/i)
+      .map((span) => span.trim())
+      .filter(Boolean)
+  );
+
+  return evidenceSpans.some((span) => {
+    const spanIsNegative = NEGATIVE_OR_EXCLUSIVE_ASSERTION.test(span);
+    if (spanIsNegative !== assertionIsNegative) return false;
+    if (assertionIsDefinitive(assertion) && !assertionIsDefinitive(span)) return false;
+    const assertionTokenSet = extractAssertionTokens(assertion);
+    const sourceTokenSet = extractAssertionTokens(span);
+    const relationCompletenessPrefixes = [
+      "bound:", "currency:", "magnitude:", "percent:", "date:", "time:",
+      "utc-offset:"
+    ];
+    if ([...sourceTokenSet].some((token) =>
+      relationCompletenessPrefixes.some((prefix) => token.startsWith(prefix)) &&
+      !assertionTokenSet.has(token)
+    )) return false;
+    if (normalizedAssertion.length >= 3 && span.includes(normalizedAssertion)) return true;
+    // A bag of words cannot prove which subject owns which value when two
+    // values of the same kind appear in one relation. Require the asserted
+    // relation verbatim unless a field-specific role parser validates it.
+    if (hasMultiValueScalarRole) return false;
+    if (/\b(?:exceeds?|above|below|before|after|precedes?|follows?|greater than|less than|replaces?|supersedes?)\b/.test(normalizedAssertion)) {
+      return false;
+    }
+    const evidenceWords = new Set(significantWords(span));
+    return words.length === 0 || words.every((word) => evidenceWords.has(word));
+  });
 }
 
-function semanticDependencyTokens(value: string) {
-  const aliases = new Map([
-    ["deadline", "closing"], ["due", "closing"], ["late", "closing"],
-    ["bid", "submission"], ["bids", "submission"], ["bidder", "submission"],
-    ["bidders", "submission"], ["proposal", "submission"], ["proposals", "submission"],
-    ["tender", "submission"], ["term", "period"], ["duration", "period"]
+function riskDeadlineFactKeysFromFinding(value: string) {
+  const normalized = normalizeEvidenceText(value);
+  const keys = new Set<"deadline:questions" | "deadline:solicitation">();
+  const questionSubject = /\b(?:questions?|enquir(?:y|ies)|clarifications?|q\s*(?:&|and)\s*a)\b/;
+  const timingOrConsequence = /\b(?:close(?:s|d)?|closing|cut[ -]?off|deadline|due|received|submit(?:ted|ting|s)?|before|after|late|reject(?:ed|ion)?|non-compliant|noncompliant)\b/;
+  if (questionSubject.test(normalized) && timingOrConsequence.test(normalized)) {
+    keys.add("deadline:questions");
+  }
+  const solicitationSubject = /\b(?:solicitation|bids?|proposals?|tenders?|offers?|submissions?|closing (?:date|time)|late bids?)\b/;
+  if (solicitationSubject.test(normalized) && timingOrConsequence.test(normalized)) {
+    keys.add("deadline:solicitation");
+  }
+  if (keys.size === 0 && /\b(?:deadline|cut[ -]?off|closing (?:date|time))\b/.test(normalized)) {
+    // A bare "cutoff" is genuinely ambiguous: it may mean the solicitation
+    // or the question period. Preserve both candidates so a stale scalar is
+    // withheld if either underlying deadline was superseded.
+    keys.add("deadline:questions");
+    keys.add("deadline:solicitation");
+  }
+  return keys;
+}
+
+export type RiskLineage =
+  | { kind: "bound"; key: string }
+  | { kind: "ambiguous"; candidateKeys: string[] }
+  | { kind: "unbound" };
+
+function riskEvidenceSpans(citations: Citation[], documentSha256: string) {
+  return citations
+    .filter((citation) => citation.verified && citation.document_sha256 === documentSha256)
+    .flatMap((citation) => normalizeEvidenceText(citation.evidence_quote)
+      .split(/(?<!a\.m)(?<!p\.m)\.\s+|[;\n]+|\b(?:while|whereas|but|although|yet)\b/i))
+    .map((span) => span.trim())
+    .filter(Boolean);
+}
+
+function spanSupportsRiskFinding(span: string, finding: string) {
+  const scalarWords = new Set([
+    "january", "february", "march", "april", "may", "june", "july", "august",
+    "september", "october", "november", "december", "monday", "tuesday", "wednesday",
+    "thursday", "friday", "saturday", "sunday", "mdt", "mst", "edt", "est", "cdt", "cst",
+    "pdt", "pst", "utc", "gmt", "cad", "usd", "eur", "gbp"
   ]);
-  return new Set(significantWords(value).map((word) => aliases.get(word) ?? word));
+  const relationWords = significantWords(finding).filter((word) => !scalarWords.has(word));
+  if (relationWords.length === 0) return false;
+  const spanWords = new Set(significantWords(span).filter((word) => !scalarWords.has(word)));
+  return relationWords.every((word) => spanWords.has(word));
+}
+
+function riskObjectKeysFromFinding(value: string) {
+  const normalized = normalizeEvidenceText(value);
+  const keys = new Set<string>();
+  if (/\bclaim\b.{0,60}\b(?:exceeds?|above|greater than)\b.{0,60}\b(?:available\s+)?protection\b/.test(normalized)) {
+    keys.add("insurance:coverage");
+  }
+  const insuranceContext = /\b(?:insurance|insured|commercial general liability|professional liability|errors and omissions|e\s*&\s*o|cgl)\b/.test(normalized);
+  if (insuranceContext) {
+    if (/\b(?:contact|representative|attention)\b/.test(normalized)) keys.add("insurance:contact");
+    if (/\bdeductible\b/.test(normalized)) keys.add("insurance:deductible");
+    if (/\bcertificat(?:e|ion)\b/.test(normalized)) keys.add("insurance:certificate");
+    const hasProfessionalLiability = /\b(?:professional liability|errors and omissions|e\s*&\s*o)\b/.test(normalized);
+    const hasCgl = /\b(?:commercial general liability|cgl)\b/.test(normalized);
+    if (hasProfessionalLiability) {
+      keys.add("insurance:professional-liability:coverage");
+    }
+    if (hasCgl) {
+      keys.add("insurance:cgl:coverage");
+    }
+    const genericCoverage = /\b(?:insurance|insured)\b.{0,60}\b(?:coverage|policy\s+limit|coverage\s+limit|insured\s+amount|liability\s+coverage)\b/.test(normalized) ||
+      /\b(?:coverage|policy\s+limit|coverage\s+limit|insured\s+amount|liability\s+coverage)\b.{0,60}\b(?:insurance|insured)\b/.test(normalized);
+    if (!hasProfessionalLiability && !hasCgl &&
+      !/\b(?:contact|representative|attention|deductible|certificat(?:e|ion))\b/.test(normalized) &&
+      genericCoverage) keys.add("insurance:coverage");
+  }
+  if (/\bcontract\b/.test(normalized) &&
+    /\b(?:end date|expiry|expiration|terminat(?:e|ion)|period ends?|contract term)\b/.test(normalized)) {
+    keys.add("contract:end");
+  }
+  if (/\b(?:projection|projections|forecast|forecasts)\b/.test(normalized) &&
+    /\b(?:horizon|end year|endpoint|extend|through|until|years? (?:out|beyond)|to 20\d{2})\b/.test(normalized)) {
+    keys.add("projection:horizon");
+  }
+  return keys;
+}
+
+export function resolveRiskLineage(
+  finding: string,
+  citations: Citation[],
+  documentSha256: string
+): RiskLineage {
+  const evidenceSpans = riskEvidenceSpans(citations, documentSha256);
+  const findingSpans = normalizeEvidenceText(finding)
+    .split(/(?<!a\.m)(?<!p\.m)\.\s+|[;\n]+|\b(?:while|whereas|but|although|yet)\b/i)
+    .map((span) => span.trim())
+    .filter(Boolean);
+  if (findingSpans.length === 0 || findingSpans.some((findingSpan) =>
+    !evidenceSpans.some((evidenceSpan) => spanSupportsRiskFinding(evidenceSpan, findingSpan))
+  )) return { kind: "unbound" };
+
+  const keys = new Set<string>();
+  for (const findingSpan of findingSpans) {
+    for (const key of riskObjectKeysFromFinding(findingSpan)) keys.add(key);
+    for (const key of riskDeadlineFactKeysFromFinding(findingSpan)) keys.add(key);
+    const sourceKey = deriveSourceFactKey({
+      topic: "",
+      value: findingSpan,
+      documentSha256,
+      citations
+    });
+    if (sourceKey) keys.add(sourceKey);
+  }
+  if (keys.size === 1) return { kind: "bound", key: [...keys][0] };
+  if (keys.size > 1) return { kind: "ambiguous", candidateKeys: [...keys].toSorted() };
+  return { kind: "unbound" };
+}
+
+function riskLineageFromDerivedText(
+  value: string,
+  citations: Citation[],
+  documentSha256: string
+): RiskLineage {
+  // Impact and recommended action are model-authored. They may inherit the
+  // verified finding's lineage, but may establish a different one only when
+  // their own relation prose is present in the verified source.
+  if (!proseAssertionSupportedByCitations(value, citations)) return { kind: "unbound" };
+  return resolveRiskLineage(value, citations, documentSha256);
 }
 
 function riskSemanticallyDependsOnSupersededFact(
-  risk: { topic: string; value: string; documentSha256: string; citations: Citation[] },
+  risk: {
+    topic: string; finding: string; impact: string; recommendedAction: string;
+    documentSha256: string; citations: Citation[];
+  },
   superseded: {
     topic: string; factKey?: string; value: string; documentSha256: string; citations: Citation[];
   },
   currentValues: string[]
 ) {
-  if (risk.documentSha256 !== superseded.documentSha256) return false;
-  if (risk.citations.some((riskCitation) => superseded.citations.some((sourceCitation) =>
-    citationsDescribeSameSourceFact(riskCitation, sourceCitation)))) return true;
-
-  const riskObjectiveTokens = extractAssertionTokens(risk.value);
+  if (risk.documentSha256 !== superseded.documentSha256) return null;
   const sourceObjectiveTokens = extractAssertionTokens(superseded.value);
-  if (riskObjectiveTokens.size === 0 || sourceObjectiveTokens.size === 0) return false;
+  if (sourceObjectiveTokens.size === 0) return null;
   const currentObjectiveTokens = new Set(currentValues.flatMap((value) => [...extractAssertionTokens(value)]));
   const invalidatedSourceTokens = currentValues.length > 0
     ? [...sourceObjectiveTokens].filter((token) => !currentObjectiveTokens.has(token))
     : [...sourceObjectiveTokens];
-  const sharedObjectiveTokens = invalidatedSourceTokens.filter((token) => riskObjectiveTokens.has(token));
-  if (sharedObjectiveTokens.length === 0) return false;
-
-  // A risk that repeats the exact old date/time from a superseded temporal
-  // fact is stale regardless of the model-provided risk topic. Requiring the
-  // risk topic to agree would let topic drift preserve an obsolete deadline.
-  const sourceContext = normalizeEvidenceText([
-    superseded.topic,
-    superseded.value,
-    ...superseded.citations.map((citation) => citation.evidence_quote)
-  ].join(" "));
-  const sourceIsTemporal = superseded.factKey?.startsWith("deadline:") ||
-    /\b(?:closing|deadline|due|date|time|term|period|expir(?:y|ation)|delivery|milestone|schedule)\b/.test(sourceContext);
   const sourceDeadlineKey = superseded.factKey?.startsWith("deadline:") ? superseded.factKey : null;
-  const riskDeadlineKey = deriveDeadlineFactKey(risk.value, risk.citations);
-  if (sourceDeadlineKey && riskDeadlineKey && sourceDeadlineKey !== riskDeadlineKey) return false;
-  if (sourceIsTemporal && sharedObjectiveTokens.some((token) =>
-    /^(?:date|time|timezone|utc-offset):/.test(token)
-  )) return true;
-
-  const riskTopics = semanticDependencyTokens(`${risk.topic} ${risk.value}`);
-  const sourceTopics = semanticDependencyTokens(`${superseded.topic} ${superseded.value}`);
-  return [...riskTopics].some((token) => sourceTopics.has(token));
+  const sourceObjectKey = sourceDeadlineKey ?? superseded.factKey ?? deriveSourceFactKey({
+    topic: superseded.topic,
+    value: superseded.value,
+    documentSha256: superseded.documentSha256,
+    citations: superseded.citations
+  });
+  if (!sourceObjectKey) return null;
+  const findingLineage = resolveRiskLineage(risk.finding, risk.citations, risk.documentSha256);
+  const inheritFindingLineage = (derived: RiskLineage, value: string) =>
+    derived.kind === "bound" || findingLineage.kind !== "bound" ||
+      extractAssertionTokens(value).size > 0
+      ? derived
+      : findingLineage;
+  const components = [
+    { value: risk.finding, lineage: findingLineage },
+    {
+      value: risk.impact,
+      lineage: inheritFindingLineage(
+        riskLineageFromDerivedText(risk.impact, risk.citations, risk.documentSha256),
+        risk.impact
+      )
+    },
+    {
+      value: risk.recommendedAction,
+      lineage: inheritFindingLineage(
+        riskLineageFromDerivedText(risk.recommendedAction, risk.citations, risk.documentSha256),
+        risk.recommendedAction
+      )
+    }
+  ];
+  let matchingStaleComponent = false;
+  let ambiguous = false;
+  let unboundDerivedStaleScalar = false;
+  for (const [index, { value, lineage }] of components.entries()) {
+    const objectiveTokens = extractAssertionTokens(value);
+    if (!invalidatedSourceTokens.some((token) => objectiveTokens.has(token))) continue;
+    if (lineage.kind === "bound" && lineage.key === sourceObjectKey) {
+      matchingStaleComponent = true;
+    }
+    if (lineage.kind === "ambiguous" && lineage.candidateKeys.includes(sourceObjectKey)) {
+      ambiguous = true;
+    }
+    // Impact/action prose is model-authored. If it repeats an invalidated
+    // scalar but its own relation is absent from the source, it must not
+    // inherit the finding's otherwise valid lineage and remain publishable.
+    if (index > 0 && lineage.kind === "unbound") unboundDerivedStaleScalar = true;
+  }
+  if (matchingStaleComponent && findingLineage.kind === "bound" &&
+    findingLineage.key === sourceObjectKey) return "stale" as const;
+  if (matchingStaleComponent || unboundDerivedStaleScalar) return "mixed" as const;
+  return ambiguous ? "ambiguous" as const : null;
 }
 
 function evaluationCitationIsRelevant(field: EvaluationField, citation: Citation) {
@@ -159,6 +334,25 @@ const SELECTION_METHOD_SOURCE =
   "(highest\\s+combined\\s+rating|lowest\\s+evaluated\\s+(?:total\\s+)?price|" +
   "lowest\\s+(?:total\\s+)?price|best\\s+value|highest\\s+(?:technical\\s+)?score)";
 
+function normalizePolarityText(value: string) {
+  return normalizeEvidenceText(value)
+    .replace(/\bcan't\b/g, "cannot")
+    .replace(/\bwon't\b/g, "will not")
+    .replace(/\bain't\b/g, "is not")
+    .replace(/\b(is|are|was|were|has|have|had|does|do|did|would|should|could|must|may|might)n't\b/g, "$1 not");
+}
+
+const CONDITIONAL_ASSERTION = /\b(?:if|unless|when|once|provided(?: that)?|assuming|pending|contingent|conditional(?:ly)?\s+on|conditioned\s+on|on\s+condition\s+that|subject(?: only)?\s+to|only\s+(?:if|after)|in\s+the\s+event)\b|\b(?:following|after|on|upon|effective\s+(?:after|on|upon))\b.{0,60}\b(?:approval|approved|authorization|authorized|acceptance|accepted|funding|exercise|execution|option)\b/;
+const NON_DEFINITIVE_ASSERTION = /\b(?:may|might|can|could|would|should|proposed|proposal|draft|expected|anticipated|possible|potential|option|alternative)\b/;
+const NEGATIVE_OR_EXCLUSIVE_ASSERTION = /\bnot\b(?!\s+(?:less|more)\s+than\b|\s+exceed(?:ing)?\b)|\b(?:never|neither|nor|no longer|cannot|under no circumstances|anything but|everything but|other than|different from|unrelated to|without(?:\s+the\s+(?:use|application)\s+of)?|excluded?|optional)\b|\bno\s+(?!later\s+than\b|less\s+than\b|more\s+than\b)/;
+
+function assertionIsDefinitive(value: string) {
+  const normalized = normalizePolarityText(value);
+  return !NON_DEFINITIVE_ASSERTION.test(normalized) &&
+    !CONDITIONAL_ASSERTION.test(normalized) &&
+    !NEGATIVE_OR_EXCLUSIVE_ASSERTION.test(normalized);
+}
+
 function selectionMethodSignature(value: string): SelectionMethodSignature | null {
   const normalized = normalizeEvidenceText(value);
   const signatures = new Set<SelectionMethodSignature>();
@@ -174,23 +368,46 @@ function selectionMethodSignature(value: string): SelectionMethodSignature | nul
 }
 
 function selectionRelationsInCitation(citation: Citation) {
-  const quote = normalizeEvidenceText(citation.evidence_quote);
+  const quote = normalizePolarityText(citation.evidence_quote);
   const relations = new Set<SelectionMethodSignature>();
-  const withoutAnotherClause = "(?:(?![.;]|\\b(?:while|whereas|but)\\b).)";
-  const forward = new RegExp(
-    `\\b(?:award|selection|select(?:s|ed|ion)?|recommend(?:s|ed|ation)?)\\b` +
-    `${withoutAnotherClause}{0,180}?\\b${SELECTION_METHOD_SOURCE}\\b`,
-    "g"
-  );
-  const reverse = new RegExp(
-    `\\b${SELECTION_METHOD_SOURCE}\\b${withoutAnotherClause}{0,180}?` +
-    "\\b(?:will\\s+be\\s+(?:selected|recommended|awarded)|for\\s+award|basis\\s+of\\s+selection)\\b",
-    "g"
-  );
-  for (const expression of [forward, reverse]) {
-    for (const match of quote.matchAll(expression)) {
-      const signature = selectionMethodSignature(match[1]);
-      if (signature) relations.add(signature);
+  const negative = /\b(?:not|never|no longer|cannot|must not|shall not|excluded?|excluding|except(?:ed|ing)?|prohibited|other[ -]than|anything[ -]but|everything[ -]but|rather[ -]than|instead[ -]of|as[ -]opposed[ -]to|apart[ -]from|save(?: for)?|in[ -]lieu[ -]of|exclusive[ -]of|disregard(?:s|ed|ing)?|regardless[ -]of|by no means|without[ -]regard(?:[ -]to)?|irrespective(?:[ -]of)?)\b/;
+  const scoringContext = /\b(?:award|evaluation|scoring|rating|ranking|price|technical|financial)\s+points?\b|\b(?:ranking|proximity|difference|distance|variance)\s+(?:from|to)\b/;
+  const segments = quote
+    .split(/(?<!a\.m)(?<!p\.m)\.\s+|[;\n]+|\b(?:while|whereas|but)\b/)
+    .map((segment) => segment.trim())
+    .filter(Boolean);
+  const expressions = [
+    new RegExp(
+      `\\b(?:award|selection)\\b.{0,80}?\\b(?:uses?|based\\s+on|determined\\s+by|` +
+      `will\\s+be\\s+made\\s+to|shall\\s+be\\s+made\\s+to)\\b.{0,140}?` +
+      `\\b${SELECTION_METHOD_SOURCE}\\b`,
+      "g"
+    ),
+    new RegExp(
+      `\\b(?:selects?|recommends?|awards?)\\b.{0,140}?\\b${SELECTION_METHOD_SOURCE}\\b`,
+      "g"
+    ),
+    new RegExp(
+      `\\b${SELECTION_METHOD_SOURCE}\\b.{0,140}?` +
+      "\\b(?:will|shall)\\s+be\\s+(?:selected|recommended|awarded)\\b",
+      "g"
+    ),
+    new RegExp(
+      `\\b(?:bids?|offers?|proposals?|tenders?)\\b.{0,100}?\\bwith\\b.{0,100}?` +
+      `\\b${SELECTION_METHOD_SOURCE}\\b.{0,100}?` +
+      "\\b(?:(?:will|shall)\\s+be\\s+(?:selected|recommended|awarded)|for\\s+award)\\b",
+      "g"
+    )
+  ];
+  for (const segment of segments) {
+    if (!assertionIsDefinitive(segment) || negative.test(segment) || scoringContext.test(segment) || /\b(?:calculate|calculation|formula|financial points?)\b/.test(segment) &&
+      !/\b(?:selection|select(?:ed|ion)?|will be awarded|will be recommended)\b/.test(segment)) continue;
+    for (const expression of expressions) {
+      expression.lastIndex = 0;
+      for (const match of segment.matchAll(expression)) {
+        const signature = selectionMethodSignature(match[1]);
+        if (signature) relations.add(signature);
+      }
     }
   }
   return relations;
@@ -228,16 +445,25 @@ function submissionMethodSignatures(value: string) {
 }
 
 function submissionRelationClauses(citation: Citation) {
-  return normalizeEvidenceText(citation.evidence_quote)
-    .split(/(?<!a\.m)(?<!p\.m)\.\s+|[;,\n]+|\b(?:while|whereas|but)\b/)
-    .map((clause) => clause.trim())
-    .filter((clause) => {
-      const explicitLabel = /\bsubmission (?:method|portal|instructions?)\b/.test(clause);
+  const quote = normalizePolarityText(citation.evidence_quote);
+  const negative = /\b(?:not|never|no longer|cannot|must not|shall not|may not|prohibited|excluded?|excluding|except(?:ed|ing)?|other[ -]than|anything[ -]but|everything[ -]but|rather[ -]than|instead[ -]of|as[ -]opposed[ -]to|apart[ -]from|save(?: for)?|in[ -]lieu[ -]of|exclusive[ -]of|disregard(?:s|ed|ing)?|regardless[ -]of|by no means|will not be accepted|reject(?:ed|ion)?|unacceptable|invalid|non-compliant|noncompliant)\b/;
+  const relationClauses: string[] = [];
+  for (const sentence of quote.split(/(?<!a\.m)(?<!p\.m)\.\s+|[\n]+/)) {
+    if (!assertionIsDefinitive(sentence)) continue;
+    const topLevelLabel = /(?:^|[;])\s*submission method\s*:/.test(sentence);
+    for (const clause of sentence.split(/[;,]+|\b(?:while|whereas)\b/).map((item) => item.trim())) {
+      if (!clause || negative.test(clause)) continue;
+      const exactLabel = /(?:^|\s)submission method\s*:/.test(clause);
       const tenderSubject = /\b(?:bids?|proposals?|tenders?|offers?|responses?|submissions?)\b/.test(clause);
       const submitAction = /\b(?:submit(?:ted|ting|s)?|send|sent|upload(?:ed|ing|s)?|deliver(?:ed|ing|s)?|e-?mail(?:ed|ing|s)?|courier(?:ed|ing|s)?)\b/.test(clause);
-      const unrelatedSubject = /\b(?:questions?|enquir(?:y|ies)|clarifications?|invoices?|payments?|billing)\b/.test(clause);
-      return !unrelatedSubject && (explicitLabel || (tenderSubject && submitAction));
-    });
+      const unrelatedSubject = /\b(?:questions?|enquir(?:y|ies)|clarifications?|invoices?|payments?|billing|timesheets?)\b/.test(clause);
+      const tenderArtifact = /\b(?:bid|proposal|tender|offer|response|submission)\s+(?:security|bond|samples?|attachments?|copies|forms?|certificates?|appendix|schedule)\b/.test(clause);
+      const hasChannel = submissionMethodSignatures(clause).size > 0;
+      if (!unrelatedSubject && !tenderArtifact && (exactLabel || (tenderSubject && submitAction) ||
+        (topLevelLabel && hasChannel))) relationClauses.push(clause);
+    }
+  }
+  return relationClauses;
 }
 
 function citationSupportsSubmissionMethod(value: string, citation: Citation) {
@@ -280,6 +506,7 @@ function boundWeightValues(field: WeightField, citation: Citation): Set<number> 
   const clauses = quote.split(/(?:[,;+]|\b(?:and|while|whereas|versus|vs\.?)\b)/);
 
   for (const clause of clauses) {
+    if (!assertionIsDefinitive(clause)) continue;
     const labels = weightLabelsIn(clause);
     const percentages = explicitPercentages(clause);
     if (labels.size === 1 && labels.has(target) && percentages.length === 1) {
@@ -301,8 +528,10 @@ function boundWeightValues(field: WeightField, citation: Citation): Set<number> 
     `${numberPattern}(?:(?!\\b${otherPattern}\\b|${clauseBoundary}|\\d).){0,80}?\\b${targetPattern}\\b`,
     "g"
   );
-  for (const match of quote.matchAll(labelThenNumber)) values.add(Number(match[1]));
-  for (const match of quote.matchAll(numberThenLabel)) values.add(Number(match[1]));
+  if (assertionIsDefinitive(quote)) {
+    for (const match of quote.matchAll(labelThenNumber)) values.add(Number(match[1]));
+    for (const match of quote.matchAll(numberThenLabel)) values.add(Number(match[1]));
+  }
   return values;
 }
 
@@ -328,18 +557,24 @@ function citationThresholdBinding(citation: Citation): { minimums: Set<number>; 
   const outOf = /(?<![\d.])(\d+(?:\.\d+)?)\s*(?:points?)?\s*(?:out of|on (?:a )?scale of)\s*(?:a\s+possible\s+)?(\d+(?:\.\d+)?)(?![\d.])/g;
   const scaleOnly = /\b(?:out of|scale of|possible(?: score)?(?: of)?|maximum(?: score)?(?: of)?)\b[^\d]{0,30}(\d+(?:\.\d+)?)/g;
 
-  for (const match of quote.matchAll(minimumBefore)) minimums.add(Number(match[1]));
-  for (const match of quote.matchAll(minimumAfter)) minimums.add(Number(match[1]));
-  for (const match of quote.matchAll(requiredScore)) minimums.add(Number(match[1]));
-  for (const match of quote.matchAll(fraction)) {
-    minimums.add(Number(match[1]));
-    scales.add(Number(match[2]));
+  const affirmativeSpans = quote
+    .split(/(?<!a\.m)(?<!p\.m)\.\s+|[;,\n]+/)
+    .map((span) => span.trim())
+    .filter((span) => span && assertionIsDefinitive(span));
+  for (const span of affirmativeSpans) {
+    for (const match of span.matchAll(minimumBefore)) minimums.add(Number(match[1]));
+    for (const match of span.matchAll(minimumAfter)) minimums.add(Number(match[1]));
+    for (const match of span.matchAll(requiredScore)) minimums.add(Number(match[1]));
+    for (const match of span.matchAll(fraction)) {
+      minimums.add(Number(match[1]));
+      scales.add(Number(match[2]));
+    }
+    for (const match of span.matchAll(outOf)) {
+      minimums.add(Number(match[1]));
+      scales.add(Number(match[2]));
+    }
+    for (const match of span.matchAll(scaleOnly)) scales.add(Number(match[1]));
   }
-  for (const match of quote.matchAll(outOf)) {
-    minimums.add(Number(match[1]));
-    scales.add(Number(match[2]));
-  }
-  for (const match of quote.matchAll(scaleOnly)) scales.add(Number(match[1]));
   return { minimums, scales };
 }
 
@@ -353,7 +588,10 @@ function validatedEvaluationRule(
   const normalizedValue = normalizeEvidenceText(value);
   const combinedEvidence = normalizeEvidenceText(relevant.map((citation) => citation.evidence_quote).join(" "));
   if (field === "mandatory_gate") {
-    if (normalizedValue === "true") return relevant;
+    if (normalizedValue === "true") {
+      const affirmative = relevant.filter((citation) => assertionIsDefinitive(citation.evidence_quote));
+      return allCitationsVerified(affirmative) ? affirmative : null;
+    }
     if (normalizedValue === "false" && /\b(no|not|without)\b.{0,40}\bmandatory\b/.test(combinedEvidence)) {
       return relevant;
     }
@@ -387,7 +625,10 @@ function validatedEvaluationRule(
   if (field === "selection_method") {
     const expected = selectionMethodSignature(value);
     if (!expected) return null;
-    const boundCitations = relevant.filter((citation) => selectionRelationsInCitation(citation).has(expected));
+    const boundCitations = relevant.filter((citation) => {
+      const relations = selectionRelationsInCitation(citation);
+      return relations.size === 1 && relations.has(expected);
+    });
     return allCitationsVerified(boundCitations) ? boundCitations : null;
   }
   const words = significantWords(value);
@@ -419,7 +660,7 @@ const SUMMARY_TOPIC_PATTERNS = {
 } as const;
 
 type SummaryField = keyof typeof SUMMARY_TOPIC_PATTERNS;
-type AnchoredSpan = { full: string; value: string };
+type AnchoredSpan = { full: string; value: string; context: string };
 
 const STRONG_FIELD_ANCHORS: ReadonlyArray<readonly [string, SummaryField | "question_deadline"]> = [
   ["\\b(?:rfp|tender|solicitation)\\s+(?:title|name)\\b", "title"],
@@ -428,7 +669,7 @@ const STRONG_FIELD_ANCHORS: ReadonlyArray<readonly [string, SummaryField | "ques
   ["\\b(?:(?:solicitation|bid|tender)\\s+)?(?:closing date|closing time)|\\b(?:solicitation|bid|tender)\\s+close(?:s|d)?\\b|\\b(?:submission deadline|submission date|bid deadline|tender deadline|solicitation deadline)\\b", "closing_date"],
   ["\\b(?:questions?|enquir(?:y|ies)|clarifications?)\\b.{0,40}\\b(?:close|closes|closing|cut[ -]?off|deadline|due|received|submitted)\\b", "question_deadline"],
   ["\\bdeadline\\s+for\\s+(?:submitting\\s+)?(?:questions?|enquir(?:y|ies)|clarifications?)\\b", "question_deadline"],
-  ["\\b(?:q\\s*&\\s*a|question(?:s)?[- ]and[- ]answer(?:s)?)\\s+(?:close|closing|cut[ -]?off|deadline|due)\\b", "question_deadline"],
+  ["\\b(?:q\\s*(?:&|and)\\s*a|question(?:s)?[- ]and[- ]answer(?:s)?)\\s+(?:close|closing|cut[ -]?off|deadline|due)\\b", "question_deadline"],
   ["\\bsubmission (?:method|portal|instructions?)\\b", "submission_method"],
   ["\\b(?:selection|award)(?: method| basis| criterion| criteria)?\\b", "current_selection_method"]
 ];
@@ -457,7 +698,7 @@ function anchoredFieldSpans(field: SummaryField, quote: string): AnchoredSpan[] 
   if (!["title", "solicitation_number", "issuer", "closing_date", "submission_method",
     "current_selection_method"].includes(field)) {
     return SUMMARY_TOPIC_PATTERNS[field].test(quote)
-      ? [{ full: quote, value: quote }]
+      ? [{ full: quote, value: quote, context: quote }]
       : [];
   }
   const normalized = normalizeEvidenceText(quote);
@@ -481,7 +722,10 @@ function anchoredFieldSpans(field: SummaryField, quote: string): AnchoredSpan[] 
       .replace(/[\s,.:;=-]+$/g, "")
       .trim();
     if (!rawValue) return [];
-    return [{ full: sourceSpan, value: rawValue }];
+    const prefix = normalized.slice(0, anchor.start);
+    const previousBoundary = Math.max(prefix.lastIndexOf(". "), prefix.lastIndexOf(";"), prefix.lastIndexOf("\n"));
+    const context = normalized.slice(previousBoundary < 0 ? 0 : previousBoundary + 1, end).trim();
+    return [{ full: sourceSpan, value: rawValue, context }];
   });
 }
 
@@ -494,14 +738,22 @@ function citationSupportsSummaryValue(field: SummaryField, value: string, citati
   }
   if (field === "current_selection_method") {
     const expected = selectionMethodSignature(value);
-    return Boolean(expected && selectionRelationsInCitation(citation).has(expected) &&
+    const relations = selectionRelationsInCitation(citation);
+    return Boolean(expected && relations.size === 1 && relations.has(expected) &&
       assertionTokensSupportedByCitations(value, [citation]) &&
       proseAssertionSupportedByCitations(value, [citation]));
   }
   const spans = anchoredFieldSpans(field, citation.evidence_quote);
   return spans.some((span) => {
+    if (!assertionIsDefinitive(span.context)) return false;
     if (field === "closing_date") {
       if (/\b(?:questions?|enquir(?:y|ies)|clarifications?)\b/i.test(span.full)) return false;
+      if (/\b(?:insurance|security(?: clearance)?|invoice|payment|certificate|bond|sample|deliverable|milestone)\b.{0,80}\b(?:submission deadline|submission date|deadline|due date|expiry|expiration)\b/i.test(span.context)) {
+        return false;
+      }
+      if (/\b(?:before|after|differs? from|different from|earlier than|later than|prior to|subsequent to|other than)\b/i.test(span.full)) {
+        return false;
+      }
       const objective = [...extractAssertionTokens(span.full)];
       const distinct = (prefix: string) => objective.filter((token) => token.startsWith(prefix)).length;
       if (distinct("date:") > 1 || distinct("time:") > 1 ||
@@ -527,9 +779,25 @@ function citationSupportsSummaryValue(field: SummaryField, value: string, citati
 }
 
 function topicFieldBindingSupported(topic: string, value: string, citations: Citation[]) {
+  const assertedContext = `${topic} ${value}`;
   const field = (["title", "solicitation_number", "issuer", "closing_date", "submission_method",
     "current_selection_method"] as const)
-    .find((candidate) => SUMMARY_TOPIC_PATTERNS[candidate].test(topic));
+    .find((candidate) => SUMMARY_TOPIC_PATTERNS[candidate].test(assertedContext));
+  if (field === "closing_date" &&
+    /\b(?:insurance|security|deliverable|milestone|invoice|payment)\b.{0,50}\b(?:certificate|deadline|due date|expiry|expiration)\b/i.test(assertedContext)) {
+    // An operational deadline may contain "submission deadline" without
+    // being the solicitation closing field. It remains eligible as a cited
+    // fact but can never populate summary.closing_date.
+    return true;
+  }
+  if (field === "closing_date" && ![...extractAssertionTokens(value)].some((token) =>
+    /^(?:date|time|timezone|utc-offset):/.test(token)
+  )) {
+    // Consequences such as "bids received after the closing time are rejected"
+    // refer to the field without asserting its scalar value. Keep them eligible
+    // as grounded risks; only scalar closing assertions need field-span binding.
+    return true;
+  }
   if (field === "closing_date" &&
     deriveDeadlineFactKey(value, citations) === "deadline:questions" &&
     /\b(?:questions?|enquir(?:y|ies)|clarifications?|request for clarification)\b/i.test(value)) {
@@ -539,6 +807,24 @@ function topicFieldBindingSupported(topic: string, value: string, citations: Cit
     return true;
   }
   return !field || citations.some((citation) => citationSupportsSummaryValue(field, value, citation));
+}
+
+function mandatoryCategorySupported(text: string, citations: Citation[]) {
+  const mandatoryLanguage = /\bmandatory\b|\bcondition(?:s)? of (?:bid|tender)\b|\bnon-compliant\b|\bnoncompliant\b|\b(?:bidder|offeror|proponent|tenderer)\b.{0,100}\b(?:must|shall|required to)\b.{0,100}\b(?:submit|provide|demonstrate|propose|include|complete|sign|obtain)\b/;
+  return citations.some((citation) => normalizePolarityText(citation.evidence_quote)
+    .split(/(?<!a\.m)(?<!p\.m)\.\s+|[;\n]+|\s+and\s+(?=(?:the|a|an|this|that|these|those|bidder|offeror|proponent|tenderer|contractor|supplier|vendor)\s+)/)
+    .map((span) => span.trim())
+    .filter(Boolean)
+    .some((span) => assertionIsDefinitive(span) && mandatoryLanguage.test(span) &&
+      proseAssertionSupportedByCitations(text, [{ ...citation, evidence_quote: span }])));
+}
+
+function sourceBackedSupportingDetail(value: string | null, citations: Citation[]) {
+  if (!value) return null;
+  return assertionTokensSupportedByCitations(value, citations) &&
+    proseAssertionSupportedByCitations(value, citations)
+    ? value
+    : null;
 }
 
 export function materializeAnalysis(input: MaterializeInput): {
@@ -636,7 +922,11 @@ export function materializeAnalysis(input: MaterializeInput): {
   const claimReconciliation = reconcileVersionedFacts(validClaimDrafts.map(({ claim, citations, document }) => ({
     id: claim.claim_id,
     topic: claim.topic,
-    factKey: deriveDeadlineFactKey(claim.claim_text, citations) ?? undefined,
+    factKey: deriveDeadlineFactKey(claim.claim_text, citations) ?? deriveSourceFactKey({
+      topic: claim.topic, value: claim.claim_text,
+      documentSha256: claim.document_sha256, citations
+    }) ?? undefined,
+    factKeySource: "derived" as const,
     value: claim.claim_text,
     documentSha256: claim.document_sha256,
     documentRole: document.role,
@@ -669,6 +959,7 @@ export function materializeAnalysis(input: MaterializeInput): {
   const validRequirementDrafts: Array<{
     requirement: DraftAnalysis["requirements"][number]; citations: Citation[];
     document: MaterializeInput["documents"][number];
+    category: DraftAnalysis["requirements"][number]["category"];
   }> = [];
   const reviewRequirements: AnalysisResult["requirements"] = [];
   for (const requirement of input.draft.requirements) {
@@ -684,11 +975,13 @@ export function materializeAnalysis(input: MaterializeInput): {
     const document = input.documents.find(
       (item) => item.index.documentSha256 === requirement.document_sha256
     );
+    const sourceMarksMandatory = mandatoryCategorySupported(requirement.text, matchingCitations);
     const supported = Boolean(document && checked.everyCandidateVerified &&
       citationsMatchDocument(checked.citations, requirement.document_sha256) &&
       assertionTokensSupportedByCitations(requirement.text, matchingCitations) &&
       proseAssertionSupportedByCitations(requirement.text, matchingCitations) &&
-      topicFieldBindingSupported(requirement.topic, requirement.text, matchingCitations));
+      topicFieldBindingSupported(requirement.topic, requirement.text, matchingCitations) &&
+      (requirement.effect === "delete" || requirement.category !== "mandatory" || sourceMarksMandatory));
     if (!supported) {
       unsupportedItemsRemoved += 1;
       truthReviewItems += 1;
@@ -705,13 +998,22 @@ export function materializeAnalysis(input: MaterializeInput): {
       }
       continue;
     }
-    validRequirementDrafts.push({ requirement, citations: checked.citations, document: document! });
+    validRequirementDrafts.push({
+      requirement,
+      citations: checked.citations,
+      document: document!,
+      category: sourceMarksMandatory ? "mandatory" : requirement.category
+    });
   }
   const requirementReconciliation = reconcileVersionedFacts(validRequirementDrafts.map(
     ({ requirement, citations, document }) => ({
       id: requirement.id,
       topic: requirement.topic,
-      factKey: deriveDeadlineFactKey(requirement.text, citations) ?? undefined,
+      factKey: deriveDeadlineFactKey(requirement.text, citations) ?? deriveSourceFactKey({
+        topic: requirement.topic, value: requirement.text,
+        documentSha256: requirement.document_sha256, citations
+      }) ?? undefined,
+      factKeySource: "derived" as const,
       value: requirement.text,
       documentSha256: requirement.document_sha256,
       documentRole: document.role,
@@ -725,22 +1027,62 @@ export function materializeAnalysis(input: MaterializeInput): {
   truthReviewItems += unauthorizedRequirementMutations.size;
   const requirements: AnalysisResult["requirements"] = [
     ...requirementReconciliation.facts.flatMap((fact) => {
-      const draft = validRequirementDrafts.find((item) => item.requirement.id === fact.id)?.requirement;
-      if (!draft || draft.effect === "delete") return [];
+      const validated = validRequirementDrafts.find((item) => item.requirement.id === fact.id);
+      const draft = validated?.requirement;
+      if (!draft || !validated || draft.effect === "delete") return [];
       return [{
         id: draft.id,
-        category: draft.category,
+        category: validated.category,
         status: unauthorizedRequirementMutations.has(fact.id) ? "needs_review" as const : fact.status,
         text: fact.value,
-        evidence_needed: draft.evidence_needed && assertionTokensSupportedByCitations(draft.evidence_needed, fact.citations)
-          ? draft.evidence_needed : null,
-        consequence: draft.consequence && assertionTokensSupportedByCitations(draft.consequence, fact.citations)
-          ? draft.consequence : null,
+        evidence_needed: sourceBackedSupportingDetail(draft.evidence_needed, fact.citations),
+        consequence: sourceBackedSupportingDetail(draft.consequence, fact.citations),
         citations: fact.citations
       }];
     }),
     ...reviewRequirements
   ];
+
+  // Claims and requirements are presentation categories, not independent
+  // truth stores. Reconcile them together so a duplicate fact cannot remain
+  // current in one collection after an amendment supersedes it in the other.
+  const packageSourceReconciliation = reconcileVersionedFacts([
+    ...claimReconciliation.facts.map((fact) => ({
+      ...fact, id: `claim:${fact.id}`
+    })),
+    ...requirementReconciliation.facts.map((fact) => ({
+      ...fact, id: `requirement:${fact.id}`
+    }))
+  ]);
+  unsupportedItemsRemoved -= unauthorizedClaimMutations.size + unauthorizedRequirementMutations.size;
+  truthReviewItems -= unauthorizedClaimMutations.size + unauthorizedRequirementMutations.size;
+  unsupportedItemsRemoved += packageSourceReconciliation.unauthorizedMutationIds.length;
+  truthReviewItems += packageSourceReconciliation.unauthorizedMutationIds.length;
+  const packageFactsById = new Map(packageSourceReconciliation.facts.map((fact) => [fact.id, fact]));
+  const packageUnauthorized = new Set(packageSourceReconciliation.unauthorizedMutationIds);
+  const effectiveClaimFacts = claimReconciliation.facts.map((fact) => ({
+    ...fact,
+    status: packageFactsById.get(`claim:${fact.id}`)?.status ?? fact.status
+  }));
+  const effectiveRequirementFacts = requirementReconciliation.facts.map((fact) => ({
+    ...fact,
+    status: packageFactsById.get(`requirement:${fact.id}`)?.status ?? fact.status
+  }));
+  for (const claim of claims) {
+    const effective = packageFactsById.get(`claim:${claim.claim_id}`);
+    if (!effective) continue;
+    const unauthorized = packageUnauthorized.has(`claim:${claim.claim_id}`);
+    claim.status = unauthorized ? "needs_review" : effective.status;
+    const sourceDraft = validClaimDrafts.find((item) => item.claim.claim_id === claim.claim_id)?.claim;
+    if (sourceDraft) claim.claim_type = !unauthorized && effective.status === "conflicted"
+      ? "conflict" : sourceDraft.claim_type;
+  }
+  for (const requirement of requirements) {
+    const effective = packageFactsById.get(`requirement:${requirement.id}`);
+    if (!effective) continue;
+    requirement.status = packageUnauthorized.has(`requirement:${requirement.id}`)
+      ? "needs_review" : effective.status;
+  }
 
   const validEvaluationRules: Array<{
     rule: DraftAnalysis["evaluation"]["rules"][number]; citations: Citation[];
@@ -771,6 +1113,7 @@ export function materializeAnalysis(input: MaterializeInput): {
       id: rule.id,
       topic: rule.topic,
       factKey: `evaluation:${rule.field}`,
+      factKeySource: "validated" as const,
       value: rule.value,
       documentSha256: rule.document_sha256,
       documentRole: document.role,
@@ -839,44 +1182,62 @@ export function materializeAnalysis(input: MaterializeInput): {
     }
     validRiskDrafts.push({ risk, citations: checked.citations, document: document! });
   }
-  const riskReconciliation = reconcileVersionedFacts(validRiskDrafts.map(({ risk, citations, document }) => ({
-    id: risk.id,
-    topic: risk.topic,
-    value: risk.finding,
-    documentSha256: risk.document_sha256,
-    documentRole: document.role,
-    amendmentNumber: document.amendmentNumber,
-    effect: risk.effect,
-    citations
-  })));
+  const riskReconciliation = reconcileVersionedFacts(validRiskDrafts.map(({ risk, citations, document }) => {
+    const lineage = resolveRiskLineage(risk.finding, citations, risk.document_sha256);
+    return {
+      id: risk.id,
+      topic: risk.topic,
+      // Bound risks reconcile only within the same server-derived lineage.
+      // Unbound/ambiguous risks remain independent and cannot use a generic
+      // model topic to delete or conflict with another finding.
+      factKey: lineage.kind === "bound" ? `risk-lineage:${lineage.key}` : `risk-record:${risk.id}`,
+      factKeySource: "validated" as const,
+      value: risk.finding,
+      documentSha256: risk.document_sha256,
+      documentRole: document.role,
+      amendmentNumber: document.amendmentNumber,
+      effect: risk.effect,
+      citations
+    };
+  }));
   unsupportedItemsRemoved += riskReconciliation.unauthorizedMutationIds.length;
   truthReviewItems += riskReconciliation.unauthorizedMutationIds.length;
-  const supersededSourceFacts = [
-    ...claimReconciliation.facts,
-    ...requirementReconciliation.facts,
+  const allEffectiveSourceFacts = [
+    ...effectiveClaimFacts,
+    ...effectiveRequirementFacts,
     ...evaluationReconciliation.facts
-  ].filter((fact) => fact.status === "superseded");
-  const activeSourceFacts = [
-    ...claimReconciliation.facts,
-    ...requirementReconciliation.facts,
-    ...evaluationReconciliation.facts
-  ].filter((fact) => fact.status === "active");
+  ];
+  const conflictedSourceKeys = new Set(allEffectiveSourceFacts.flatMap((fact) =>
+    fact.status === "conflicted" && fact.factKey ? [fact.factKey] : []
+  ));
+  const supersededSourceFacts = allEffectiveSourceFacts.filter((fact) =>
+    fact.status === "superseded" && (!fact.factKey || !conflictedSourceKeys.has(fact.factKey))
+  );
+  const activeSourceFacts = allEffectiveSourceFacts.filter((fact) => fact.status === "active");
+  let ambiguousRiskLineageCount = 0;
   const risks: AnalysisResult["risks"] = riskReconciliation.facts.flatMap((fact) => {
     const draft = validRiskDrafts.find((item) => item.risk.id === fact.id)?.risk;
     if (!draft || draft.effect === "delete" || fact.status !== "active") return [];
-    const dependsOnSupersededFact = supersededSourceFacts.some((sourceFact) =>
+    const staleDispositions = supersededSourceFacts.map((sourceFact) =>
       riskSemanticallyDependsOnSupersededFact({
         ...fact,
-        value: [draft.finding, draft.impact, draft.recommended_action].join(" ")
+        finding: draft.finding,
+        impact: draft.impact,
+        recommendedAction: draft.recommended_action
       }, sourceFact, sourceFact.factKey
         ? activeSourceFacts.filter((candidate) => candidate.factKey === sourceFact.factKey)
           .map((candidate) => candidate.value)
         : [])
     );
-    if (dependsOnSupersededFact) {
+    if (staleDispositions.includes("stale") || staleDispositions.includes("mixed")) {
       unsupportedItemsRemoved += 1;
       truthReviewItems += 1;
+      if (staleDispositions.includes("mixed")) ambiguousRiskLineageCount += 1;
       return [];
+    }
+    if (staleDispositions.includes("ambiguous")) {
+      ambiguousRiskLineageCount += 1;
+      truthReviewItems += 1;
     }
     return [{
       id: draft.id,
@@ -890,8 +1251,7 @@ export function materializeAnalysis(input: MaterializeInput): {
   });
 
   const conflicts = [
-    ...claimReconciliation.conflicts,
-    ...requirementReconciliation.conflicts,
+    ...packageSourceReconciliation.conflicts,
     ...evaluationReconciliation.conflicts,
     ...riskReconciliation.conflicts
   ].filter((conflict) => {
@@ -908,6 +1268,11 @@ export function materializeAnalysis(input: MaterializeInput): {
   }
   if (truthReviewItems > 0) {
     blockingUnknowns.push("One or more extracted items failed source, scalar, or field-specific evidence validation.");
+  }
+  if (ambiguousRiskLineageCount > 0) {
+    blockingUnknowns.push(
+      "One or more risks share a superseded scalar but have ambiguous source lineage and require review."
+    );
   }
   if (duplicateIdentityCount > 0) {
     blockingUnknowns.push("One or more model records reused an ambiguous identity and were withheld.");
@@ -940,7 +1305,7 @@ export function materializeAnalysis(input: MaterializeInput): {
     ? "The supplied package has incomplete or inconsistent server-derived document metadata."
     : "The supplied package completeness cannot be verified without an authoritative tender-notice manifest.");
 
-  const activeClaimSources = claimReconciliation.facts.flatMap((fact) => {
+  const activeClaimSources = effectiveClaimFacts.flatMap((fact) => {
     if (fact.status !== "active") return [];
     const draft = validClaimDrafts.find((item) => item.claim.claim_id === fact.id)?.claim;
     return draft ? [{ topic: draft.topic, value: fact.value, citations: fact.citations }] : [];

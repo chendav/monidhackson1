@@ -119,6 +119,8 @@ export const cerM3VersionedFacts: VersionedFact[] = CER_M3_ROW_DEFINITIONS.flatM
   {
     id: `m3-row-${String(definition.row).padStart(2, "0")}-base`,
     topic: `M3 Appendix 1 row ${definition.row}`,
+    factKey: `document:m3-appendix-1:row:${String(definition.row).padStart(2, "0")}`,
+    factKeySource: "fixture" as const,
     value: definition.baseQuote,
     documentSha256: CER_DOCUMENTS[0].sha256,
     documentRole: "base" as const,
@@ -129,6 +131,8 @@ export const cerM3VersionedFacts: VersionedFact[] = CER_M3_ROW_DEFINITIONS.flatM
   {
     id: `m3-row-${String(definition.row).padStart(2, "0")}-amendment-003`,
     topic: `M3 Appendix 1 row ${definition.row}`,
+    factKey: `document:m3-appendix-1:row:${String(definition.row).padStart(2, "0")}`,
+    factKeySource: "fixture" as const,
     value: definition.amendmentQuote,
     documentSha256: CER_DOCUMENTS[3].sha256,
     documentRole: "amendment" as const,
@@ -165,6 +169,8 @@ export const cerGoldenFacts: VersionedFact[] = [
   {
     id: "basis-of-payment-base",
     topic: "Controlling Basis of Payment",
+    factKey: "document:basis-of-payment",
+    factKeySource: "fixture",
     value: "Original RFP Annex Basis of Payment",
     documentSha256: CER_DOCUMENTS[0].sha256,
     documentRole: "base",
@@ -175,6 +181,8 @@ export const cerGoldenFacts: VersionedFact[] = [
   {
     id: "basis-of-payment-amendment-001",
     topic: "Controlling Basis of Payment",
+    factKey: "document:basis-of-payment",
+    factKeySource: "fixture",
     value: "Amendment 001 Annex Basis of Payment (entire replacement)",
     documentSha256: CER_DOCUMENTS[1].sha256,
     documentRole: "amendment",
@@ -188,6 +196,8 @@ export const cerGoldenFacts: VersionedFact[] = [
   {
     id: "m3-table-base",
     topic: "Controlling M3 Appendix 1 table",
+    factKey: "document:m3-appendix-1",
+    factKeySource: "fixture",
     value: "Original 37-row Appendix 1 table",
     documentSha256: CER_DOCUMENTS[0].sha256,
     documentRole: "base",
@@ -198,6 +208,8 @@ export const cerGoldenFacts: VersionedFact[] = [
   {
     id: "m3-table-amendment-003",
     topic: "Controlling M3 Appendix 1 table",
+    factKey: "document:m3-appendix-1",
+    factKeySource: "fixture",
     value: "Amendment 003 replacement 37-row Appendix 1 table",
     documentSha256: CER_DOCUMENTS[3].sha256,
     documentRole: "amendment",
@@ -208,6 +220,8 @@ export const cerGoldenFacts: VersionedFact[] = [
   {
     id: "forecast-horizon-base",
     topic: "Original Statement of Work projection-horizon clause",
+    factKey: "projection:horizon",
+    factKeySource: "fixture",
     value: "Roughly 20 to 30 years from the current year",
     documentSha256: CER_DOCUMENTS[0].sha256,
     documentRole: "base",
@@ -218,6 +232,8 @@ export const cerGoldenFacts: VersionedFact[] = [
   {
     id: "forecast-horizon-base-deletion",
     topic: "Original Statement of Work projection-horizon clause",
+    factKey: "projection:horizon",
+    factKeySource: "fixture",
     value: "Deleted by Amendment 003",
     documentSha256: CER_DOCUMENTS[3].sha256,
     documentRole: "amendment",
@@ -228,6 +244,8 @@ export const cerGoldenFacts: VersionedFact[] = [
   {
     id: "forecast-horizon-003-answer",
     topic: "Current required annual projection end year for the first contract period",
+    factKey: "projection:horizon",
+    factKeySource: "fixture",
     value: "2050",
     documentSha256: CER_DOCUMENTS[3].sha256,
     documentRole: "amendment",
@@ -238,6 +256,8 @@ export const cerGoldenFacts: VersionedFact[] = [
   {
     id: "forecast-horizon-003-sow",
     topic: "Current required annual projection end year for the first contract period",
+    factKey: "projection:horizon",
+    factKeySource: "fixture",
     value: "2055",
     documentSha256: CER_DOCUMENTS[3].sha256,
     documentRole: "amendment",
@@ -248,6 +268,8 @@ export const cerGoldenFacts: VersionedFact[] = [
   {
     id: "forecast-horizon-003-table",
     topic: "Current required annual projection end year for the first contract period",
+    factKey: "projection:horizon",
+    factKeySource: "fixture",
     value: "2050",
     documentSha256: CER_DOCUMENTS[3].sha256,
     documentRole: "amendment",

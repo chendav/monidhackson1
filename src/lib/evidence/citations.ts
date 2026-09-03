@@ -96,6 +96,11 @@ function recordObjectiveModifiers(value: string, tokens: Set<string>) {
     const minutes = Number(match[3]);
     if (hours <= 14 && minutes <= 59) tokens.add(`utc-offset:${match[1]}${match[2]}:${match[3]}`);
   }
+  for (const match of value.matchAll(/[t ]\d{2}:\d{2}(?::\d{2})?([+\-])(\d{2}):(\d{2})\b/gu)) {
+    const hours = Number(match[2]);
+    const minutes = Number(match[3]);
+    if (hours <= 14 && minutes <= 59) tokens.add(`utc-offset:${match[1]}${match[2]}:${match[3]}`);
+  }
 
   for (const match of value.matchAll(/(?<![\p{L}\p{N}])(\d+(?:\.\d+)?)\s*(?:%|per\s*cent|percent(?:age)?)(?![\p{L}])/gu)) {
     tokens.add(`percent:${canonicalNumber(match[1])}`);
