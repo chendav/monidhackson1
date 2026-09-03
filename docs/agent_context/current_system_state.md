@@ -4,8 +4,10 @@ Updated: 2026-09-02
 
 ## Confirmed
 
-- The repository is initialized and has an origin remote, but has no commits.
-- The working tree contains only Chief Agent governance and planning documents.
+- The repository is initialized on `main`, is connected to origin, and the
+  implemented MVP through commit `96641c6` is pushed.
+- Next.js Web/API, local deterministic pipeline, Neon/Blob/Workflow adapters,
+  Monid/OpenAI adapters, golden fixtures, and automated tests are implemented.
 - There is no `.codegraph/` directory and no existing application scaffold.
 - The selected target is bidworx Starter at its current public £190/month price.
 - Edmonton RFP 100022184-A is a 55-page closed development fixture.
@@ -22,6 +24,14 @@ Updated: 2026-09-02
   download link, and a longer provider-side artifact lifetime.
 - Ontology's reusable strengths are fail-closed SHA/page/quote verification,
   append-only receipts, conflict preservation, and bounded grounded queries.
+- Independent review found one P0 and six P1 defects despite every declared QA
+  command passing. The current commit must not be deployed.
+- Current production blockers include cleanup-result leakage, no browser
+  Turnstile token lifecycle, summary fields bypassing citation checks,
+  requirements not receiving amendment status, fail-open infrastructure
+  fallbacks, unbounded model input/output spend, and Monid artifact SSRF.
+- The CER golden suite currently covers only a subset of the frozen acceptance
+  facts; amendment 003's current internal-conflict evidence is p2, p5, and p6.
 
 ## Inferred
 
@@ -42,3 +52,5 @@ Updated: 2026-09-02
 - Do not store secrets, raw PDFs, raw parsed Markdown, or signed source URLs.
 - Preserve user-authored untracked governance files and unrelated work.
 - Node must be at least 22.13 because of the installed PDF.js runtime.
+- Current runtime decision remains Vercel Pro + Fluid Compute, not Railway. Local
+  memory adapters are development/test only and production must fail closed.

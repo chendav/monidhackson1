@@ -2,7 +2,7 @@
 
 - Task ID: MH-001
 - Title: RFP X-Ray contest MVP
-- Status: active
+- Status: revision round 1 after independent REQUEST_CHANGES
 - Chief owner: chief
 - Updated: 2026-09-02
 
@@ -53,9 +53,15 @@ reconciliation, grounded Q&A, citations, cleanup proof, and per-run cost.
 
 ## Current Phase
 
-Specification and contract spike.
+Independent review completed against commit `96641c6` with one P0 and six P1
+findings. Static checks, official-fixture checks, build, and local browser E2E
+passed, but the product is not releasable until the cleanup, production guest,
+summary-evidence, amendment, spend-bound, runtime-config, and SSRF findings are
+fixed and independently re-reviewed.
 
 ## Immediate Next Action
 
-Freeze provider contracts and shared public types, then dispatch backend and
-frontend tasks against non-overlapping paths.
+Run revision round 1 with bounded frontend and backend assignments, rerun the
+entire QA gate plus adversarial regressions, then return the resulting commit to
+the independent Reviewer. Do not deploy or run paid providers before P0/P1 is
+zero and the required credentials are configured.

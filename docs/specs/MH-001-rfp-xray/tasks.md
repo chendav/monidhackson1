@@ -27,7 +27,7 @@ exclude_paths: [src/app/page.tsx, src/components/**, src/app/globals.css, tests/
 edits_allowed: true
 acceptance: [AC-1, AC-2, AC-3, AC-4, AC-5, AC-6, AC-7, AC-9]
 handoff: handoff-backend.md
-status: active
+status: revision-round-1
 ```
 
 ## T3 Frontend working surface
@@ -42,7 +42,7 @@ exclude_paths: [src/app/api/**, src/lib/**, src/db/**, drizzle/**]
 edits_allowed: true
 acceptance: [AC-8, AC-10]
 handoff: handoff-frontend.md
-status: active
+status: revision-round-1
 ```
 
 ## QA1 Independent review
@@ -57,5 +57,25 @@ exclude_paths: []
 edits_allowed: false
 acceptance: [AC-1, AC-2, AC-3, AC-4, AC-5, AC-6, AC-7, AC-8, AC-9, AC-10, AC-11]
 handoff: qa_report.md
-status: pending
+status: request-changes-round-1
+```
+
+## REV-1 Release blockers
+
+```yaml
+id: REV-1
+objective: Resolve the independent review's one P0 and six P1 findings without broadening product scope.
+frontend_scope:
+  - fresh action-bound Turnstile token lifecycle for every guest mutation
+  - production-path browser coverage and accessible failure state
+backend_scope:
+  - cleanup/expiry/result release invariant and abandoned/replayable uploads
+  - verified summary materialization and requirement reconciliation
+  - complete production configuration gate and health semantics
+  - bounded OpenAI input/output, token-cost accounting, and budget reservation
+  - allowlisted/public-network Monid artifact retrieval
+  - complete Edmonton/CER frozen golden assertions
+  - patched high-severity transitive dependencies
+review: independent re-review required
+status: active
 ```
