@@ -8,15 +8,22 @@ text, provider payloads, or wallet secrets.
 
 `NOT_READY_FOR_LIVE_PROVIDER_OR_CONTEST_COMPLETION`
 
-Application commit `f1b09e3d0b7f3f6570e61b1a0faeb72b2b85d455` is pushed and
-was deployed at evidence capture. The public alias serves that fail-closed
-baseline. The current tested candidate changes application behavior and must
-receive independent review, a commit, a new deployment-bound runtime receipt,
-and a provider receipt before public source or paid work.
+Application commit `fbb48d09bda4f8d671f6b1679c66d3e0400f45db` and release commit
+`76e0f4e01f93d67eab4da9b98807959b81578396` are pushed. The public alias
+serves that reviewed fail-closed release. Exact-deployment runtime and
+Monid/OpenAI provider receipts both passed; Turnstile and real campaign gates
+still prevent public source or paid work.
+
+Local candidate `120e38a25824e083cce54470d9e27b17ff06844a`
+adds an independently approved watchdog-reclaim fence and is intentionally not
+pushed or deployed until it can ship with the Turnstile configuration.
+Video scaffold `fc054660aab99dbb46128a7d519bf1885f43ad5a` is also local-only;
+its evidence gate is supposed to fail until the real campaign supplies every
+capture and measured value.
 
 ## Evidence classes
 
-1. **Pre-deploy local candidate** — current checks pass: 44 test files and 421
+1. **Pre-deploy local candidate** — current checks pass: 44 test files and 423
    tests passed, with 4 files/10 tests explicitly skipped; build PASS with 8
    Workflow steps, 4 workflows, and 13 pages; local E2E 14/2; official fixtures
    3/3; no known production dependency vulnerabilities. The full audit has zero
@@ -26,7 +33,10 @@ and a provider receipt before public source or paid work.
    received `APPROVE`, P0=0/P1=0, and both earlier P2 recommendations were
    implemented and tested. The current candidate's analysis-dispatch ACK-loss
    fence is focused-tested and independently approved with P0=0, P1=0, and
-   P2=0.
+   P2=0. Local commit `120e38a` adds the independently approved watchdog-
+   reclaim fence (P0=0, P1=0, one non-blocking test suggestion). The video
+   evidence gate is separately approved P0=0/P1=0 and currently blocks all
+   canonical build/render/publish commands on 23 real open markers.
 3. **Live component probes** — Neon schema/concurrency, Railway private
    storage, and the Monid contract spike passed their stated scopes. These are
    not complete production campaign evidence.
@@ -45,12 +55,14 @@ and a provider receipt before public source or paid work.
   than 30 minutes; Railway
   runs no RFP analysis worker and has zero instances between cron invocations.
 - Vercel settings: Node 22 and Fluid Compute. Deployment
-  `dpl_md5xRevqZNJiDYG4Z6mtjWF4JCQd` had a current deployment-bound runtime
-  receipt at capture; the next evidence-only deployment requires a new one.
+  `dpl_5dMrPWKGMCKxy5hcQUfq57uLmZce` has current deployment-bound runtime and
+  provider-contract receipts. Their payload SHA-256 values are
+  `5d50e812e28ee43fdc81bd99c8a2a291a737ff3c607ccb2d148cbba97aa14dbf` and
+  `0c8ede2c44fc3ff8038eea7640573bdef5cbbb0523ae7583e66b5e8f1743fe07`.
 - Provider contract: exact Monid configuration is stored in Vercel and two
   credentialed Edmonton parses passed at USD 0.0009 each. One proved a
   five-minute Railway signed URL plus confirmed source cleanup in 8.140 seconds.
-  The exact deployment/OpenAI-bound provider receipt remains open.
+  The exact deployment/OpenAI-bound provider receipt passed.
 - Retention: Context.dev ZDR is unavailable for this workspace and a successful
   response reported a seven-day upstream artifact expiry. No provider early-
   delete API is known; this is disclosed separately from app-controlled cleanup.
@@ -65,6 +77,7 @@ and a provider receipt before public source or paid work.
 ## Durable artifacts
 
 - [Deployment summary](deployment-summary.md)
+- [Current production status](production-status-2026-09-03.md)
 - [Neon schema/concurrency probe](neon-concurrency-probe.md)
 - [Railway private-storage probe](railway-storage-probe.md)
 - [Railway maintenance Cron probe](railway-maintenance-cron.md)
@@ -76,10 +89,10 @@ and a provider receipt before public source or paid work.
 
 ## Open gates
 
-Turnstile is absent. Chrome/in-app interactive browser control is unavailable.
+Turnstile is absent. Interactive production citation review has not run.
 The two paid Monid calls are bounded contract-spike evidence, not the real
-Edmonton/CER campaign. The new exact deployment and attestations, Turnstile,
-paid Edmonton/CER
+Edmonton/CER campaign. The Turnstile-triggered redeployment and renewed
+attestations, paid Edmonton/CER
 campaigns, end-to-end cleanup/cost/latency proof, at least 12 production
 citation clicks, final video, contest submission, and five social publications
 remain open.

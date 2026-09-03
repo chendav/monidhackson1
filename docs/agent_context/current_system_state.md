@@ -4,9 +4,13 @@ Updated: 2026-09-03
 
 ## Confirmed
 
-- The repository is on `main`, connected to origin, and reviewed application
-  commit `f1b09e3d0b7f3f6570e61b1a0faeb72b2b85d455` is pushed and deployed.
-  CI run `33762472176` passed.
+- The repository is on `main`, connected to origin, and release commit
+  `76e0f4e01f93d67eab4da9b98807959b81578396` is pushed and deployed. Its
+  application-code parent is
+  `fbb48d09bda4f8d671f6b1679c66d3e0400f45db`. CI run `33793276409` passed.
+- Local candidate commit `120e38a25824e083cce54470d9e27b17ff06844a`
+  is intentionally not pushed yet. It adds the watchdog-reclaim fence described
+  below and must ship with the final Turnstile-triggered deployment.
 - The application is a single Next.js/TypeScript repository using Vercel for
   Web/API/Workflow compute, Neon for durable state, and the dedicated Railway
   `rfp-xray-private` S3-compatible Bucket for temporary private objects.
@@ -17,23 +21,26 @@ Updated: 2026-09-03
   code requires a deployment-bound 300-second Workflow runtime attestation
   before source or paid work.
 - Runtime-attestation code was independently reviewed: `APPROVE`, P0=0,
-  P1=0, P2=0. Production deployment `dpl_md5xRevqZNJiDYG4Z6mtjWF4JCQd` has an
+  P1=0, P2=0. Production deployment `dpl_5dMrPWKGMCKxy5hcQUfq57uLmZce` has an
   exact receipt binding its ID, URL, project, team, Git SHA, runtime, duration,
   region, memory, SDK version, internal deadlines, TTL, and payload hash. The
-  receipt expires at `2026-09-10T13:41:27.781Z` unless refreshed first.
+  receipt payload SHA-256 is
+  `5d50e812e28ee43fdc81bd99c8a2a291a737ff3c607ccb2d148cbba97aa14dbf` and
+  expires at `2026-09-04T19:00:58.845Z` unless refreshed first.
 - Provider-contract attestation code was independently reviewed: `APPROVE`,
   P0=0, P1=0, P2=0. The intended Monid workspace is authenticated, the exact
   `context.dev /parse` configuration is stored in Vercel, and credentialed
-  discovery/inspect plus two paid Edmonton parses succeeded. No deployment-
-  bound provider receipt exists yet because the local OpenAI credential is not
-  available to the attestation command and this working tree still needs its
-  release deployment.
+  discovery/inspect plus two paid Edmonton parses succeeded. Deployment
+  `dpl_5dMrPWKGMCKxy5hcQUfq57uLmZce` also has a Monid/OpenAI receipt with
+  payload SHA-256
+  `0c8ede2c44fc3ff8038eea7640573bdef5cbbb0523ae7583e66b5e8f1743fe07`,
+  expiring at `2026-09-04T19:01:09.386Z`.
 - The release tooling pins Vercel CLI 59.11.2. Thirty-three focused
   runtime/provider attestation tests pass after the dependency overrides.
 - The security re-review returned `APPROVE`, P0=0 and P1=0. Its two P2
   recommendations were subsequently implemented and tested.
 - Current local regression evidence is: `pnpm check` 44 files passed/4 skipped,
-  421 tests passed/10 skipped; build PASS with 8 Workflow steps, 4 workflows,
+  423 tests passed/10 skipped; build PASS with 8 Workflow steps, 4 workflows,
   and 13 pages; local E2E 14 passed/2 explicit live skips; official fixture
   audit 3/3; production dependency audit reports no known vulnerabilities. The
   full dependency audit has no high/critical findings and retains 1 low/3
@@ -46,6 +53,11 @@ Updated: 2026-09-03
   `start()`: claim, start, and settlement ACK-loss paths never blind-redispatch,
   and maintenance owns the queued failure/cleanup fallback. Final independent
   review approved the current working tree with P0=0, P1=0, and P2=0.
+- The local candidate also refuses an expired processing-lease reclaim after
+  any source-cleanup watchdog has been armed, preventing duplicate watchdog
+  scheduling across a hard kill before the paid-call marker. Independent delta
+  review approved this fence with P0=0, P1=0, and two non-blocking test-hardening
+  suggestions.
 - The conservative five-document full reserve is USD 1.412123, including 24
   generated function invocations; this remains estimated rather than a live
   Vercel usage receipt.
@@ -75,7 +87,7 @@ Updated: 2026-09-03
   reported an upstream artifact expiry of seven days and no provider early-
   delete API is known. The source form and audit view now disclose this before
   submission and must not promise deletion outside application control.
-- Chrome and in-app interactive browser automation are unavailable. Local and
+- Interactive production citation review has not yet been performed. Local and
   remote automated probes do not substitute for the required human production
   citation review.
 - The S3/runtime/provider receipt refresh heartbeat is scheduled for
@@ -96,16 +108,32 @@ Updated: 2026-09-03
   single Edmonton normalization run are proven; ten-run Edmonton consistency,
   CER package quality, OCR/scanned quality, and full production Workflow
   behavior remain unverified.
-- Turnstile production configuration is absent.
-- Production schema v9 is applied and probed; deployment of the matching
-  application candidate remains pending.
-- The current deployment has its own Vercel runtime receipt; no
-  provider-contract receipt exists.
+- Turnstile production configuration is absent. The current health response is
+  intentionally `503 not_ready`; its only missing entries are
+  `TURNSTILE_SECRET_KEY`, `NEXT_PUBLIC_TURNSTILE_SITE_KEY`, and
+  `TURNSTILE_EXPECTED_HOSTNAME`.
+- The user explicitly authorized widget creation and manually authenticated
+  Cloudflare, but three Windows browser-control attempts stopped before the
+  first page action because the safety layer could not verify Chrome's current
+  URL. No widget or key was created. Resume only after the browser-control
+  channel is restarted, or after the user creates the widget directly.
+- Production schema v9 is applied, probed, and served by the matching deployed
+  application candidate.
+- The current deployment has both its own Vercel runtime receipt and a
+  Monid/OpenAI provider-contract receipt. Both must be renewed after any
+  credential-triggered redeployment and before expiry.
 - Live-provider Workflow execution, hard-kill recovery, end-to-end source
   cleanup timing, and production citation links remain unverified.
 - Two bounded paid Monid parse calls occurred for the contract spike. The real
   ten-run Edmonton/CER campaign, 90-second video, contest submission, and social
   publication have not occurred.
+- A 90-second English video scaffold is prepared under
+  `videos/rfp-xray-launch/`; it intentionally remains unrendered and carries
+  explicit live-evidence placeholders until the production campaign supplies
+  the real captures, cost, and duration. Scaffold commit
+  `fc054660aab99dbb46128a7d519bf1885f43ad5a` is local-only; its deterministic
+  evidence gate is independently approved P0=0/P1=0 and currently blocks on 23
+  real open markers.
 
 ## Active constraints
 
@@ -117,7 +145,7 @@ Updated: 2026-09-03
   enforced design facts, not latency evidence.
 - A passing component probe is not an end-to-end release. The current verdict
   is `NOT_READY` until all live-provider and contest-evidence gates pass.
-- Remaining gates include a new exact deployment and attestations, Turnstile,
-  paid Edmonton/CER campaigns,
+- Remaining gates include Turnstile, the resulting exact redeployment and
+  refreshed attestations, paid Edmonton/CER campaigns,
   production citation clicks, final video, contest submission, and five social
   publications.

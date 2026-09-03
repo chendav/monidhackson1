@@ -5,8 +5,14 @@
 - Status: Deployed fail-closed release candidate; live-provider and contest gates remain open
 - Chief owner: chief
 - Updated: 2026-09-03
-- Reviewed application commit: `f1b09e3d0b7f3f6570e61b1a0faeb72b2b85d455`;
-  pushed to `origin/main`, deployed, and independently re-reviewed.
+- Release commit: `76e0f4e01f93d67eab4da9b98807959b81578396`;
+  application-code parent
+  `fbb48d09bda4f8d671f6b1679c66d3e0400f45db`; pushed to `origin/main`,
+  deployed, and independently re-reviewed.
+- Local candidate commit:
+  `120e38a25824e083cce54470d9e27b17ff06844a`; independently approved P0=0,
+  P1=0 for the watchdog-reclaim delta and intentionally not pushed until the
+  Turnstile deployment gate can be closed in the same release.
 
 ## Outcome
 
@@ -26,7 +32,7 @@ predictions, and long-term tender storage remain out of scope.
 
 ## Current release evidence
 
-- `pnpm check`: PASS, 44 test files passed and 4 skipped; 421 tests passed and
+- `pnpm check`: PASS, 44 test files passed and 4 skipped; 423 tests passed and
   10 explicitly skipped. The live-only skips include the deliberate paid
   Monid/Railway contract probe, which passed 1/1 when explicitly enabled, and
   the new Neon cleanup-retry and analysis-dispatch CAS race probes, which now
@@ -47,15 +53,14 @@ predictions, and long-term tender storage remain out of scope.
 - Vercel project configuration is Node 22 with Fluid Compute enabled. The
   deployment-bound 300-second Workflow runtime-attestation implementation was
   independently approved with P0/P1/P2=0. Production deployment
-  `dpl_md5xRevqZNJiDYG4Z6mtjWF4JCQd` is READY and has its own current receipt,
-  bound to commit `f1b09e3d0b7f3f6570e61b1a0faeb72b2b85d455`.
+  `dpl_5dMrPWKGMCKxy5hcQUfq57uLmZce` is READY and has its own current receipt,
+  bound to release commit `76e0f4e01f93d67eab4da9b98807959b81578396`.
 - Provider-contract attestation was independently approved with P0/P1/P2=0.
   The intended Monid workspace is authenticated, exact `context.dev /parse`
   configuration is stored in Vercel, and two credentialed Edmonton parses cost
   USD 0.0009 each. One used a five-minute Railway signed URL and confirmed
-  application-controlled source deletion in 8.140 seconds. A deployment-bound
-  provider receipt still needs the exact candidate deployment and a locally
-  usable OpenAI credential.
+  application-controlled source deletion in 8.140 seconds. The current exact
+  deployment has a successful Monid/OpenAI provider-contract receipt.
 - The pinned Vercel CLI remains 59.11.2; 33 focused runtime/provider attestation
   tests pass after dependency overrides.
 - The final security re-review returned `APPROVE`, P0=0 and P1=0; both P2
@@ -78,9 +83,9 @@ predictions, and long-term tender storage remain out of scope.
 
 The public deployment at https://rfp-xray.vercel.app serves the reviewed
 fail-closed application and passed remote smoke 4/4. It must not be described
-as live-provider ready: health remains 503 because production Turnstile and
-the exact-deployment provider-contract receipt are absent, and this candidate
-has not been migrated, deployed, or attested.
+as live-provider ready: health remains 503 only because production Turnstile
+is absent. Schema v9, the matching release deployment, and both exact-
+deployment attestations are present.
 
 The contract spike is not the final campaign. It also proved that Context.dev
 ZDR is unavailable for this workspace and reported a seven-day upstream
@@ -88,15 +93,14 @@ artifact expiry; that limitation is now disclosed before submission and in the
 audit view. No complete Edmonton/CER production campaign, deployment-bound
 provider receipt, production citation click-through, final video, contest
 submission, or five-platform social publication has occurred. Turnstile is
-absent, and Chrome/in-app interactive browser control is unavailable. The
-release verdict therefore remains `NOT_READY`.
+absent, and the required interactive production review has not run. The release
+verdict therefore remains `NOT_READY`.
 
 ## Immediate next action
 
-Commit and deploy the approved schema-v9 candidate, then issue fresh runtime
-and provider-contract
-attestations for that exact deployment. Configure production Turnstile before
-any public mutation. After every preflight gate passes, run the budget-capped
+Configure production Turnstile, redeploy once, then issue fresh runtime and
+provider-contract attestations for that exact deployment before any public
+mutation. After every preflight gate passes, run the budget-capped
 Edmonton/CER campaigns and click at least 12 production citations. The final
 video, contest submission, and five social publications remain open. Continue
 monitoring the independently approved Railway maintenance Cron without adding

@@ -4,24 +4,23 @@ Updated: 2026-09-03.
 
 ## Release identity and verdict
 
-- Reviewed application commit: `f1b09e3d0b7f3f6570e61b1a0faeb72b2b85d455`.
-- Working tree at capture: tested application/evidence candidate pending
-  independent review, commit, and deployment.
+- Reviewed application commit: `fbb48d09bda4f8d671f6b1679c66d3e0400f45db`.
+- Deployed release commit: `76e0f4e01f93d67eab4da9b98807959b81578396`.
 - Public URL: https://rfp-xray.vercel.app.
-- Captured production deployment: `dpl_md5xRevqZNJiDYG4Z6mtjWF4JCQd`
-  (`https://rfp-xray-pgrtupsau-chendavs-projects.vercel.app`).
+- Captured production deployment: `dpl_5dMrPWKGMCKxy5hcQUfq57uLmZce`
+  (`https://rfp-xray-3dpwofwgr-chendavs-projects.vercel.app`).
 - Verdict: `NOT_READY`.
 
-The landing, OpenAPI, Edmonton sample, runtime receipt, maintenance heartbeat,
-and fail-closed health were rechecked against the captured deployment. They
-remain component/reachability evidence only. Chrome and in-app interactive
-browser control are unavailable.
+The landing, OpenAPI, Edmonton sample, runtime/provider receipts, maintenance
+heartbeat, and fail-closed health were rechecked against the captured
+deployment. They remain component/reachability evidence only; interactive
+production citation review has not run.
 
 ## Current checks
 
 | Check | Result |
 |---|---|
-| `pnpm check` | PASS: 44 files passed, 4 skipped; 421 tests passed, 10 skipped |
+| `pnpm check` | PASS: 44 files passed, 4 skipped; 423 tests passed, 10 skipped |
 | Production build | PASS: 8 Workflow steps, 4 workflows, 13 pages |
 | Local Playwright | PASS: 14 passed, 2 explicit live skips |
 | Official fixture audit | PASS: 3/3 |
@@ -33,11 +32,11 @@ browser control are unavailable.
 
 | Scope | Verdict | Boundary |
 |---|---|---|
-| Deployment-bound runtime attestation | `APPROVE`, P0/P1/P2=0 | Current for captured deployment; refresh after this evidence-only commit deploys. |
-| Deployment-bound provider contract | `APPROVE`, P0/P1/P2=0 | Monid is configured/live-probed; exact candidate deployment and OpenAI-bound receipt remain open. |
+| Deployment-bound runtime attestation | `APPROVE`, P0/P1/P2=0 | Passed for captured deployment; refresh after Turnstile redeployment or expiry. |
+| Deployment-bound provider contract | `APPROVE`, P0/P1/P2=0 | Passed for captured deployment; Monid and OpenAI are actively verified. |
 | Security re-review | `APPROVE`, P0=0/P1=0 | Both P2 recommendations were implemented and tested afterward. |
 | Maintenance scheduler | `APPROVE`, P0/P1/P2=0 | Railway proved seven scheduled cycles across more than 30 minutes; GitHub schedule remains unobserved redundancy. |
-| Current candidate | `P2 PENDING` | Analysis-dispatch ACK-loss fence is implemented and focused-tested; current evidence synchronization still awaits Reviewer closure. |
+| Current candidate | `APPROVE`, P0/P1/P2=0 | Analysis-dispatch ACK-loss fence and final cost/retention evidence were independently reviewed. |
 
 The conservative five-document full reserve is USD 1.412123 and includes 24
 generated function invocations. It is estimated allocation evidence, not a
@@ -69,9 +68,13 @@ between runs; it does not process RFPs. See
 ### Vercel runtime and maintenance
 
 The Vercel project is configured for Node 22 and Fluid Compute. Captured
-deployment `dpl_md5xRevqZNJiDYG4Z6mtjWF4JCQd` had a current attestation of the
-300-second Workflow route capability. The receipt is deployment-bound and must
-be refreshed after this documentation-only release.
+deployment `dpl_5dMrPWKGMCKxy5hcQUfq57uLmZce` has a current attestation of the
+300-second Workflow route capability. Its payload SHA-256 is
+`5d50e812e28ee43fdc81bd99c8a2a291a737ff3c607ccb2d148cbba97aa14dbf`.
+The exact deployment also has a provider-contract receipt with payload SHA-256
+`0c8ede2c44fc3ff8038eea7640573bdef5cbbb0523ae7583e66b5e8f1743fe07`.
+Both receipts are deployment-bound and must be refreshed after any subsequent
+deployment or before their recorded expiry.
 
 `CRON_SECRET` was rotated consistently in Vercel production/preview, GitHub
 Actions, and Railway. GitHub manual run `33760198137` succeeded after rotation.
@@ -101,11 +104,10 @@ reported a seven-day upstream artifact expiry. See
 ## Open gates and evidence boundary
 
 - Current candidate independent review: `APPROVE`, P0=0, P1=0, P2=0.
-- Production schema v9 is applied and probed; deploy the matching candidate.
-- The current candidate needs a new exact deployment and fresh runtime/provider
-  attestations.
+- Production schema v9 is applied, probed, and served by the matching release.
 - Turnstile is absent.
-- No exact-deployment/OpenAI-bound provider-contract receipt exists.
+- The next deployment caused by Turnstile configuration will require fresh
+  runtime and provider-contract receipts.
 - No real Edmonton ten-run benchmark or complete CER campaign has occurred.
 - No end-to-end production Workflow recovery, cleanup timing, live cost,
   latency, retention/deletion, or citation click-through has been established.

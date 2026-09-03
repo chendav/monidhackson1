@@ -39,8 +39,9 @@ deadlines, TTL, and canonical payload hash.
 
 The runtime-attestation implementation received independent `APPROVE` with
 P0=0, P1=0, and P2=0. Production deployment
-`dpl_md5xRevqZNJiDYG4Z6mtjWF4JCQd` was built from Git SHA `f1b09e3d0b7f3f6570e61b1a0faeb72b2b85d455`
-and had a current deployment-bound runtime receipt at evidence capture. Any
+`dpl_5dMrPWKGMCKxy5hcQUfq57uLmZce` was built from Git SHA
+`76e0f4e01f93d67eab4da9b98807959b81578396` and has a current deployment-
+bound runtime receipt at evidence capture. Any
 subsequent deployment must receive its own receipt; receipts must never be
 copied between deployment IDs.
 
@@ -62,9 +63,10 @@ fetching, end-to-end cleanup timing, or deployed guest mutations.
 
 ## Neon and maintenance contract
 
-The active Neon database reports 9 public tables, 8 migration-ledger rows,
-schema version 8, and marker `rfp-xray-schema-v8`. The live concurrency suite
-passed 2/2, including a real compare-and-swap loss.
+The active Neon database reports 9 public tables, 9 migration-ledger rows,
+schema version 9, and marker `rfp-xray-schema-v9`. The live concurrency suite
+passed 4/4, including application contention, an actual compare-and-swap loss,
+and real 16-way cleanup-retry and analysis-dispatch claim races.
 
 Recurring maintenance requires both a shared secret and a recent successful
 bounded heartbeat. `CRON_SECRET` is rotated consistently in Vercel
@@ -89,9 +91,9 @@ OpenAI control-plane check and binds the result to the same deployment identity.
 The intended Monid workspace is now authenticated, the exact configuration is
 stored in Vercel, and two paid Edmonton contract-spike parses passed. The
 five-minute signed-URL path captured its artifact and confirmed source cleanup
-in 8.140 seconds, well within the Vercel envelope. A deployment-bound provider
-receipt still needs the next exact deployment and local access to the OpenAI
-control-plane credential. Production Turnstile is also absent.
+in 8.140 seconds, well within the Vercel envelope. The current exact deployment
+has a successful Monid/OpenAI provider receipt. Production Turnstile is absent;
+its resulting redeployment must receive fresh runtime and provider receipts.
 
 ## Why Railway does not run the application
 
@@ -126,7 +128,7 @@ half-migrated second analysis path.
 
 ## Verification summary
 
-- `pnpm check`: PASS, 44 files passed/4 skipped; 421 tests passed/10 skipped.
+- `pnpm check`: PASS, 44 files passed/4 skipped; 423 tests passed/10 skipped.
 - Production build: PASS, 8 Workflow steps, 4 workflows, 13 pages.
 - Local E2E: PASS, 14 passed/2 explicit live skips.
 - Official fixture audit: PASS, 3/3.
@@ -139,24 +141,21 @@ half-migrated second analysis path.
   implemented and tested.
 - Analysis Workflow claim/start/settlement ACK-loss fencing is implemented,
   focused-tested, and independently approved with P0=0, P1=0, and P2=0.
-- Production schema v9 is applied and probed; the matching application build
-  is not yet deployed.
+- Production schema v9 is applied and probed; the matching application build is
+  deployed and has current runtime/provider receipts.
 - The five-document full reserve is USD 1.412123 and contains 24 generated
   function invocations; live Vercel usage remains unverified.
 
 ## Revalidation gate
 
-1. Commit this approved schema-v9 candidate and inspect the exact resulting production deployment.
-2. Store that deployment's runtime receipt and verify fail-closed health.
+1. Configure Turnstile, redeploy once, and store fresh runtime/provider
+   receipts for that exact deployment.
+2. Require health 200 and validate the deployed guest flow.
 3. Continue observing Railway Cron and GitHub redundancy; health must remain
    fresh and no manual dispatch may be counted as scheduled evidence.
-4. Bind the configured/live-probed Monid contract and OpenAI control-plane
-   check to the exact candidate deployment before any campaign source or paid
-   call.
-5. Configure production Turnstile and validate the deployed guest flow.
-6. Run ten Edmonton analyses and one complete CER analysis under the existing
+4. Run ten Edmonton analyses and one complete CER analysis under the existing
    budget caps, verify cleanup/cost/latency, and review at least 12 citations.
-7. Complete the final video, contest submission, and five social publications.
+5. Complete the final video, contest submission, and five social publications.
 
 S3, runtime, and provider receipts are scheduled for refresh on Sep 9 and
 Sep 10 at 12:00 MDT. Until every gate passes, the release remains `NOT_READY`;

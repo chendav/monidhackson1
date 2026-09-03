@@ -12,20 +12,23 @@ and cost USD 0.0009. A direct official-URL parse produced byte-identical
 Markdown at the same cost.
 
 This is component evidence, not the full production campaign. Production stays
-`NOT_READY` until Turnstile, the deployment-bound Monid/OpenAI receipt, live
-Workflow runs, final citation review, and contest/publication gates pass.
+`NOT_READY` until Turnstile, live Workflow runs, final citation review, and
+contest/publication gates pass. The current deployment already has runtime and
+Monid/OpenAI receipts; both must be refreshed after the Turnstile redeployment.
 
 ## Release identity
 
-- Reviewed/deployed baseline commit:
-  `f1b09e3d0b7f3f6570e61b1a0faeb72b2b85d455`.
-- Baseline deployment: `dpl_md5xRevqZNJiDYG4Z6mtjWF4JCQd` at
-  https://rfp-xray-pgrtupsau-chendavs-projects.vercel.app.
+- Reviewed local candidate commit:
+  `120e38a25824e083cce54470d9e27b17ff06844a` (not deployed).
+- Reviewed application commit:
+  `fbb48d09bda4f8d671f6b1679c66d3e0400f45db`.
+- Deployed release commit:
+  `76e0f4e01f93d67eab4da9b98807959b81578396`.
+- Production deployment: `dpl_5dMrPWKGMCKxy5hcQUfq57uLmZce` at
+  https://rfp-xray-3dpwofwgr-chendavs-projects.vercel.app.
 - Public alias: https://rfp-xray.vercel.app.
-- Current working tree adds evidence-linked citations, truthful cost
-  completeness, adversarial PDF/OCR checks, the live Monid/Railway probe, and
-  the account-specific retention disclosure. It is tested but not yet committed
-  or deployed.
+- GitHub Actions run `33793276409` passed. The public alias passed the four-case
+  read-only production smoke.
 
 ## Credential and provider state
 
@@ -37,9 +40,11 @@ Workflow runs, final citation review, and contest/publication gates pass.
   cost unit, and artifact allowlist are stored for all three Vercel targets.
 - The raw canonical inspect SHA-256 is
   `551283ef6526c09f276f4c2d82015168e083cdc348063521db1172c683384476`.
-- The deployment-bound provider receipt remains open because it must bind the
-  next exact deployment and also execute the OpenAI control-plane check with a
-  locally usable credential.
+- The current exact deployment has both receipts. The runtime payload SHA-256 is
+  `5d50e812e28ee43fdc81bd99c8a2a291a737ff3c607ccb2d148cbba97aa14dbf`; the
+  provider payload SHA-256 is
+  `0c8ede2c44fc3ff8038eea7640573bdef5cbbb0523ae7583e66b5e8f1743fe07`.
+  Health reports Monid and OpenAI as `actively_verified`.
 
 Never print, commit, or copy the Key into evidence. Vercel `env pull` masks
 Sensitive Secrets and is not a way to recover them locally.
@@ -62,19 +67,21 @@ OCR facts that cannot bind to the native physical index are withheld.
 
 ## Verification
 
-- `pnpm check`: 44 files passed/4 skipped, 421 tests passed/10 skipped.
+- `pnpm check`: 44 files passed/4 skipped, 423 tests passed/10 skipped.
 - Production build: PASS, 8 Workflow steps, 4 workflows, 13 pages.
 - Local Playwright: 14 passed/2 explicit live skips.
 - Official PDF fixture audit: 3/3.
 - Opt-in paid Monid/Railway live integration: 1/1 PASS.
-- Baseline production read-only smoke: 4/4 PASS.
+- Current production read-only smoke: 4/4 PASS.
 - Neon schema/concurrency and Railway storage/Cron evidence remain valid within
   their recorded receipt windows.
 
 The analysis-dispatch ACK-loss fence is implemented and its focused claim,
 start, settlement, replay, maintenance, and concurrency regressions pass. The
-current candidate received final independent `APPROVE` with P0=0, P1=0, and
-P2=0. The conservative five-document full reserve is
+prior candidate received final independent `APPROVE` with P0=0, P1=0, and
+P2=0. The watchdog-reclaim delta in local commit `120e38a` separately received
+`APPROVE` with P0=0, P1=0, and one non-blocking test-hardening suggestion. The
+conservative five-document full reserve is
 USD 1.412123 and includes 24 generated function invocations; this is an
 estimate, not a provider receipt.
 
@@ -92,15 +99,19 @@ and long-term source storage remain out of scope.
 
 ## Next gates
 
-1. Commit and push this schema-v9 candidate; wait for CI and the new exact Vercel deployment.
-2. Issue that deployment's runtime receipt and repeat public read-only smoke.
-3. Make the OpenAI credential locally available without exposing it, then issue
-   the exact deployment-bound provider receipt.
-4. Configure production Turnstile and verify real guest mutations.
-5. Run the capped ten-run Edmonton benchmark and four-document CER campaign.
-6. Complete an independent production review of at least 12 high-risk links.
-7. Record the truthful under-90-second video, register, submit, and publish on
+1. Configure production Turnstile, redeploy once, and refresh both exact-
+   deployment receipts.
+2. Require health 200 and verify real guest mutations.
+3. Run the capped ten-run Edmonton benchmark and four-document CER campaign.
+4. Complete an independent production review of at least 12 high-risk links.
+5. Record the truthful under-90-second video, register, submit, and publish on
    all five required social platforms.
+
+The video scaffold is already prepared at `videos/rfp-xray-launch/`. Its live
+evidence markers are deliberate release blockers; do not render around them or
+replace them with estimates. Local scaffold commit
+`fc054660aab99dbb46128a7d519bf1885f43ad5a` is independently approved P0=0/P1=0;
+the gate currently reports 23 unresolved live-evidence findings by design.
 
 Refresh S3/runtime/provider receipts on September 9 and September 10 at 12:00
 MDT. Roll back to the last fail-closed build if any release gate regresses.

@@ -37,22 +37,25 @@ regression_checks:
 review:
   required: true
   release_verdict: not_ready
-  reviewed_implementation_commit: f1b09e3d0b7f3f6570e61b1a0faeb72b2b85d455
-  current_candidate_review: approve_p0_0_p1_0_p2_0
+  reviewed_implementation_commit: 120e38a25824e083cce54470d9e27b17ff06844a
+  deployed_release_commit: 76e0f4e01f93d67eab4da9b98807959b81578396
+  current_candidate_review: approve_p0_0_p1_0_p2_1_nonblocking
   reviewed_release_candidate:
-    pnpm_check: 44_files_passed_4_skipped_421_tests_passed_10_skipped
+    pnpm_check: 44_files_passed_4_skipped_423_tests_passed_10_skipped
     build: pass_8_steps_4_workflows_13_pages
     local_e2e: 14_passed_2_live_skipped
     official_fixture_audit: 3_passed
     production_audit: no_known_vulnerabilities
     full_audit: 0_high_0_critical_1_low_3_moderate_development_chain
     focused_runtime_provider_attestation_tests: 33_passed_vercel_cli_59_11_2
-  runtime_attestation: approve_p0_0_p1_0_p2_0_captured_deployment_receipt_current_evidence_deploy_refresh_required
-  provider_attestation: approve_p0_0_p1_0_p2_0_monid_spike_passed_exact_deployment_openai_receipt_pending
+  runtime_attestation: approve_p0_0_p1_0_p2_0_current_exact_deployment_receipt_passed
+  provider_attestation: approve_p0_0_p1_0_p2_0_current_exact_deployment_monid_openai_receipt_passed
   security_rereview: approve_p0_0_p1_0_both_p2_implemented_and_tested
   maintenance_scheduler_review: approve_p0_0_p1_0_p2_0
   paid_live_verifier_component: pass-p0-0-p1-0
   analysis_dispatch_ack_loss_fence: approve_p0_0_p1_0_p2_0
+  watchdog_reclaim_fence: approve_p0_0_p1_0_p2_1_nonblocking
+  video_evidence_gate: approve_p0_0_p1_0_p2_1_nonblocking
 max_revision_rounds: 3
 external_release_evidence:
   public_sample:
@@ -66,7 +69,10 @@ external_release_evidence:
     live_mutations_exercised: false
     citation_click_through_exercised: false
     build_currency: matches_reviewed_application_commit
-    evidence_only_redeploy_required: true
+    deployment_id: dpl_5dMrPWKGMCKxy5hcQUfq57uLmZce
+    deployment_url: https://rfp-xray-3dpwofwgr-chendavs-projects.vercel.app
+    git_sha: 76e0f4e01f93d67eab4da9b98807959b81578396
+    evidence_only_redeploy_required: false
   deployed_health:
     expected_http_status_until_live_gates_close: 503
     observed_http_status: 503
@@ -119,8 +125,10 @@ external_release_evidence:
     result_commit_deadline_seconds: 285
     monid_parse_concurrency: 4
     attestation_implementation_review: approve_p0_0_p1_0_p2_0
-    captured_attestation_receipt: dpl_md5xRevqZNJiDYG4Z6mtjWF4JCQd
-    evidence_only_deploy_receipt_refresh_required: true
+    captured_attestation_receipt: dpl_5dMrPWKGMCKxy5hcQUfq57uLmZce
+    payload_sha256: 5d50e812e28ee43fdc81bd99c8a2a291a737ff3c607ccb2d148cbba97aa14dbf
+    expires_at: 2026-09-04T19:00:58.845Z
+    evidence_only_deploy_receipt_refresh_required: false
     real_benchmark: one_monid_signed_url_parse_passed_full_campaign_pending
     result: implemented_component_benchmark_passed_campaign_open
   paid_live_verifier:
@@ -128,14 +136,18 @@ external_release_evidence:
     independent_audit: pass_p0_0_p1_0
     paid_path_executed: false
     result: ready_for_credentialed_use_not_run
+  provider_contract_receipt:
+    deployment_id: dpl_5dMrPWKGMCKxy5hcQUfq57uLmZce
+    result: passed_monid_and_openai_actively_verified
+    payload_sha256: 0c8ede2c44fc3ff8038eea7640573bdef5cbbb0523ae7583e66b5e8f1743fe07
+    expires_at: 2026-09-04T19:01:09.386Z
   live_provider_release:
     required: true
     result: blocked
     blockers:
       - Production Turnstile is absent.
-      - No exact-deployment provider-contract receipt exists; the local OpenAI control-plane credential is unavailable.
       - One 8.140-second signed-URL parse passed, but the required ten-run Edmonton and CER campaign has not run.
-      - Interactive in-app browser automation is unavailable; read-only smoke does not satisfy the deployed mutation-flow and citation-review gate.
+      - Read-only smoke does not satisfy the deployed mutation-flow and citation-review gate.
   maintenance:
     cron_secret_rotated_consistently: true
     github_enablement_variable: true
@@ -147,6 +159,6 @@ external_release_evidence:
   release_verdict: not_ready
   generated_function_invocation_envelope: 24
   five_document_full_reserve_usd: 1.412123
-  open_gates: new_deploy_and_attest_turnstile_paid_campaigns_citation_clicks_video_submission_social
+  open_gates: turnstile_then_redeploy_and_refresh_receipts_paid_campaigns_citation_clicks_video_submission_social
   railway: private_s3_plus_short_lived_maintenance_cron_no_analysis_worker
   rule: Never convert sample-route availability, component probes, or local Reviewer PASS into a live-provider or contest-completion claim.

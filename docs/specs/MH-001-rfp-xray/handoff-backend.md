@@ -705,7 +705,7 @@ all paid-provider evidence is absent.
   candidate discloses this before submission, in Audit & Cost, and in health.
 - The normalized Markdown contained no trustworthy physical-page boundaries.
   PDF.js remains citation truth; unbound Monid/OCR facts are withheld.
-- Current candidate checks: 421 tests passed/10 skipped across 44 passed/4
+- Current candidate checks: 423 tests passed/10 skipped across 44 passed/4
   skipped files; build PASS with 8 steps/4 workflows/13 pages; Playwright 14/2;
   official fixtures 3/3; opt-in
   paid Monid/Railway probe 1/1.
@@ -714,14 +714,17 @@ all paid-provider evidence is absent.
 - Production schema v9 is applied and its live Neon suite passed 4/4. The
   conservative five-document full reserve is USD 1.412123 and
   includes 24 generated function invocations; this is not a usage receipt.
-- Still open: candidate commit and new deploy, exact deployment-bound runtime and
-  Monid/OpenAI provider receipts, Turnstile, ten-run Edmonton plus CER
-  campaign, at least 12 production citation clicks, video, registration,
-  submission, and five social publications. Release remains `NOT_READY`.
+- Current release commit `76e0f4e01f93d67eab4da9b98807959b81578396`
+  is deployed as `dpl_5dMrPWKGMCKxy5hcQUfq57uLmZce`; CI, runtime receipt,
+  Monid/OpenAI provider receipt, and read-only smoke 4/4 passed.
+- Still open: Turnstile and its one-time redeployment/receipt refresh, ten-run
+  Edmonton plus CER campaign, at least 12 production citation clicks, video,
+  registration, submission, and five social publications. Release remains
+  `NOT_READY`.
 - GitHub did not emit a `schedule` event during the observation window. It is
   redundant only and is not claimed as the source of scheduled-delivery proof.
 
-The new exact deployment and
-attestations, production Turnstile, paid Edmonton/CER, end-to-end
+The Turnstile-triggered redeployment and refreshed
+attestations, paid Edmonton/CER, end-to-end
 cleanup/cost/latency, citation click-through, video, submission, and five
 publication gates remain open. The release remains `NOT_READY`.

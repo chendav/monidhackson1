@@ -37,6 +37,12 @@ competition page, guide, and registration form before each external action.
 
 ## Under-90-second recording script
 
+The truthful video scaffold lives in `videos/rfp-xray-launch/`. Its
+`STORYBOARD.md`, `SCRIPT.md`, and `ASSET_GATES.md` are preparatory artifacts,
+not release evidence. The video project's evidence gate must fail while any
+`PENDING_LIVE` marker or `{{LIVE_*}}` token remains; only production campaign
+captures and reconciled measurements may clear those markers.
+
 | Time | Picture | Spoken line / on-screen fact |
 |---|---|---|
 | 0-5s | Current bidworx Starter pricing page, with capture date visible | “I replaced the single-tender analysis workflow inside a £190-per-month bid tool.” |
@@ -60,8 +66,8 @@ least 1080p. Produce a separate captioned 9:16 export for Instagram and TikTok.
 |---|---|---|
 | Registration | confirmation tied to the entrant-selected team and exact Monid account email | pending; closes Sep 9 |
 | Competitor price | URL, capture date, screenshot | captured; refresh on final day |
-| Reviewed product build | Git commit and Vercel deployment URL | captured for `f1b09e3` / `dpl_md5xRevqZNJiDYG4Z6mtjWF4JCQd`; refresh after the next release commit |
-| Monid contract | inspect schema hash, provider/endpoint, cost unit, retention disclosure | credentialed component spike captured; deployment-bound provider receipt pending |
+| Reviewed product build | Git commit and Vercel deployment URL | captured for `76e0f4e` / `dpl_5dMrPWKGMCKxy5hcQUfq57uLmZce`; refresh after Turnstile redeployment |
+| Monid contract | inspect schema hash, provider/endpoint, cost unit, retention disclosure | credentialed component spike and exact-deployment Monid/OpenAI receipt captured; refresh after redeployment or expiry |
 | Live campaign | sanitized verifier report and wallet reconciliation | pending |
 | Deletion | application-controlled source deletion receipts and timing | signed-URL component probe captured at 8.140 s; end-to-end production receipt pending |
 | Reviewer | signed verdict and 12-citation click ledger | pending |
