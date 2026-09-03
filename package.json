@@ -6,7 +6,7 @@
   "description": "Document-only, evidence-backed tender analysis powered by Monid.",
   "packageManager": "pnpm@10.14.0",
   "engines": {
-    "node": ">=22.13.0"
+    "node": "22.x"
   },
   "scripts": {
     "dev": "next dev",
@@ -17,11 +17,21 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
+    "test:e2e:production": "node scripts/production-smoke.mjs",
+    "test:e2e:release": "node scripts/production-smoke.mjs --strict",
+    "test:live:storage": "vitest run tests/integration/railway-s3-live.test.ts",
+    "test:live:neon": "vitest run tests/integration/neon-live-concurrency.test.ts",
+    "probe:database": "node scripts/database-schema-probe.mjs",
+    "verify:live": "node scripts/live-verify.mjs",
+    "attest:vercel-runtime": "node --env-file-if-exists=.env.local scripts/attest-vercel-runtime.mjs",
+    "attest:provider-contracts": "node --env-file-if-exists=.env.local scripts/attest-provider-contracts.mjs",
     "check": "pnpm lint && pnpm typecheck && pnpm test",
     "db:generate": "drizzle-kit generate",
-    "db:migrate": "drizzle-kit migrate"
+    "db:migrate": "node scripts/migrate.mjs"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "3.1125.0",
+    "@aws-sdk/s3-request-presigner": "3.1125.0",
     "@neondatabase/serverless": "1.1.0",
     "@vercel/blob": "2.8.0",
     "drizzle-orm": "0.45.2",
@@ -44,11 +54,16 @@
     "eslint-config-next": "16.3.4",
     "jsdom": "27.0.0",
     "typescript": "6.0.3",
+    "vercel": "59.11.2",
     "vitest": "4.1.11"
   },
   "pnpm": {
     "overrides": {
+      "js-yaml@>=4.0.0 <4.3.1": "4.3.2",
+      "minimatch@>=10.0.0 <10.2.3": "10.2.6",
       "nanoid": "5.1.16",
+      "path-to-regexp@>=8.0.0 <8.4.0": "8.4.0",
+      "tar@<=7.5.20": "7.5.22",
       "undici": "7.29.0"
     },
     "onlyBuiltDependencies": [

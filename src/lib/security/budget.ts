@@ -68,9 +68,23 @@ export class InMemoryBudgetGuard implements BudgetGuard {
   }
 
   async settle(runId: string, actualMicroUsd: number): Promise<void> {
+    if (!Number.isFinite(actualMicroUsd) || actualMicroUsd < 0) {
+      throw new AppError("BUDGET_EXCEEDED", "Observed provider cost is invalid.", {
+        httpStatus: 503,
+        retryable: false
+      });
+    }
+    const settled = Math.round(actualMicroUsd);
     const reservation = this.reservations.get(runId);
     if (!reservation) return;
-    reservation.settled = Math.max(reservation.settled ?? 0, Math.max(0, Math.round(actualMicroUsd)));
+    if (settled > this.config.MAX_RUN_COST_MICRO_USD || settled > reservation.reserved) {
+      throw new AppError(
+        "BUDGET_EXCEEDED",
+        "Observed provider cost exceeded the reserved per-run safety ceiling.",
+        { httpStatus: 503, retryable: false }
+      );
+    }
+    reservation.settled = Math.max(reservation.settled ?? 0, settled);
   }
 
   clear() {
@@ -159,11 +173,38 @@ export class NeonBudgetGuard implements BudgetGuard {
   }
 
   async settle(runId: string, actualMicroUsd: number, now = new Date()): Promise<void> {
+    if (!Number.isFinite(actualMicroUsd) || actualMicroUsd < 0) {
+      throw new AppError("BUDGET_EXCEEDED", "Observed provider cost is invalid.", {
+        httpStatus: 503,
+        retryable: false
+      });
+    }
+    const settled = Math.round(actualMicroUsd);
+    if (settled > this.config.MAX_RUN_COST_MICRO_USD) {
+      throw new AppError(
+        "BUDGET_EXCEEDED",
+        "Observed provider cost exceeded the per-run safety ceiling.",
+        { httpStatus: 503, retryable: false }
+      );
+    }
+    const existing = await this.sql`
+      SELECT reserved_micro_usd
+      FROM budget_reservations
+      WHERE run_id = ${runId}::uuid
+    ` as unknown as Array<{ reserved_micro_usd: number }>;
+    if (!existing[0]) return;
+    if (settled > Number(existing[0].reserved_micro_usd)) {
+      throw new AppError(
+        "BUDGET_EXCEEDED",
+        "Observed provider cost exceeded the reserved per-run safety ceiling.",
+        { httpStatus: 503, retryable: false }
+      );
+    }
     await this.sql`
       UPDATE budget_reservations
       SET settled_micro_usd = GREATEST(
             COALESCE(settled_micro_usd, 0),
-            ${Math.max(0, Math.round(actualMicroUsd))}
+            ${settled}
           ),
           settled_at = ${now.toISOString()}::timestamptz
       WHERE run_id = ${runId}::uuid

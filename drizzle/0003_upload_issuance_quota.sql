@@ -7,7 +7,9 @@ CREATE TABLE IF NOT EXISTS "upload_quota_events" (
   "day" text NOT NULL,
   "created_at" timestamptz NOT NULL
 );
+--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "upload_quota_events_quota_day_idx"
   ON "upload_quota_events" ("quota_key", "day");
+--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "upload_quota_events_day_idx"
   ON "upload_quota_events" ("day");

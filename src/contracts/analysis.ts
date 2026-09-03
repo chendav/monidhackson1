@@ -123,14 +123,27 @@ export const ConflictSchema = z.object({
 });
 export type Conflict = z.infer<typeof ConflictSchema>;
 
+export const MonidCostProvenanceSchema = z.strictObject({
+  kind: z.literal("credentialed_inspect"),
+  inspect_schema_sha256: z.string().regex(/^[a-f0-9]{64}$/),
+  value_path: z.string().min(1),
+  currency_path: z.string().min(1),
+  value_unit: z.enum(["currency_major", "micro_dollar"]),
+  source_value: z.union([z.number().nonnegative(), z.string().regex(/^\d+(?:\.\d{1,6})?$/)]),
+  source_currency: z.literal("USD")
+});
+export type MonidCostProvenance = z.infer<typeof MonidCostProvenanceSchema>;
+
 export const CostEventSchema = z.object({
-  provider: z.enum(["monid", "openai", "vercel_blob", "vercel", "neon"]),
+  attempt_id: z.string().uuid().nullable().optional(),
+  provider: z.enum(["monid", "openai", "railway_s3", "vercel_blob", "vercel", "neon"]),
   operation: z.string().min(1),
-  status: z.enum(["succeeded", "failed"]),
+  status: z.enum(["pending", "succeeded", "failed"]),
   actual_micro_usd: z.number().int().nonnegative().nullable(),
   estimated_micro_usd: z.number().int().nonnegative().nullable(),
   latency_ms: z.number().int().nonnegative(),
-  retry_of: z.string().nullable()
+  retry_of: z.string().nullable(),
+  cost_provenance: MonidCostProvenanceSchema.nullable().optional()
 });
 export type CostEvent = z.infer<typeof CostEventSchema>;
 

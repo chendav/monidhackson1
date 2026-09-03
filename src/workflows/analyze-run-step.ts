@@ -1,15 +1,23 @@
 import { processRun } from "@/lib/pipeline";
+import { getConfig } from "@/lib/config";
+import { assertWorkflowRuntimeAttested } from "@/lib/health/workflow-runtime";
+import { assertProviderContractsActivelyVerified } from "@/lib/health/provider-contracts";
 
-// `workflow/next` emits maxDuration="max" for its generated step endpoint.
-// Live deployments require Vercel Pro/Fluid Compute and this explicit 800s
-// ceiling; the pipeline reserves only 600s for source/Monid networking and
-// 120s for one OpenAI attempt.
-export const maxDuration = 800;
+// Keep the source declaration aligned with the monolith's attested 300-second
+// envelope even though Workflow 4.8.5 currently emits `maxDuration: "max"`
+// for the generated route. The deployment receipt still has final authority.
+export const maxDuration = 300;
 
 export async function processRunStep(runId: string) {
   "use step";
 
-  const record = await processRun(runId);
+  const config = getConfig();
+  const workflowRuntimeCapability = await assertWorkflowRuntimeAttested(config);
+  const providerContractsCapability = await assertProviderContractsActivelyVerified(config);
+  const record = await processRun(runId, {
+    workflowRuntimeCapability: workflowRuntimeCapability ?? undefined,
+    providerContractsCapability: providerContractsCapability ?? undefined
+  });
   return { runId: record.id, status: record.status, expiresAt: record.expiresAt };
 }
 

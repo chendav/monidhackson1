@@ -1,0 +1,62 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1788393600000,
+      "tag": "0000_rfp_xray",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1788393601000,
+      "tag": "0001_revision1_privacy",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1788393602000,
+      "tag": "0002_queued_admission_recovery",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1788393603000,
+      "tag": "0003_upload_issuance_quota",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1788393604000,
+      "tag": "0004_admission_and_quota_retention",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1788393605000,
+      "tag": "0005_durable_source_cleanup_watchdog",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1788393606000,
+      "tag": "0006_maintenance_heartbeat",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1788393607000,
+      "tag": "0007_release_attestations",
+      "breakpoints": true
+    }
+  ]
+}

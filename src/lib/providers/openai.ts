@@ -5,7 +5,6 @@ import { sha256Hex, stableJson } from "@/lib/crypto";
 import { AppError } from "@/lib/errors";
 import {
   DraftAnalysisSchema,
-  DraftQuestionAnswerSchema,
   type DraftAnalysis,
   type DraftQuestionAnswer
 } from "@/lib/analysis/draft";
@@ -17,8 +16,9 @@ const GPT_5_4_MINI_CONTEXT_TOKENS = 400_000;
 const MODEL_FRAGMENT_CHARACTERS = 12_000;
 const OPENAI_INPUT_MICRO_USD_PER_TOKEN = 0.75;
 const OPENAI_OUTPUT_MICRO_USD_PER_TOKEN = 4.5;
-const OPENAI_EXTRACTION_PHASE_TIMEOUT_MS = 120_000;
-const OPENAI_QA_PHASE_TIMEOUT_MS = 20_000;
+export const OPENAI_EXTRACTION_PHASE_TIMEOUT_MS = 120_000;
+export const OPENAI_MIN_PAID_BATCH_WINDOW_MS = 20_000;
+export const OPENAI_API_BASE_URL = "https://api.openai.com/v1";
 
 export interface ModelDocumentInput {
   document_sha256: string;
@@ -43,8 +43,29 @@ export interface QuestionCallResult {
   responseId: string;
 }
 
+export interface ExtractionBatchPlan {
+  batchIndex: number;
+  totalBatches: number;
+  maximumEstimatedCostMicroUsd: number;
+  remainingMaximumEstimatedCostMicroUsd: number;
+}
+
+export interface ExtractionBatchSettlement extends ExtractionBatchPlan {
+  status: "succeeded" | "failed";
+  estimatedCostMicroUsd: number;
+  latencyMs: number;
+}
+
+export interface PaidExtractionCallbacks {
+  beforePaidBatchDispatch(plan: ExtractionBatchPlan): Promise<void>;
+  settlePaidBatch(settlement: ExtractionBatchSettlement): Promise<void>;
+}
+
 export interface AnalysisModel {
-  extract(documents: ModelDocumentInput[]): Promise<ExtractionCallResult>;
+  extract(
+    documents: ModelDocumentInput[],
+    paidCallbacks?: PaidExtractionCallbacks
+  ): Promise<ExtractionCallResult>;
   answer(question: string, documents: ModelDocumentInput[]): Promise<QuestionCallResult>;
 }
 
@@ -88,6 +109,42 @@ export function estimateOpenAiCostMicroUsd(inputTokens: number, outputTokens: nu
     inputTokens * OPENAI_INPUT_MICRO_USD_PER_TOKEN +
     outputTokens * OPENAI_OUTPUT_MICRO_USD_PER_TOKEN
   );
+}
+
+function validatedResponseUsage(usage: unknown): {
+  inputTokens: number;
+  outputTokens: number;
+} | null {
+  if (typeof usage !== "object" || usage === null) return null;
+  const candidate = usage as { input_tokens?: unknown; output_tokens?: unknown };
+  if (
+    !Number.isSafeInteger(candidate.input_tokens) ||
+    (candidate.input_tokens as number) < 0 ||
+    !Number.isSafeInteger(candidate.output_tokens) ||
+    (candidate.output_tokens as number) < 0
+  ) return null;
+  return {
+    inputTokens: candidate.input_tokens as number,
+    outputTokens: candidate.output_tokens as number
+  };
+}
+
+function addUsageTokens(total: number | null, observed: number) {
+  if (total === null) return null;
+  const next = total + observed;
+  return Number.isSafeInteger(next) && next >= 0 ? next : null;
+}
+
+function observedCostOrMaximum(
+  maximumEstimatedCostMicroUsd: number,
+  inputTokens: number | null,
+  outputTokens: number | null
+) {
+  if (inputTokens === null || outputTokens === null) return maximumEstimatedCostMicroUsd;
+  const observed = estimateOpenAiCostMicroUsd(inputTokens, outputTokens);
+  return Number.isSafeInteger(observed) && observed >= 0
+    ? observed
+    : maximumEstimatedCostMicroUsd;
 }
 
 export function estimateOpenAiBatchFailureCostMicroUsd(error: ModelBatchError) {
@@ -247,9 +304,13 @@ function disambiguateModelIds<T>(
   });
 }
 
-function remainingRequestTimeout(deadlineMs: number, now: () => number): number {
+function remainingRequestTimeout(
+  deadlineMs: number,
+  now: () => number,
+  minimumMs = 1
+): number {
   const remaining = Math.floor(deadlineMs - now());
-  if (remaining <= 0) {
+  if (remaining < minimumMs) {
     throw new AppError("MODEL_UNAVAILABLE", "The aggregate OpenAI phase deadline was exhausted.", {
       httpStatus: 503,
       retryable: true
@@ -318,13 +379,31 @@ export class OpenAIResponsesAdapter implements AnalysisModel {
     }
     // Whole-pipeline Workflow retries are disabled. Each deterministic batch is
     // attempted once; total serialized input and total output tokens are capped.
-    this.client = client ?? new OpenAI({ apiKey: config.OPENAI_API_KEY, timeout: 120_000, maxRetries: 0 });
+    // Pin the credential-bearing SDK to OpenAI's exact official API. The SDK
+    // otherwise honors ambient OPENAI_BASE_URL, which must not be able to
+    // redirect an API key or tender text to an operator-controlled host.
+    this.client = client ?? new OpenAI({
+      apiKey: config.OPENAI_API_KEY,
+      baseURL: OPENAI_API_BASE_URL,
+      timeout: 120_000,
+      maxRetries: 0
+    });
   }
 
-  async extract(documents: ModelDocumentInput[]): Promise<ExtractionCallResult> {
+  async extract(
+    documents: ModelDocumentInput[],
+    paidCallbacks?: PaidExtractionCallbacks
+  ): Promise<ExtractionCallResult> {
     const started = this.now();
     const deadline = started + OPENAI_EXTRACTION_PHASE_TIMEOUT_MS;
     try {
+      if (!paidCallbacks) {
+        throw new AppError(
+          "MODEL_UNAVAILABLE",
+          "OpenAI paid-call accounting callbacks are not configured.",
+          { httpStatus: 503, retryable: false }
+        );
+      }
       const inputs = prepareExtractionInputs(documents, this.config);
       const perBatchOutputTokens = Math.floor(this.config.OPENAI_MAX_OUTPUT_TOKENS / inputs.length);
       const format = zodTextFormat(DraftAnalysisSchema, "rfp_xray_analysis");
@@ -356,6 +435,14 @@ export class OpenAIResponsesAdapter implements AnalysisModel {
           retryable: true
         });
       }
+      const aggregateMinimumPaidWindow = inputs.length * OPENAI_MIN_PAID_BATCH_WINDOW_MS;
+      if (deadline - this.now() < aggregateMinimumPaidWindow) {
+        throw new AppError(
+          "MODEL_UNAVAILABLE",
+          "The complete extraction batch plan cannot fit the aggregate paid-call window.",
+          { httpStatus: 503, retryable: true }
+        );
+      }
       const totalInputTokens = tokenCounts.reduce((total, count) => total + count, 0);
       const exceedsContext = tokenCounts.some((count) =>
         count + perBatchOutputTokens > GPT_5_4_MINI_CONTEXT_TOKENS
@@ -375,6 +462,9 @@ export class OpenAIResponsesAdapter implements AnalysisModel {
           { httpStatus: 422 }
         );
       }
+      const maximumBatchCosts = tokenCounts.map((inputTokens) =>
+        estimateOpenAiCostMicroUsd(inputTokens, perBatchOutputTokens)
+      );
       const analyses: DraftAnalysis[] = [];
       const responseIds: string[] = [];
       let inputTokens: number | null = 0;
@@ -382,8 +472,48 @@ export class OpenAIResponsesAdapter implements AnalysisModel {
       for (const [index, input] of inputs.entries()) {
         let responseReturned = false;
         let requestAttempted = false;
+        let pendingPersisted = false;
+        let settlementAttempted = false;
+        let responseInputTokens: number | null = null;
+        let responseOutputTokens: number | null = null;
+        const maximumEstimatedCostMicroUsd = maximumBatchCosts[index];
+        if (maximumEstimatedCostMicroUsd === undefined) {
+          throw new AppError("MODEL_UNAVAILABLE", "The OpenAI batch cost plan is incomplete.", {
+            httpStatus: 503,
+            retryable: false
+          });
+        }
+        const plan: ExtractionBatchPlan = {
+          batchIndex: index,
+          totalBatches: inputs.length,
+          maximumEstimatedCostMicroUsd,
+          remainingMaximumEstimatedCostMicroUsd: maximumBatchCosts
+            .slice(index + 1)
+            .reduce((total, amount) => total + amount, 0)
+        };
+        const batchStarted = this.now();
         try {
-          const timeout = remainingRequestTimeout(deadline, this.now);
+          // Avoid writing a durable commitment when the paid call is already
+          // unable to fit. The callback itself may take time, so this is only
+          // a preliminary check and must not be reused for the request.
+          remainingRequestTimeout(
+            deadline,
+            this.now,
+            OPENAI_MIN_PAID_BATCH_WINDOW_MS
+          );
+          // This is the last awaited boundary before the paid request. The
+          // callback must atomically persist the deterministic pending batch
+          // commitment under the caller's current processing claim.
+          await paidCallbacks.beforePaidBatchDispatch(plan);
+          pendingPersisted = true;
+          // No awaited boundary may sit between this fresh deadline check and
+          // the paid SDK dispatch. A slow ledger write must not grant the
+          // request a stale timeout that can cross the Workflow hard limit.
+          const timeout = remainingRequestTimeout(
+            deadline,
+            this.now,
+            OPENAI_MIN_PAID_BATCH_WINDOW_MS
+          );
           requestAttempted = true;
           const response = await this.client.responses.parse({
             model: this.config.OPENAI_EXTRACTION_MODEL,
@@ -399,20 +529,56 @@ export class OpenAIResponsesAdapter implements AnalysisModel {
           });
           responseReturned = true;
           responseIds.push(response.id);
-          inputTokens = inputTokens === null || response.usage?.input_tokens === undefined
-            ? null : inputTokens + response.usage.input_tokens;
-          outputTokens = outputTokens === null || response.usage?.output_tokens === undefined
-            ? null : outputTokens + response.usage.output_tokens;
+          const validatedUsage = validatedResponseUsage(response.usage);
+          responseInputTokens = validatedUsage?.inputTokens ?? null;
+          responseOutputTokens = validatedUsage?.outputTokens ?? null;
+          inputTokens = validatedUsage === null
+            ? null
+            : addUsageTokens(inputTokens, validatedUsage.inputTokens);
+          outputTokens = validatedUsage === null
+            ? null
+            : addUsageTokens(outputTokens, validatedUsage.outputTokens);
           if (!response.output_parsed) {
             throw new AppError(
               "ANALYSIS_INCOMPLETE",
               "The model did not return a complete structured analysis batch."
             );
           }
+          settlementAttempted = true;
+          await paidCallbacks.settlePaidBatch({
+            ...plan,
+            status: "succeeded",
+            estimatedCostMicroUsd: observedCostOrMaximum(
+              plan.maximumEstimatedCostMicroUsd,
+              responseInputTokens,
+              responseOutputTokens
+            ),
+            latencyMs: Math.max(0, Math.round(this.now() - batchStarted))
+          });
           analyses.push(response.output_parsed);
         } catch (error) {
+          let failure = error;
+          if (pendingPersisted && !settlementAttempted) {
+            settlementAttempted = true;
+            try {
+              await paidCallbacks.settlePaidBatch({
+                ...plan,
+                status: "failed",
+                estimatedCostMicroUsd: requestAttempted
+                  ? observedCostOrMaximum(
+                      plan.maximumEstimatedCostMicroUsd,
+                      responseInputTokens,
+                      responseOutputTokens
+                    )
+                  : 0,
+                latencyMs: Math.max(0, Math.round(this.now() - batchStarted))
+              });
+            } catch (settlementError) {
+              failure = settlementError;
+            }
+          }
           throw new ModelBatchError({
-            cause: error,
+            cause: failure,
             completedResponseIds: responseIds,
             completedInputTokens: responseIds.length > 0 ? inputTokens : null,
             completedOutputTokens: responseIds.length > 0 ? outputTokens : null,
@@ -442,79 +608,16 @@ export class OpenAIResponsesAdapter implements AnalysisModel {
   }
 
   async answer(question: string, documents: ModelDocumentInput[]): Promise<QuestionCallResult> {
-    const started = this.now();
-    const deadline = started + OPENAI_QA_PHASE_TIMEOUT_MS;
-    try {
-      const questionDocuments = evidenceDocuments(documents).map((document) => ({
-        document_sha256: document.document_sha256,
-        document_name: document.document_name,
-        role: document.role,
-        amendment_number: document.amendment_number,
-        source_fragments: document.source_fragments
-      }));
-      const input = boundedModelInput(
-        `Question: ${question}\n\nAnswer only from these document chunks. If the answer is not stated, return not_found:\n`,
-        questionDocuments,
-        this.config.OPENAI_MAX_REQUEST_INPUT_BYTES
-      ).serialized;
-      const format = zodTextFormat(DraftQuestionAnswerSchema, "rfp_xray_question");
-      let inputTokens: number;
-      try {
-        const counted = await this.client.beta.responses.inputTokens.count({
-          model: this.config.OPENAI_QA_MODEL,
-          instructions: CLOSED_WORLD_INSTRUCTIONS,
-          input,
-          tools: [],
-          text: { format }
-        }, {
-          timeout: remainingRequestTimeout(deadline, this.now),
-          maxRetries: 0
-        });
-        inputTokens = counted.input_tokens;
-      } catch (error) {
-        throw new AppError("MODEL_UNAVAILABLE", "OpenAI input-token preflight is unavailable.", {
-          httpStatus: 503,
-          retryable: true,
-          cause: error
-        });
-      }
-      const maximumOutputTokens = Math.min(this.config.OPENAI_MAX_OUTPUT_TOKENS, 4_096);
-      if (
-        !Number.isSafeInteger(inputTokens) || inputTokens < 0 ||
-        inputTokens > this.config.OPENAI_MAX_INPUT_TOKENS ||
-        inputTokens + maximumOutputTokens > GPT_5_4_MINI_CONTEXT_TOKENS
-      ) {
-        throw new AppError("BUDGET_EXCEEDED", "The question exceeds the exact-token model budget.", {
-          httpStatus: 422
-        });
-      }
-      const response = await this.client.responses.parse({
-        model: this.config.OPENAI_QA_MODEL,
-        store: false,
-        tools: [],
-        instructions: CLOSED_WORLD_INSTRUCTIONS,
-        input,
-        max_output_tokens: maximumOutputTokens,
-        text: { format }
-      }, {
-        timeout: remainingRequestTimeout(deadline, this.now),
-        maxRetries: 0
-      });
-      if (!response.output_parsed) {
-        throw new AppError("ANALYSIS_INCOMPLETE", "The model did not return a structured answer.");
-      }
-      return {
-        answer: response.output_parsed,
-        latencyMs: Math.round(this.now() - started),
-        responseId: response.id
-      };
-    } catch (error) {
-      if (error instanceof AppError) throw error;
-      throw new AppError("MODEL_UNAVAILABLE", "Document Q&A is temporarily unavailable.", {
-        retryable: true,
-        cause: error
-      });
-    }
+    void question;
+    void documents;
+    // Public Q&A is intentionally served from persisted, already-cited
+    // evidence. Keeping an unledgered paid SDK path here would allow a future
+    // caller to bypass the run reservation and processing fence.
+    throw new AppError(
+      "MODEL_UNAVAILABLE",
+      "Paid model Q&A is disabled; use the persisted evidence-only Q&A service.",
+      { httpStatus: 503, retryable: false }
+    );
   }
 }
 

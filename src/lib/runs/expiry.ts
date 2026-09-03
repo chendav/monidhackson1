@@ -1,12 +1,12 @@
 import { cleanupGate, executeCleanup, type CleanupTarget } from "@/lib/cleanup";
 import { sha256Hex } from "@/lib/crypto";
 import { transitionRun } from "@/lib/runs/state-machine";
-import type { RunStore } from "@/lib/runs/store";
+import { PROCESSING_LEASE_MS, type RunStore } from "@/lib/runs/store";
 import type { CleanupReceipt, RunRecord } from "@/lib/runs/types";
 import { getUploadStorage, stagingBlobPath, type UploadStorage } from "@/lib/storage/uploads";
 
 const AUDIT_RETENTION_MS = 30 * 24 * 60 * 60_000;
-const FALLBACK_PROCESSING_LEASE_MS = 20 * 60_000;
+const FALLBACK_PROCESSING_LEASE_MS = PROCESSING_LEASE_MS;
 const CLEANUP_BATCH_SIZE = 100;
 
 function terminalWinner(
@@ -75,6 +75,16 @@ function retryableTargets(record: RunRecord, storage: UploadStorage): CleanupTar
   });
 }
 
+function providerSourceCleanupAuthorized(record: RunRecord, resourceId: string, now: Date) {
+  const watchdog = record.sourceCleanupWatchdogs.find((candidate) =>
+    candidate.resourceIds.includes(resourceId)
+  );
+  if (!watchdog || !watchdog.providerCallStartedAt) return true;
+  if (watchdog.providerResultCapturedAt) return true;
+  return watchdog.sourceAccessExpiresAt !== null &&
+    new Date(watchdog.sourceAccessExpiresAt) <= now;
+}
+
 function scrubForAudit(record: RunRecord, now: Date): RunRecord {
   return {
     ...record,
@@ -88,6 +98,14 @@ function scrubForAudit(record: RunRecord, now: Date): RunRecord {
     admissionLeaseId: null,
     admissionLeaseExpiresAt: null,
     cleanupExpectedResourceIds: [],
+    sourceCleanupWatchdogs: record.sourceCleanupWatchdogs.map((watchdog) => ({
+      ...watchdog,
+      documentId: `sha256:${sha256Hex(watchdog.documentId)}`,
+      resourceIds: watchdog.resourceIds.map((resourceId) =>
+        `sha256:${sha256Hex(resourceId)}`
+      ),
+      watchdogWorkflowRunId: null
+    })),
     cleanupReceipts: record.cleanupReceipts.map((receipt) => ({
       ...receipt,
       resourceId: `sha256:${sha256Hex(receipt.resourceId)}`,
@@ -112,13 +130,14 @@ export async function cleanupRun(
   store: RunStore,
   storage: UploadStorage,
   terminal: "failed" | "expired",
-  now = new Date()
+  now = new Date(),
+  options: { onlyIfProcessingLeaseExpired?: boolean } = {}
 ): Promise<RunRecord> {
   // Revoke the processing capability before touching external resources. A
   // worker holding the old lease can continue unwinding, but every guarded
   // write is fenced out immediately. Keep the old lease expiry as the point
   // after which its application-only process memory can be considered gone.
-  const revoked = await store.update(record.id, (current) => {
+  const revoke = (current: RunRecord) => {
     if (current.status === "expired") return current;
     const hadProcessingClaim = current.processingLeaseId !== null;
     const quiescenceDeadline = hadProcessingClaim
@@ -145,7 +164,16 @@ export async function cleanupRun(
         : current.expiresAt,
       updatedAt: now.toISOString()
     };
-  });
+  };
+  const conditional = options.onlyIfProcessingLeaseExpired
+    ? await store.updateIfProcessingLeaseExpired(record.id, now, revoke)
+    : null;
+  // An explicit store result is required here: a winning heartbeat can leave a
+  // fresh lease, while a winning READY transition deliberately leaves a null
+  // lease. Neither state may be inferred from the stale record supplied by the
+  // watchdog, and neither authorizes any external deletion.
+  if (conditional && !conditional.applied) return conditional.record;
+  const revoked = conditional?.record ?? await store.update(record.id, revoke);
   if (revoked.status === "expired") return revoked;
 
   const alreadyDeleted = new Set(revoked.cleanupReceipts
@@ -153,6 +181,10 @@ export async function cleanupRun(
     .map((receipt) => receipt.resourceId));
   const revokedWorkerHasQuiesced = quiescenceReached(revoked, now);
   const targets = retryableTargets(revoked, storage)
+    // A cancellation or retry-cleanup workflow must not revoke a source URL
+    // while an unobserved provider call may still be fetching it. The durable
+    // watchdog unlocks these targets on confirmed capture or access expiry.
+    .filter((target) => providerSourceCleanupAuthorized(revoked, target.resourceId, now))
     // A still-running worker might recreate a deterministic staging object
     // after an early deletion. Once the lease has elapsed, always delete and
     // reconfirm every durable target instead of trusting historical receipts.
@@ -230,20 +262,37 @@ export async function expireRun(
 export async function expireDueRuns(
   store: RunStore,
   storage: UploadStorage = getUploadStorage(),
-  now = new Date()
+  now = new Date(),
+  limit = CLEANUP_BATCH_SIZE,
+  options: {
+    incomingLimit?: number;
+    assertWithinDeadline?: () => void;
+  } = {}
 ) {
   // The store performs the due/stale filtering and applies a hard batch
   // limit. This keeps maintenance work proportional to actionable records
   // instead of loading the entire run table into application memory.
-  const due = await store.listCleanupCandidates(now, CLEANUP_BATCH_SIZE);
+  options.assertWithinDeadline?.();
+  const due = await store.listCleanupCandidates(
+    now,
+    Math.min(Math.max(Math.trunc(limit), 1), CLEANUP_BATCH_SIZE)
+  );
   const results: RunRecord[] = [];
   for (const record of due) {
+    options.assertWithinDeadline?.();
     if (record.status === "expired") {
       if (record.auditExpiresAt && new Date(record.auditExpiresAt) <= now) await store.remove(record.id);
+      options.assertWithinDeadline?.();
       continue;
     }
     results.push(await expireRun(record, store, storage, now));
+    options.assertWithinDeadline?.();
   }
-  await storage.sweepExpiredIncoming(now, 100);
+  options.assertWithinDeadline?.();
+  await storage.sweepExpiredIncoming(
+    now,
+    Math.min(Math.max(Math.trunc(options.incomingLimit ?? 100), 1), 100)
+  );
+  options.assertWithinDeadline?.();
   return results;
 }

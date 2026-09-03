@@ -72,6 +72,12 @@ export const RunStatusResponseSchema = z.strictObject({
   expires_at: z.iso.datetime(),
   cleanup_confirmed: z.boolean(),
   cost_micro_usd: z.number().int().nonnegative(),
+  cost_accounting_status: z.enum([
+    "no_paid_attempt",
+    "estimated_pending",
+    "estimated_complete",
+    "actual_complete"
+  ]),
   error: z.strictObject({
     code: ErrorCodeSchema,
     message: z.string(),
@@ -131,11 +137,42 @@ export const HealthResponseSchema = z.strictObject({
   version: z.literal("1.0"),
   mode: z.enum(["live", "local_fallback", "unavailable"]),
   dependencies: z.strictObject({
-    database: z.enum(["configured", "missing", "memory_fallback"]),
-    private_blob: z.enum(["configured", "missing", "memory_fallback"]),
-    workflow: z.enum(["configured", "missing", "microtask_fallback"]),
-    monid: z.enum(["configured", "missing", "local_fallback"]),
-    openai: z.enum(["configured", "missing", "local_fallback"])
+    database: z.enum(["ready", "missing", "unreachable", "schema_mismatch", "memory_fallback"]),
+    maintenance: z.enum(["fresh", "missing", "stale", "unreachable", "not_applicable"]),
+    private_storage: z.enum(["attested", "configured", "missing", "memory_fallback"]),
+    workflow: z.enum([
+      "attested_300s",
+      "configured_unattested",
+      "mismatch",
+      "expired",
+      "microtask_fallback"
+    ]),
+    monid: z.enum([
+      "actively_verified",
+      "configured_unattested",
+      "mismatch",
+      "expired",
+      "configured_unverified",
+      "configured",
+      "missing",
+      "local_fallback"
+    ]),
+    openai: z.enum([
+      "actively_verified",
+      "configured_unattested",
+      "mismatch",
+      "expired",
+      "configured_unverified",
+      "configured",
+      "missing",
+      "local_fallback"
+    ])
+  }),
+  storage_provider: z.enum(["railway_s3", "vercel_blob", "memory", "missing"]),
+  storage_safety: z.enum(["current", "missing", "expired", "invalid", "not_applicable"]),
+  limits: z.strictObject({
+    max_run_cost_micro_usd: z.number().int().positive(),
+    daily_cost_cap_micro_usd: z.number().int().positive()
   }),
   missing: z.array(z.string()),
   source_scope: z.literal("document_only"),

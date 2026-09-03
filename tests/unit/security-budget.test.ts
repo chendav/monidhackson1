@@ -56,7 +56,7 @@ describe("security, idempotency, quotas, and budget", () => {
     const guard = new InMemoryBudgetGuard(monotonicConfig);
     const runId = crypto.randomUUID();
     await guard.reserve({
-      runId, quotaKey: "ip:monotonic", principalKind: "guest", amountMicroUsd: 1_000,
+      runId, quotaKey: "ip:monotonic", principalKind: "guest", amountMicroUsd: 1_500,
       now: new Date("2026-09-02T01:00:00Z")
     });
     await guard.settle(runId, 1_500);
@@ -65,6 +65,32 @@ describe("security, idempotency, quotas, and budget", () => {
       runId: crypto.randomUUID(), quotaKey: "ip:other", principalKind: "guest", amountMicroUsd: 501,
       now: new Date("2026-09-02T12:00:00Z")
     })).rejects.toMatchObject({ code: "BUDGET_EXCEEDED" });
+  });
+
+  it("trips the budget circuit when observed cost exceeds its reservation or run cap", async () => {
+    const guard = new InMemoryBudgetGuard(config);
+    const runId = crypto.randomUUID();
+    await guard.reserve({
+      runId,
+      quotaKey: "ip:overage",
+      principalKind: "guest",
+      amountMicroUsd: 800,
+      now: new Date("2026-09-02T01:00:00Z")
+    });
+    await expect(guard.settle(runId, 801)).rejects.toMatchObject({
+      code: "BUDGET_EXCEEDED",
+      retryable: false
+    });
+    await expect(guard.settle(runId, 1_001)).rejects.toMatchObject({
+      code: "BUDGET_EXCEEDED",
+      retryable: false
+    });
+    for (const invalid of [Number.NaN, Number.POSITIVE_INFINITY, -1]) {
+      await expect(guard.settle(runId, invalid)).rejects.toMatchObject({
+        code: "BUDGET_EXCEEDED",
+        retryable: false
+      });
+    }
   });
 
   it("deduplicates identical requests and rejects idempotency-key reuse with different input", async () => {

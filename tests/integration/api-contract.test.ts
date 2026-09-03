@@ -296,6 +296,7 @@ describe("versioned public API contract", () => {
       expires_at: "2026-09-03T00:00:00.000Z",
       cleanup_confirmed: false,
       cost_micro_usd: 10,
+      cost_accounting_status: "estimated_pending",
       error: null
     };
     expect(RunStatusResponseSchema.safeParse(status).success).toBe(true);
@@ -333,6 +334,7 @@ describe("versioned public API contract", () => {
       config, store, budget, schedule
     });
     expect(CreateRunResponseSchema.parse(first.response).run_id).toBe(first.record.id);
+    expect(first.record.reservedMicroUsd).toBe(config.MAX_RUN_COST_MICRO_USD);
     expect(replay.created).toBe(false);
     expect(replay.record.id).toBe(first.record.id);
     expect(schedule).toHaveBeenCalledTimes(2);
@@ -368,6 +370,7 @@ describe("versioned public API contract", () => {
     expect(replay.created).toBe(false);
     expect(replay.record.id).toBe(stranded.record.id);
     expect(replay.record.workflowRunId).toBe("workflow-recovered");
+    expect(replay.record.reservedMicroUsd).toBe(config.MAX_RUN_COST_MICRO_USD);
     expect(schedule).toHaveBeenCalledExactlyOnceWith(stranded.record.id);
     expect((await store.get(stranded.record.id))?.workflowRunId).toBe("workflow-recovered");
   });

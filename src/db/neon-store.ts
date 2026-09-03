@@ -7,6 +7,7 @@ import {
   newRunRecord,
   ACTIVE_RUN_STATUSES,
   LEASED_RUN_STATUSES,
+  PROCESSING_LEASE_MS,
   type CreateRunRecordInput,
   type RunStore
 } from "@/lib/runs/store";
@@ -28,6 +29,10 @@ function toRow(record: RunRecord): typeof runs.$inferInsert {
     cleanupConfirmed: record.cleanupConfirmed,
     cleanupExpectedResourceIds: record.cleanupExpectedResourceIds,
     cleanupReceipts: record.cleanupReceipts,
+    sourceCleanupWatchdogs: record.sourceCleanupWatchdogs,
+    paidProviderAttemptStartedAt: record.paidProviderAttemptStartedAt
+      ? new Date(record.paidProviderAttemptStartedAt)
+      : null,
     citationReceipts: record.citationReceipts,
     manifests: record.manifests,
     costs: record.costs,
@@ -72,6 +77,8 @@ function fromRow(row: RunRow): RunRecord {
     cleanupConfirmed: row.cleanupConfirmed,
     cleanupExpectedResourceIds: row.cleanupExpectedResourceIds,
     cleanupReceipts: row.cleanupReceipts,
+    sourceCleanupWatchdogs: row.sourceCleanupWatchdogs,
+    paidProviderAttemptStartedAt: row.paidProviderAttemptStartedAt?.toISOString() ?? null,
     citationReceipts: row.citationReceipts,
     manifests: row.manifests,
     costs: row.costs,
@@ -195,6 +202,47 @@ export class NeonRunStore implements RunStore {
     });
   }
 
+  async updateIfProcessingLeaseExpired(
+    id: string,
+    expiredAt: Date,
+    mutate: (record: RunRecord) => RunRecord
+  ): Promise<{ applied: boolean; record: RunRecord }> {
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const current = await this.get(id);
+      if (!current) {
+        throw new AppError("ANALYSIS_INCOMPLETE", "The run was not found.", { httpStatus: 404 });
+      }
+      if (
+        (!(LEASED_RUN_STATUSES as readonly RunRecord["status"][]).includes(current.status) &&
+          current.status !== "cleanup_pending") ||
+        current.processingLeaseExpiresAt === null ||
+        new Date(current.processingLeaseExpiresAt) > expiredAt
+      ) {
+        return { applied: false, record: current };
+      }
+      const mutated = mutate(structuredClone(current));
+      const next = { ...mutated, version: current.version + 1 };
+      const [updated] = await this.db
+        .update(runs)
+        .set(toRow(next))
+        .where(and(
+          eq(runs.id, id),
+          eq(runs.version, current.version),
+          inArray(runs.status, [...LEASED_RUN_STATUSES, "cleanup_pending"]),
+          lte(runs.processingLeaseExpiresAt, expiredAt)
+        ))
+        .returning();
+      if (updated) return { applied: true, record: fromRow(updated) };
+      // A heartbeat or terminal transition may have won after the stale read.
+      // Re-read and return an explicit no-op rather than allowing callers to
+      // infer success from fields that can legitimately be null.
+    }
+    throw new AppError("ANALYSIS_INCOMPLETE", "The run was updated concurrently; retry the operation.", {
+      httpStatus: 409,
+      retryable: true
+    });
+  }
+
   async claimAdmission(
     id: string,
     now = new Date(),
@@ -230,7 +278,7 @@ export class NeonRunStore implements RunStore {
     return { record: fromRow(claimed), admissionLeaseId };
   }
 
-  async claimProcessing(id: string, now = new Date(), leaseMs = 20 * 60_000) {
+  async claimProcessing(id: string, now = new Date(), leaseMs = PROCESSING_LEASE_MS) {
     const leaseId = crypto.randomUUID();
     const [claimed] = await this.db
       .update(runs)
@@ -246,6 +294,7 @@ export class NeonRunStore implements RunStore {
       })
       .where(and(
         eq(runs.id, id),
+        isNull(runs.paidProviderAttemptStartedAt),
         or(
           eq(runs.status, "queued"),
           and(inArray(runs.status, [...LEASED_RUN_STATUSES]), lte(runs.processingLeaseExpiresAt, now))
@@ -261,6 +310,29 @@ export class NeonRunStore implements RunStore {
     }
     const record = fromRow(claimed);
     return { record, leaseId, fence: record.processingFence };
+  }
+
+  async heartbeatProcessing(
+    id: string,
+    claim: { leaseId: string; fence: number },
+    now = new Date(),
+    leaseMs = PROCESSING_LEASE_MS
+  ): Promise<RunRecord | null> {
+    const [updated] = await this.db
+      .update(runs)
+      .set({
+        processingLeaseExpiresAt: new Date(now.getTime() + leaseMs),
+        updatedAt: now,
+        version: sql`${runs.version} + 1`
+      })
+      .where(and(
+        eq(runs.id, id),
+        eq(runs.processingLeaseId, claim.leaseId),
+        eq(runs.processingFence, claim.fence),
+        inArray(runs.status, [...LEASED_RUN_STATUSES])
+      ))
+      .returning();
+    return updated ? fromRow(updated) : null;
   }
 
   async remove(id: string): Promise<void> {

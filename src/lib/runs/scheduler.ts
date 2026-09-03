@@ -63,3 +63,26 @@ export async function scheduleCleanupRetry(runId: string): Promise<string | null
   }
   return null;
 }
+
+export async function scheduleSourceCleanupWatchdog(
+  runId: string,
+  registrationId: string
+): Promise<string | null> {
+  const config = getConfig();
+  if (config.DATABASE_URL && process.env.VERCEL) {
+    const [{ start }, { sourceCleanupWatchdogWorkflow }] = await Promise.all([
+      import("workflow/api"),
+      import("@/workflows/source-cleanup-watchdog")
+    ]);
+    const workflowRun = await start(sourceCleanupWatchdogWorkflow, [runId, registrationId]);
+    return workflowRun.runId;
+  }
+  if (config.NODE_ENV === "production") {
+    throw new AppError(
+      "SOURCE_CLEANUP_PENDING",
+      "The independent source cleanup watchdog is not configured.",
+      { httpStatus: 503, retryable: true }
+    );
+  }
+  return null;
+}

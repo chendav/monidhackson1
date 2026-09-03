@@ -2,6 +2,8 @@ import { cleanupRun } from "@/lib/runs/expiry";
 import { getRunStore } from "@/lib/runs/store";
 import { getUploadStorage } from "@/lib/storage/uploads";
 
+export const maxDuration = 50;
+
 export async function retryCleanupStep(runId: string) {
   "use step";
 

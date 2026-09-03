@@ -4,11 +4,18 @@ import { and, eq, gt, inArray, isNull, lte, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/neon-http";
 import type { PresignUploadRequest, PresignUploadResponse } from "@/contracts";
 import { incomingUploads } from "@/db/schema";
-import { getConfig, type AppConfig } from "@/lib/config";
+import {
+  getConfig,
+  getPrivateStorageProvider,
+  getRailwayS3CorsAllowedOrigins,
+  getRailwayS3SafetyStatus,
+  type AppConfig
+} from "@/lib/config";
 import { sha256Hex } from "@/lib/crypto";
 import { AppError } from "@/lib/errors";
 import { auditLog } from "@/lib/logging";
 import { normalizeFilename, ownerUploadNamespace } from "@/lib/source-validation";
+import { RailwayS3UploadStorage } from "@/lib/storage/railway-s3";
 
 const MAX_PDF_BYTES = 25 * 1024 * 1024;
 const GRANT_LIFETIME_MS = 5 * 60_000;
@@ -204,7 +211,7 @@ export class LocalUploadStorage implements UploadStorage {
   async temporaryReadUrl(): Promise<string> {
     throw new AppError(
       "MONID_PARSE_FAILED",
-      "Local uploads cannot be exposed to the live parsing provider. Configure Private Blob.",
+      "Local uploads cannot be exposed to the live parsing provider. Configure private object storage.",
       { httpStatus: 503 }
     );
   }
@@ -698,11 +705,42 @@ export function setUploadStorageForTests(storage: UploadStorage | undefined) {
 
 export function getUploadStorage(config = getConfig()): UploadStorage {
   if (storageOverride) return storageOverride;
-  if (config.BLOB_READ_WRITE_TOKEN || process.env.VERCEL_OIDC_TOKEN) {
+  const provider = getPrivateStorageProvider(config);
+  if (provider === "railway_s3") {
+    const requireSafetyAttestation = config.NODE_ENV === "production";
+    const safety = getRailwayS3SafetyStatus(config);
+    if (!config.DATABASE_URL || !config.SESSION_SIGNING_SECRET ||
+      (requireSafetyAttestation && !safety.valid)) {
+      throw new AppError("ANALYSIS_INCOMPLETE", "Private S3 storage does not have a current safety attestation.", {
+        httpStatus: 503,
+        retryable: true
+      });
+    }
+    return new RailwayS3UploadStorage({
+      endpoint: config.S3_ENDPOINT!,
+      region: config.S3_REGION!,
+      bucket: config.S3_BUCKET!,
+      accessKeyId: config.S3_ACCESS_KEY_ID!,
+      secretAccessKey: config.S3_SECRET_ACCESS_KEY!,
+      forcePathStyle: config.S3_URL_STYLE === "path",
+      databaseUrl: config.DATABASE_URL,
+      namespaceSecret: config.SESSION_SIGNING_SECRET,
+      requireSafetyAttestation,
+      safetyAttestation: config.S3_SAFETY_ATTESTATION,
+      corsAllowedOrigins: getRailwayS3CorsAllowedOrigins(config),
+      MAX_OUTSTANDING_UPLOAD_GRANTS: config.MAX_OUTSTANDING_UPLOAD_GRANTS,
+      GUEST_UPLOAD_DOCUMENTS_PER_DAY: config.GUEST_UPLOAD_DOCUMENTS_PER_DAY,
+      API_UPLOAD_DOCUMENTS_PER_DAY: config.API_UPLOAD_DOCUMENTS_PER_DAY,
+      GUEST_UPLOAD_BYTES_PER_DAY: config.GUEST_UPLOAD_BYTES_PER_DAY,
+      API_UPLOAD_BYTES_PER_DAY: config.API_UPLOAD_BYTES_PER_DAY,
+      GLOBAL_UPLOAD_BYTES_PER_DAY: config.GLOBAL_UPLOAD_BYTES_PER_DAY
+    });
+  }
+  if (provider === "vercel_blob") {
     return new VercelBlobUploadStorage(config);
   }
   if (config.NODE_ENV === "production") {
-    throw new AppError("ANALYSIS_INCOMPLETE", "Private Blob storage is not configured.", {
+    throw new AppError("ANALYSIS_INCOMPLETE", "Private object storage is not configured.", {
       httpStatus: 503, retryable: true
     });
   }

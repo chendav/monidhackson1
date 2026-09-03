@@ -28,6 +28,12 @@ export const LEASED_RUN_STATUSES = [
   "verifying"
 ] as const satisfies readonly RunRecord["status"][];
 
+// A hard-killed worker must become quiescent inside the one-minute source
+// cleanup SLA. A live worker refreshes this lease while it owns the processing
+// fence; a dead worker cannot.
+export const PROCESSING_LEASE_MS = 45_000;
+export const PROCESSING_HEARTBEAT_INTERVAL_MS = 10_000;
+
 export function isActiveRunStatus(status: RunRecord["status"]): boolean {
   return (ACTIVE_RUN_STATUSES as readonly RunRecord["status"][]).includes(status);
 }
@@ -50,6 +56,11 @@ export interface RunStore {
     mutate: (record: RunRecord) => RunRecord,
     claim?: { leaseId: string; fence: number } | { admissionLeaseId: string }
   ): Promise<RunRecord>;
+  updateIfProcessingLeaseExpired(
+    id: string,
+    expiredAt: Date,
+    mutate: (record: RunRecord) => RunRecord
+  ): Promise<{ applied: boolean; record: RunRecord }>;
   claimAdmission(
     id: string,
     now?: Date,
@@ -61,6 +72,12 @@ export interface RunStore {
     now?: Date,
     leaseMs?: number
   ): Promise<{ record: RunRecord; leaseId: string; fence: number } | null>;
+  heartbeatProcessing(
+    id: string,
+    claim: { leaseId: string; fence: number },
+    now?: Date,
+    leaseMs?: number
+  ): Promise<RunRecord | null>;
   remove(id: string): Promise<void>;
   listExpired(now?: Date): Promise<RunRecord[]>;
   listUnscheduledQueued(before: Date, limit?: number): Promise<RunRecord[]>;
@@ -96,6 +113,8 @@ export function newRunRecord(input: CreateRunRecordInput): RunRecord {
         : [staged];
     }),
     cleanupReceipts: [],
+    sourceCleanupWatchdogs: [],
+    paidProviderAttemptStartedAt: null,
     citationReceipts: [],
     manifests: [],
     costs: [],
@@ -193,6 +212,36 @@ export class InMemoryRunStore implements RunStore {
     return clone(next);
   }
 
+  async updateIfProcessingLeaseExpired(
+    id: string,
+    expiredAt: Date,
+    mutate: (record: RunRecord) => RunRecord
+  ): Promise<{ applied: boolean; record: RunRecord }> {
+    const current = this.records.get(id);
+    if (!current) {
+      throw new AppError("ANALYSIS_INCOMPLETE", "The run was not found.", { httpStatus: 404 });
+    }
+    if (
+      (!(LEASED_RUN_STATUSES as readonly RunRecord["status"][]).includes(current.status) &&
+        current.status !== "cleanup_pending") ||
+      current.processingLeaseExpiresAt === null ||
+      new Date(current.processingLeaseExpiresAt) > expiredAt
+    ) {
+      return { applied: false, record: clone(current) };
+    }
+    const next = mutate(clone(current));
+    if (next.id !== current.id || next.ownerId !== current.ownerId) {
+      throw new AppError("ANALYSIS_INCOMPLETE", "Immutable run identity fields were changed.", {
+        httpStatus: 500
+      });
+    }
+    if (current.idempotencyKey && next.idempotencyKey === null) {
+      this.idempotency.delete(`${current.ownerId}\u0000${current.idempotencyKey}`);
+    }
+    this.records.set(id, clone(next));
+    return { applied: true, record: clone(next) };
+  }
+
   async claimAdmission(
     id: string,
     now = new Date(),
@@ -220,7 +269,7 @@ export class InMemoryRunStore implements RunStore {
     return { record: clone(record), admissionLeaseId };
   }
 
-  async claimProcessing(id: string, now = new Date(), leaseMs = 20 * 60_000) {
+  async claimProcessing(id: string, now = new Date(), leaseMs = PROCESSING_LEASE_MS) {
     const current = this.records.get(id);
     if (!current) {
       throw new AppError("ANALYSIS_INCOMPLETE", "The run was not found.", { httpStatus: 404 });
@@ -230,6 +279,10 @@ export class InMemoryRunStore implements RunStore {
     const reclaimable =
       (LEASED_RUN_STATUSES as readonly RunRecord["status"][]).includes(current.status) &&
       leaseExpired;
+    // Once any paid attempt may have reached the provider, restarting the
+    // whole pipeline would risk a duplicate charge. The cleanup watchdog owns
+    // recovery from that point forward.
+    if (current.paidProviderAttemptStartedAt !== null) return null;
     if (current.status !== "queued" && !reclaimable) return null;
     if (["ready", "partial", "failed", "expired"].includes(current.status)) return null;
     const leaseId = crypto.randomUUID();
@@ -247,6 +300,31 @@ export class InMemoryRunStore implements RunStore {
     };
     this.records.set(id, clone(record));
     return { record: clone(record), leaseId, fence };
+  }
+
+  async heartbeatProcessing(
+    id: string,
+    claim: { leaseId: string; fence: number },
+    now = new Date(),
+    leaseMs = PROCESSING_LEASE_MS
+  ): Promise<RunRecord | null> {
+    const current = this.records.get(id);
+    if (!current) {
+      throw new AppError("ANALYSIS_INCOMPLETE", "The run was not found.", { httpStatus: 404 });
+    }
+    if (
+      current.processingLeaseId !== claim.leaseId ||
+      current.processingFence !== claim.fence ||
+      !(LEASED_RUN_STATUSES as readonly RunRecord["status"][]).includes(current.status)
+    ) return null;
+    const record: RunRecord = {
+      ...current,
+      processingLeaseExpiresAt: new Date(now.getTime() + leaseMs).toISOString(),
+      updatedAt: now.toISOString(),
+      version: current.version + 1
+    };
+    this.records.set(id, clone(record));
+    return clone(record);
   }
 
   async remove(id: string): Promise<void> {

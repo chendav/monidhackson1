@@ -1,12 +1,21 @@
 ALTER TABLE "runs" ALTER COLUMN "input" DROP NOT NULL;
+--> statement-breakpoint
 ALTER TABLE "runs" ALTER COLUMN "request_hash" DROP NOT NULL;
+--> statement-breakpoint
 ALTER TABLE "runs" ADD COLUMN IF NOT EXISTS "processing_lease_id" uuid;
+--> statement-breakpoint
 ALTER TABLE "runs" ADD COLUMN IF NOT EXISTS "processing_lease_expires_at" timestamptz;
+--> statement-breakpoint
 ALTER TABLE "runs" ADD COLUMN IF NOT EXISTS "processing_fence" integer NOT NULL DEFAULT 0;
+--> statement-breakpoint
 ALTER TABLE "runs" ADD COLUMN IF NOT EXISTS "terminal_after_cleanup" text;
+--> statement-breakpoint
 ALTER TABLE "runs" ADD COLUMN IF NOT EXISTS "audit_expires_at" timestamptz;
+--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "runs_audit_expires_at_idx" ON "runs" ("audit_expires_at");
+--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "runs_processing_lease_expiry_idx" ON "runs" ("processing_lease_expires_at");
+--> statement-breakpoint
 
 CREATE TABLE IF NOT EXISTS "incoming_uploads" (
   "blob_path" text PRIMARY KEY,
@@ -30,6 +39,9 @@ CREATE TABLE IF NOT EXISTS "incoming_uploads" (
   "created_at" timestamptz NOT NULL,
   "updated_at" timestamptz NOT NULL
 );
+--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "incoming_uploads_expiry_idx" ON "incoming_uploads" ("expires_at");
+--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "incoming_uploads_cleanup_due_idx" ON "incoming_uploads" ("cleanup_due_at");
+--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "incoming_uploads_owner_idx" ON "incoming_uploads" ("owner_id");

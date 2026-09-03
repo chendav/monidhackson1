@@ -4,6 +4,7 @@ import {
   integer,
   jsonb,
   pgTable,
+  primaryKey,
   text,
   timestamp,
   uniqueIndex,
@@ -12,7 +13,55 @@ import {
 import { sql } from "drizzle-orm";
 import type { AnalysisResult, CostEvent, CreateRunRequest, DocumentManifest } from "@/contracts";
 import type { QuoteVerificationReceipt } from "@/lib/evidence/citations";
-import type { CleanupReceipt, RunFailure } from "@/lib/runs/types";
+import type { CleanupReceipt, RunFailure, SourceCleanupWatchdog } from "@/lib/runs/types";
+
+export const APP_SCHEMA_VERSION = 8;
+export const APP_SCHEMA_MARKER = "rfp-xray-schema-v8";
+
+export const appSchemaMeta = pgTable("app_schema_meta", {
+  id: text("id").primaryKey(),
+  schemaVersion: integer("schema_version").notNull(),
+  marker: text("marker").notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull()
+});
+
+export const maintenanceHeartbeats = pgTable("maintenance_heartbeats", {
+  id: text("id").primaryKey(),
+  completedAt: timestamp("completed_at", { withTimezone: true }).notNull(),
+  durationMs: integer("duration_ms").notNull(),
+  workBudgetMs: integer("work_budget_ms").notNull(),
+  recoveredRunCount: integer("recovered_run_count").notNull(),
+  admissionFailureCount: integer("admission_failure_count").notNull(),
+  admissionDeferredCount: integer("admission_deferred_count").notNull(),
+  expiredRunCount: integer("expired_run_count").notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull()
+});
+
+/**
+ * Non-secret release receipts share this deployment-bound envelope. The
+ * `kind` discriminator leaves room for a later, independently verified
+ * provider-contract receipt without weakening the Workflow runtime gate.
+ */
+export const releaseAttestations = pgTable(
+  "release_attestations",
+  {
+    kind: text("kind").notNull(),
+    deploymentId: text("deployment_id").notNull(),
+    deploymentUrl: text("deployment_url").notNull(),
+    projectId: text("project_id").notNull(),
+    teamId: text("team_id").notNull(),
+    gitCommitSha: text("git_commit_sha").notNull(),
+    payload: jsonb("payload").$type<Record<string, unknown>>().notNull(),
+    payloadSha256: text("payload_sha256").notNull(),
+    issuedAt: timestamp("issued_at", { withTimezone: true }).notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull()
+  },
+  (table) => [
+    primaryKey({ columns: [table.kind, table.deploymentId] }),
+    index("release_attestations_kind_issued_idx").on(table.kind, table.issuedAt)
+  ]
+);
 
 export const runs = pgTable(
   "runs",
@@ -29,6 +78,11 @@ export const runs = pgTable(
     cleanupConfirmed: boolean("cleanup_confirmed").notNull().default(false),
     cleanupExpectedResourceIds: jsonb("cleanup_expected_resource_ids").$type<string[]>().notNull(),
     cleanupReceipts: jsonb("cleanup_receipts").$type<CleanupReceipt[]>().notNull(),
+    sourceCleanupWatchdogs: jsonb("source_cleanup_watchdogs")
+      .$type<SourceCleanupWatchdog[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    paidProviderAttemptStartedAt: timestamp("paid_provider_attempt_started_at", { withTimezone: true }),
     citationReceipts: jsonb("citation_receipts").$type<QuoteVerificationReceipt[]>().notNull(),
     manifests: jsonb("manifests").$type<DocumentManifest[]>().notNull(),
     costs: jsonb("costs").$type<CostEvent[]>().notNull(),

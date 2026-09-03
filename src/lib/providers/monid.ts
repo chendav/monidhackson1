@@ -2,7 +2,9 @@ import { z } from "zod";
 import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
 import { getConfig, type AppConfig } from "@/lib/config";
+import { sha256Hex, stableJson } from "@/lib/crypto";
 import { AppError } from "@/lib/errors";
+import { isGloballyReachableIpAddress } from "@/lib/security/public-network";
 
 const LifecycleStatusSchema = z.enum([
   "QUEUED",
@@ -15,18 +17,51 @@ const LifecycleStatusSchema = z.enum([
   "CANCELED",
   "TIMED_OUT"
 ]);
+type LifecycleStatus = z.infer<typeof LifecycleStatusSchema>;
+
+export class MonidTerminalProviderError extends AppError {
+  readonly terminalProviderFailure = true;
+
+  constructor(
+    message: string,
+    readonly providerRunId: string,
+    readonly lifecycleStatus: LifecycleStatus | "NESTED_HTTP_FAILURE",
+    readonly costAmount: number | null,
+    readonly costCurrency: string | null,
+    readonly costProvenance: MonidCostProvenance | null,
+    options: { retryable?: boolean } = {}
+  ) {
+    super("MONID_PARSE_FAILED", message, { retryable: options.retryable });
+    this.name = "MonidTerminalProviderError";
+  }
+}
 
 export interface MonidParseInput {
   fileUrl: string;
   extension?: string;
   ocr?: boolean;
+  /** Runs after control-plane validation and immediately before paid POST. */
+  beforePaidDispatch?: () => Promise<void>;
+}
+
+export interface MonidCostProvenance {
+  kind: "credentialed_inspect";
+  inspect_schema_sha256: string;
+  value_path: string;
+  currency_path: string;
+  value_unit: "currency_major" | "micro_dollar";
+  source_value: number;
+  source_currency: "USD";
 }
 
 export interface MonidParseResult {
   markdown: string;
   runId: string;
-  costMicroUsd: number | null;
+  /** Numeric value exactly as returned at the inspected Monid cost path. */
+  costAmount: number | null;
+  costValueUnit: "currency_major" | "micro_dollar" | null;
   costCurrency: string | null;
+  costProvenance: MonidCostProvenance | null;
   providerArtifactUrl: string;
   providerRetention: "unknown";
   terminalPayload: unknown;
@@ -44,6 +79,19 @@ export interface MonidAdapterOptions {
   pollIntervalMs?: number;
   maxPolls?: number;
   resolveHostname?: (hostname: string) => Promise<string[]>;
+}
+
+const PRODUCTION_MONID_ORIGIN = "https://api.monid.ai";
+
+export function monidInspectResponseSha256(payload: unknown) {
+  return sha256Hex(stableJson(payload));
+}
+
+interface ValidatedMonidCostContract {
+  inspectSchemaSha256: string;
+  valuePath: string;
+  currencyPath: string;
+  valueUnit: "currency_major" | "micro_dollar";
 }
 
 function getPath(value: unknown, path: string): unknown {
@@ -130,6 +178,7 @@ export class MonidAdapter {
   private readonly pollIntervalMs: number;
   private readonly maxPolls: number;
   private readonly resolveHostname: (hostname: string) => Promise<string[]>;
+  private validatedCostContractPromise: Promise<ValidatedMonidCostContract | null> | undefined;
 
   constructor(options: MonidAdapterOptions = {}) {
     this.config = options.config ?? getConfig();
@@ -142,12 +191,113 @@ export class MonidAdapter {
       (await lookup(hostname, { all: true, verbatim: true })).map((entry) => entry.address));
   }
 
-  private async request(path: string, init: RequestInit): Promise<unknown> {
+  private terminalProviderError(
+    message: string,
+    runId: string,
+    lifecycleStatus: LifecycleStatus | "NESTED_HTTP_FAILURE",
+    terminal: unknown,
+    contract: ValidatedMonidCostContract | null,
+    retryable = false
+  ) {
+    const costAmount = optionalNumberAt(
+      terminal,
+      this.config.MONID_COST_VALUE_PATH,
+      "cost.value"
+    );
+    const currency = getPath(
+      terminal,
+      this.config.MONID_COST_CURRENCY_PATH ?? "cost.currency"
+    );
+    const normalizedCurrency = typeof currency === "string" ? currency.trim().toUpperCase() : null;
+    const costProvenance = contract && costAmount !== null && normalizedCurrency === "USD"
+      ? {
+          kind: "credentialed_inspect" as const,
+          inspect_schema_sha256: contract.inspectSchemaSha256,
+          value_path: contract.valuePath,
+          currency_path: contract.currencyPath,
+          value_unit: contract.valueUnit,
+          source_value: costAmount,
+          source_currency: "USD" as const
+        }
+      : null;
+    return new MonidTerminalProviderError(
+      message,
+      runId,
+      lifecycleStatus,
+      costAmount,
+      normalizedCurrency,
+      costProvenance,
+      { retryable }
+    );
+  }
+
+  /**
+   * Bearer credentials may only be sent to the exact Monid control-plane
+   * origin. Resolve the hostname immediately before every request so a
+   * private/special-use answer fails closed before the Authorization header is
+   * constructed. Redirects are deliberately disabled in `request`.
+   */
+  private async validateControlPlaneUrl(path: string): Promise<URL> {
+    let base: URL;
+    try {
+      base = new URL(this.config.MONID_API_BASE_URL);
+    } catch {
+      throw new AppError("MONID_PARSE_FAILED", "The Monid API origin is invalid.", { httpStatus: 503 });
+    }
+    const isBareHttpsOrigin = base.protocol === "https:" && !base.username && !base.password &&
+      !base.port && base.pathname === "/" && !base.search && !base.hash;
+    if (!isBareHttpsOrigin ||
+      (this.config.NODE_ENV === "production" && base.origin !== PRODUCTION_MONID_ORIGIN)) {
+      throw new AppError(
+        "MONID_PARSE_FAILED",
+        "The Monid API origin is outside the permitted production control plane.",
+        { httpStatus: 503 }
+      );
+    }
+    if (!path.startsWith("/") || path.startsWith("//")) {
+      throw new AppError("MONID_PARSE_FAILED", "The Monid API request path is invalid.");
+    }
+    const target = new URL(path, base);
+    if (target.origin !== base.origin || target.username || target.password || target.hash) {
+      throw new AppError("MONID_PARSE_FAILED", "The Monid API request target is invalid.");
+    }
+    let addresses: string[];
+    try {
+      addresses = isIP(target.hostname)
+        ? [target.hostname]
+        : await this.resolveHostname(target.hostname);
+    } catch (cause) {
+      throw new AppError(
+        "MONID_PARSE_FAILED",
+        "The Monid API host could not be resolved safely.",
+        { httpStatus: 503, retryable: true, cause }
+      );
+    }
+    if (addresses.length === 0 || addresses.some((address) => !isGloballyReachableIpAddress(address))) {
+      throw new AppError(
+        "MONID_PARSE_FAILED",
+        "The Monid API host did not resolve exclusively to public addresses.",
+        { httpStatus: 503 }
+      );
+    }
+    return target;
+  }
+
+  private async request(
+    path: string,
+    init: RequestInit,
+    beforeDispatch?: () => Promise<void>
+  ): Promise<unknown> {
     if (!this.config.MONID_API_KEY) {
       throw new AppError("MONID_PARSE_FAILED", "Monid is not configured.", { httpStatus: 503 });
     }
-    const response = await this.fetcher(new URL(path, this.config.MONID_API_BASE_URL), {
+    const target = await this.validateControlPlaneUrl(path);
+    await beforeDispatch?.();
+    const response = await this.fetcher(target, {
       ...init,
+      redirect: "manual",
+      credentials: "omit",
+      referrerPolicy: "no-referrer",
       headers: {
         authorization: `Bearer ${this.config.MONID_API_KEY}`,
         "content-type": "application/json",
@@ -156,6 +306,10 @@ export class MonidAdapter {
       },
       signal: init.signal ?? AbortSignal.timeout(20_000)
     });
+    if (response.status >= 300 && response.status < 400) {
+      await response.body?.cancel();
+      throw new AppError("MONID_PARSE_FAILED", "The Monid control-plane redirect was rejected.");
+    }
     if (!response.ok) {
       throw new AppError("MONID_PARSE_FAILED", `Monid returned HTTP ${response.status}.`, {
         retryable: response.status === 429 || response.status >= 500
@@ -184,7 +338,7 @@ export class MonidAdapter {
       throw new AppError("MONID_PARSE_FAILED", "Monid returned a parse artifact URL outside the configured allowlist.");
     }
     const addresses = isIP(hostname) ? [hostname] : await this.resolveHostname(hostname);
-    if (addresses.length === 0 || addresses.some((address) => !isPublicAddress(address))) {
+    if (addresses.length === 0 || addresses.some((address) => !isGloballyReachableIpAddress(address))) {
       throw new AppError("MONID_PARSE_FAILED", "The parse artifact host did not resolve exclusively to public addresses.");
     }
     return url;
@@ -224,11 +378,46 @@ export class MonidAdapter {
     return payload;
   }
 
+  /**
+   * A configured path/unit/hash is only an operator assertion. Bind cost
+   * provenance to a credentialed inspect response fetched in this adapter
+   * lifetime, and fail before the paid run when the pinned response changed.
+   */
+  async validateCurrentCostContract(): Promise<ValidatedMonidCostContract | null> {
+    this.validatedCostContractPromise ??= (async () => {
+      const inspectSchemaSha256 = this.config.MONID_INSPECT_SCHEMA_SHA256;
+      const valuePath = this.config.MONID_COST_VALUE_PATH;
+      const currencyPath = this.config.MONID_COST_CURRENCY_PATH;
+      const valueUnit = this.config.MONID_COST_VALUE_UNIT;
+      if (!inspectSchemaSha256 || !valuePath || !currencyPath || !valueUnit) {
+        if (this.config.NODE_ENV === "production") {
+          throw new AppError(
+            "MONID_PARSE_FAILED",
+            "The credentialed Monid cost contract is not configured for production.",
+            { httpStatus: 503, retryable: false }
+          );
+        }
+        return null;
+      }
+      const payload = await this.inspect();
+      if (monidInspectResponseSha256(payload) !== inspectSchemaSha256) {
+        throw new AppError(
+          "MONID_PARSE_FAILED",
+          "The current credentialed Monid inspect response does not match the pinned contract.",
+          { httpStatus: 503, retryable: false }
+        );
+      }
+      return { inspectSchemaSha256, valuePath, currencyPath, valueUnit };
+    })();
+    return this.validatedCostContractPromise;
+  }
+
   async parse(input: MonidParseInput): Promise<MonidParseResult> {
     const fileUrl = new URL(input.fileUrl);
     if (fileUrl.protocol !== "https:") {
       throw new AppError("MONID_PARSE_FAILED", "Monid parser input requires a short-lived HTTPS URL.");
     }
+    const costContract = await this.validateCurrentCostContract();
     const { provider, endpoint } = resolveProviderEndpoint(this.config);
     const started = await this.request("/v1/run", {
       method: "POST",
@@ -247,7 +436,7 @@ export class MonidAdapter {
           }
         }
       })
-    });
+    }, input.beforePaidDispatch);
     const runId = selectUniqueString(
       started,
       this.config.MONID_RUN_ID_PATH,
@@ -270,9 +459,14 @@ export class MonidAdapter {
         throw new AppError("MONID_PARSE_FAILED", "Monid returned an unknown lifecycle status.");
       }
       if (["FAILED", "CANCELLED", "CANCELED", "TIMED_OUT"].includes(status.data)) {
-        throw new AppError("MONID_PARSE_FAILED", `Monid run ended with ${status.data}.`, {
-          retryable: status.data === "TIMED_OUT"
-        });
+        throw this.terminalProviderError(
+          `Monid run ended with ${status.data}.`,
+          runId,
+          status.data,
+          payload,
+          costContract,
+          status.data === "TIMED_OUT"
+        );
       }
       if (status.data === "COMPLETED") {
         terminal = payload;
@@ -293,9 +487,12 @@ export class MonidAdapter {
       ? providerStatusRaw
       : Number(providerStatusRaw);
     if (!Number.isInteger(providerStatus) || providerStatus < 200 || providerStatus >= 300) {
-      throw new AppError(
-        "MONID_PARSE_FAILED",
-        "Monid completed but the nested provider HTTP response was not a successful 2xx result."
+      throw this.terminalProviderError(
+        "Monid completed but the nested provider HTTP response was not a successful 2xx result.",
+        runId,
+        "NESTED_HTTP_FAILURE",
+        terminal,
+        costContract
       );
     }
 
@@ -321,45 +518,41 @@ export class MonidAdapter {
     const markdown = await boundedText(artifact, 15 * 1024 * 1024);
     if (!markdown.trim()) throw new AppError("EMPTY_PARSE", "The parser returned no document text.");
 
+    const costAmount = optionalNumberAt(
+      terminal,
+      this.config.MONID_COST_VALUE_PATH,
+      "cost.value"
+    );
+    const costCurrencyValue = getPath(
+      terminal,
+      this.config.MONID_COST_CURRENCY_PATH ?? "cost.currency"
+    );
+    const costCurrency = typeof costCurrencyValue === "string"
+      ? costCurrencyValue.trim().toUpperCase()
+      : null;
+    const costValueUnit = costContract?.valueUnit ?? null;
+    const costProvenance = costAmount !== null && costCurrency === "USD" && costContract
+      ? {
+          kind: "credentialed_inspect" as const,
+          inspect_schema_sha256: costContract.inspectSchemaSha256,
+          value_path: costContract.valuePath,
+          currency_path: costContract.currencyPath,
+          value_unit: costContract.valueUnit,
+          source_value: costAmount,
+          source_currency: "USD" as const
+        }
+      : null;
+
     return {
       markdown,
       runId,
-      costMicroUsd: optionalNumberAt(
-        terminal,
-        this.config.MONID_COST_VALUE_PATH,
-        "cost.value"
-      ),
-      costCurrency: (() => {
-        const value = getPath(terminal, this.config.MONID_COST_CURRENCY_PATH ?? "cost.currency");
-        return typeof value === "string" ? value : null;
-      })(),
+      costAmount,
+      costValueUnit,
+      costCurrency,
+      costProvenance,
       providerArtifactUrl: artifactResult.url.toString(),
       providerRetention: "unknown",
       terminalPayload: terminal
     };
   }
-}
-
-function isPublicAddress(address: string): boolean {
-  const kind = isIP(address);
-  if (kind === 4) {
-    const [a, b, c] = address.split(".").map(Number);
-    return !(a === 0 || a === 10 || a === 127 || a >= 224 ||
-      (a === 100 && b >= 64 && b <= 127) ||
-      (a === 169 && b === 254) ||
-      (a === 172 && b >= 16 && b <= 31) ||
-      (a === 192 && b === 168) ||
-      (a === 192 && b === 0 && (c === 0 || c === 2)) ||
-      (a === 198 && (b === 18 || b === 19 || b === 51)) ||
-      (a === 203 && b === 0 && c === 113));
-  }
-  if (kind === 6) {
-    const normalized = address.toLowerCase();
-    if (normalized.startsWith("::ffff:")) return isPublicAddress(normalized.slice(7));
-    return !(normalized === "::" || normalized === "::1" ||
-      normalized.startsWith("fc") || normalized.startsWith("fd") ||
-      /^fe[89ab]/.test(normalized) || normalized.startsWith("ff") ||
-      normalized.startsWith("2001:db8:"));
-  }
-  return false;
 }

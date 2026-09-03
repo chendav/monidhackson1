@@ -1,6 +1,14 @@
 import { CreateRunResponseSchema, type CreateRunRequest } from "@/contracts";
 import { getConfig, getProductionReadiness, type AppConfig } from "@/lib/config";
 import { asAppError, AppError } from "@/lib/errors";
+import {
+  assertWorkflowRuntimeAttested,
+  type WorkflowRuntimeAttestationHealth
+} from "@/lib/health/workflow-runtime";
+import {
+  assertProviderContractsActivelyVerified,
+  type ProviderContractsAttestationHealth
+} from "@/lib/health/provider-contracts";
 import { transitionRun } from "@/lib/runs/state-machine";
 import { getRunStore, type RunStore } from "@/lib/runs/store";
 import { scheduleCleanupRetry, scheduleRun } from "@/lib/runs/scheduler";
@@ -18,6 +26,27 @@ export interface CreateRunDependencies {
   budget?: BudgetGuard;
   uploadStorage?: UploadStorage;
   schedule?: (runId: string) => Promise<string | null>;
+  maintenanceHeartbeatReady?: () => Promise<boolean>;
+  workflowRuntimeAttestationProbe?: () => Promise<WorkflowRuntimeAttestationHealth>;
+  providerContractsAttestationProbe?: () => Promise<ProviderContractsAttestationHealth>;
+}
+
+export async function assertRecentMaintenanceHeartbeat(
+  config: AppConfig,
+  heartbeatReady?: () => Promise<boolean>
+): Promise<void> {
+  if (config.NODE_ENV !== "production") return;
+  const check = heartbeatReady ?? (async () => {
+    const { probeMaintenanceHeartbeat } = await import("@/lib/health/maintenance");
+    return (await probeMaintenanceHeartbeat(config.DATABASE_URL)).status === "fresh";
+  });
+  if (!await check()) {
+    throw new AppError(
+      "ANALYSIS_INCOMPLETE",
+      "The recurring maintenance path has not completed recently.",
+      { httpStatus: 503, retryable: true }
+    );
+  }
 }
 
 const ADMISSION_RECOVERY_DELAY_MS = 60_000;
@@ -70,9 +99,16 @@ async function admitQueuedRun(
   );
   if (!acquired) return (await dependencies.store.get(record.id)) ?? record;
   const claim: AdmissionClaim = { admissionLeaseId: acquired.admissionLeaseId };
-  const claimedRecord = acquired.record;
+  let claimedRecord = acquired.record;
   let schedulingStarted = false;
   try {
+    if (claimedRecord.reservedMicroUsd < dependencies.config.MAX_RUN_COST_MICRO_USD) {
+      claimedRecord = await dependencies.store.update(claimedRecord.id, (current) => ({
+        ...current,
+        reservedMicroUsd: dependencies.config.MAX_RUN_COST_MICRO_USD,
+        updatedAt: options.now?.toISOString() ?? new Date().toISOString()
+      }), claim);
+    }
     for (const document of claimedRecord.input!.documents) {
       if (document.source.type !== "upload") continue;
       await dependencies.uploadStorage.claimIncoming({
@@ -164,6 +200,8 @@ export interface AdmissionRecoveryDependencies {
   uploadStorage?: UploadStorage;
   schedule?: (runId: string) => Promise<string | null>;
   now?: Date;
+  batchLimit?: number;
+  assertWithinDeadline?: () => void;
 }
 
 export async function recoverUnscheduledRuns(
@@ -175,14 +213,20 @@ export async function recoverUnscheduledRuns(
   const uploadStorage = dependencies.uploadStorage ?? getUploadStorage(config);
   const schedule = dependencies.schedule ?? scheduleRun;
   const now = dependencies.now ?? new Date();
+  const batchLimit = Math.min(
+    Math.max(Math.trunc(dependencies.batchLimit ?? ADMISSION_RECOVERY_BATCH_SIZE), 1),
+    ADMISSION_RECOVERY_BATCH_SIZE
+  );
+  dependencies.assertWithinDeadline?.();
   const candidates = await store.listUnscheduledQueued(
     new Date(now.getTime() - ADMISSION_RECOVERY_DELAY_MS),
-    ADMISSION_RECOVERY_BATCH_SIZE
+    batchLimit
   );
   const recoveredRunIds: string[] = [];
   const failedRunIds: string[] = [];
   const deferredRunIds: string[] = [];
   for (const candidate of candidates) {
+    dependencies.assertWithinDeadline?.();
     if (new Date(candidate.expiresAt) <= now) continue;
     try {
       const recovered = await admitQueuedRun(candidate, {
@@ -212,7 +256,9 @@ export async function recoverUnscheduledRuns(
         failedRunIds.push(candidate.id);
       }
     }
+    dependencies.assertWithinDeadline?.();
   }
+  dependencies.assertWithinDeadline?.();
   return { recoveredRunIds, failedRunIds, deferredRunIds };
 }
 
@@ -229,14 +275,22 @@ export async function createRun(
       retryable: true
     });
   }
+  await assertWorkflowRuntimeAttested(config, {
+    probe: dependencies.workflowRuntimeAttestationProbe
+  });
+  await assertProviderContractsActivelyVerified(config, {
+    probe: dependencies.providerContractsAttestationProbe
+  });
+  await assertRecentMaintenanceHeartbeat(config, dependencies.maintenanceHeartbeatReady);
   const store = dependencies.store ?? await getRunStore();
   const input: CreateRunRequest = validateCreateRunRequest(rawInput, {
     ownerId: principal.id,
     uploadSecret: uploadNamespaceSecret(config)
   });
-  const reservedMicroUsd =
-    config.MONID_PARSE_RESERVE_MICRO_USD * input.documents.length +
-    config.OPENAI_RUN_RESERVE_MICRO_USD;
+  // Until a separately cached, credentialed price contract is available at
+  // admission time, reserve the full per-run ceiling. Operator-entered unit
+  // prices are not sufficient evidence to reduce the safety reservation.
+  const reservedMicroUsd = config.MAX_RUN_COST_MICRO_USD;
   const runId = crypto.randomUUID();
   const created = await store.create({
     id: runId,

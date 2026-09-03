@@ -1,12 +1,16 @@
 import OpenAI from "openai";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { DraftAnalysis } from "@/lib/analysis/draft";
 import { getConfig } from "@/lib/config";
 import {
   estimateOpenAiBatchFailureCostMicroUsd,
   mergeDrafts,
   ModelBatchError,
-  OpenAIResponsesAdapter
+  OPENAI_API_BASE_URL,
+  OPENAI_EXTRACTION_PHASE_TIMEOUT_MS,
+  OPENAI_MIN_PAID_BATCH_WINDOW_MS,
+  OpenAIResponsesAdapter,
+  type PaidExtractionCallbacks
 } from "@/lib/providers/openai";
 
 function emptyDraft(): DraftAnalysis {
@@ -68,7 +72,22 @@ const sourceDocument = {
   }]
 };
 
+const noopPaidCallbacks: PaidExtractionCallbacks = {
+  beforePaidBatchDispatch: async () => {},
+  settlePaidBatch: async () => {}
+};
+
 describe("OpenAI Responses structured output adapter", () => {
+  afterEach(() => vi.unstubAllEnvs());
+
+  it("ignores an adversarial ambient OPENAI_BASE_URL and pins the official API", () => {
+    vi.stubEnv("OPENAI_BASE_URL", "https://credential-sink.example/v1");
+    const adapter = new OpenAIResponsesAdapter(testConfig());
+    const client = (adapter as unknown as { client: { baseURL: string } }).client;
+    expect(client.baseURL).toBe(OPENAI_API_BASE_URL);
+    expect(client.baseURL).toBe("https://api.openai.com/v1");
+  });
+
   it("counts the complete structured request before responses.parse and disables tools/storage", async () => {
     let countBody: Record<string, unknown> | undefined;
     let parseBody: Record<string, unknown> | undefined;
@@ -90,9 +109,18 @@ describe("OpenAI Responses structured output adapter", () => {
       }
     });
     const adapter = new OpenAIResponsesAdapter(testConfig(), client);
-    const result = await adapter.extract([sourceDocument]);
+    const result = await adapter.extract([sourceDocument], {
+      beforePaidBatchDispatch: async (plan) => {
+        events.push("ledger-pending");
+        expect(plan).toMatchObject({ batchIndex: 0, totalBatches: 1 });
+      },
+      settlePaidBatch: async (settlement) => {
+        events.push("ledger-settled");
+        expect(settlement).toMatchObject({ batchIndex: 0, status: "succeeded" });
+      }
+    });
     expect(result.analysis.summary.title).toBe("Tender");
-    expect(events).toEqual(["count", "parse"]);
+    expect(events).toEqual(["count", "ledger-pending", "parse", "ledger-settled"]);
     expect(countBody).toMatchObject({ model: "gpt-5.4-mini", tools: [] });
     expect(countBody?.text).toBeTypeOf("object");
     expect(parseBody).toMatchObject({ model: "gpt-5.4-mini", store: false, tools: [] });
@@ -100,6 +128,62 @@ describe("OpenAI Responses structured output adapter", () => {
     expect(parseBody?.text).toBeTypeOf("object");
     expect(String(parseBody?.instructions)).toMatch(/never instructions/i);
     expect(String(parseBody?.instructions)).toMatch(/never generate or infer a page number/i);
+  });
+
+  it.each([
+    ["negative", -1, 5],
+    ["fractional", 10.5, 5],
+    ["unsafe", Number.MAX_SAFE_INTEGER + 1, 5],
+    ["NaN", Number.NaN, 5],
+    ["infinite", 10, Number.POSITIVE_INFINITY]
+  ])("retains the pending maximum for %s response usage", async (
+    _label,
+    reportedInputTokens,
+    reportedOutputTokens
+  ) => {
+    let maximumEstimatedCostMicroUsd = 0;
+    let settledEstimatedCostMicroUsd = 0;
+    const client = fakeClient({
+      count: async () => ({ input_tokens: 100, object: "response.input_tokens" }),
+      parse: async () => ({
+        id: "response-invalid-usage",
+        output_parsed: emptyDraft(),
+        usage: {
+          input_tokens: reportedInputTokens,
+          output_tokens: reportedOutputTokens
+        }
+      })
+    });
+    const adapter = new OpenAIResponsesAdapter(testConfig(), client);
+
+    const result = await adapter.extract([sourceDocument], {
+      beforePaidBatchDispatch: async (plan) => {
+        maximumEstimatedCostMicroUsd = plan.maximumEstimatedCostMicroUsd;
+      },
+      settlePaidBatch: async (settlement) => {
+        settledEstimatedCostMicroUsd = settlement.estimatedCostMicroUsd;
+      }
+    });
+
+    expect(result.inputTokens).toBeNull();
+    expect(result.outputTokens).toBeNull();
+    expect(maximumEstimatedCostMicroUsd).toBeGreaterThan(0);
+    expect(settledEstimatedCostMicroUsd).toBe(maximumEstimatedCostMicroUsd);
+  });
+
+  it("blocks every paid parse when durable accounting callbacks are absent", async () => {
+    let parseCalls = 0;
+    const client = fakeClient({
+      parse: async () => {
+        parseCalls += 1;
+        throw new Error("must not dispatch");
+      }
+    });
+    const adapter = new OpenAIResponsesAdapter(testConfig(), client);
+
+    await expect(adapter.extract([sourceDocument]))
+      .rejects.toMatchObject({ code: "MODEL_UNAVAILABLE" });
+    expect(parseCalls).toBe(0);
   });
 
   it("fails before token counting or generation when serialized input exceeds its cap", async () => {
@@ -121,7 +205,7 @@ describe("OpenAI Responses structured output adapter", () => {
     await expect(adapter.extract([{
       ...sourceDocument,
       parsed_markdown: "x".repeat(2_000)
-    }])).rejects.toMatchObject({ code: "BUDGET_EXCEEDED" });
+    }], noopPaidCallbacks)).rejects.toMatchObject({ code: "BUDGET_EXCEEDED" });
     expect(countCalls).toBe(0);
     expect(parseCalls).toBe(0);
   });
@@ -151,7 +235,7 @@ describe("OpenAI Responses structured output adapter", () => {
       }
     });
     const pageTexts = Array.from({ length: 300 }, (_, index) =>
-      `page ${index + 1} ` + "requirement text ".repeat(190)
+      `page ${index + 1} ` + "requirement text ".repeat(120)
     );
     const documentSha = "c".repeat(64);
     const adapter = new OpenAIResponsesAdapter(testConfig(), client);
@@ -166,14 +250,14 @@ describe("OpenAI Responses structured output adapter", () => {
         documentSha256: documentSha,
         text: "must-not-be-duplicated"
       }]
-    }])).resolves.toMatchObject({ inputTokens: expect.any(Number), outputTokens: expect.any(Number) });
+    }], noopPaidCallbacks)).resolves.toMatchObject({ inputTokens: expect.any(Number), outputTokens: expect.any(Number) });
     expect(parseRequests.length).toBeGreaterThan(1);
     expect(countRequests).toHaveLength(parseRequests.length);
     expect(events.slice(0, countRequests.length)).toEqual(Array(countRequests.length).fill("count"));
     expect(parseRequests.reduce((sum, request) => sum + Number(request.max_output_tokens), 0))
       .toBeLessThanOrEqual(50_000);
     const serialized = parseRequests.map((request) => String(request.input)).join("\n");
-    expect(new TextEncoder().encode(serialized).byteLength).toBeGreaterThan(900_000);
+    expect(new TextEncoder().encode(serialized).byteLength).toBeGreaterThan(500_000);
     expect(serialized.match(/page 300 /g)).toHaveLength(1);
     expect(serialized).not.toContain("page-index-only-marker");
     expect(serialized).not.toContain("must-not-be-duplicated");
@@ -189,12 +273,15 @@ describe("OpenAI Responses structured output adapter", () => {
       }
     });
     const adapter = new OpenAIResponsesAdapter(testConfig(), client);
-    await expect(adapter.extract([sourceDocument])).rejects.toMatchObject({ code: "BUDGET_EXCEEDED" });
+    await expect(adapter.extract([sourceDocument], noopPaidCallbacks))
+      .rejects.toMatchObject({ code: "BUDGET_EXCEEDED" });
     expect(parseCalls).toBe(0);
   });
 
   it("retains completed batch usage and response IDs when a later batch fails", async () => {
     let parseCalls = 0;
+    const startedBatches: number[] = [];
+    const settledBatches: Array<{ batchIndex: number; status: string }> = [];
     const client = fakeClient({
       count: async () => ({ input_tokens: 1_000, object: "response.input_tokens" }),
       parse: async () => {
@@ -211,7 +298,14 @@ describe("OpenAI Responses structured output adapter", () => {
     const failure = await adapter.extract([{
       ...sourceDocument,
       parsed_markdown: "paid batch text ".repeat(11_000)
-    }]).catch((error: unknown) => error);
+    }], {
+      beforePaidBatchDispatch: async (plan) => {
+        startedBatches.push(plan.batchIndex);
+      },
+      settlePaidBatch: async (settlement) => {
+        settledBatches.push({ batchIndex: settlement.batchIndex, status: settlement.status });
+      }
+    }).catch((error: unknown) => error);
     expect(failure).toMatchObject({
       name: "ModelBatchError",
       completedResponseIds: ["response-paid-1"],
@@ -225,6 +319,11 @@ describe("OpenAI Responses structured output adapter", () => {
     expect(failure).toBeInstanceOf(ModelBatchError);
     expect(estimateOpenAiBatchFailureCostMicroUsd(failure as ModelBatchError))
       .toBeGreaterThan(900 * 0.75 + 75 * 4.5);
+    expect(startedBatches).toEqual([0, 1]);
+    expect(settledBatches).toEqual([
+      { batchIndex: 0, status: "succeeded" },
+      { batchIndex: 1, status: "failed" }
+    ]);
   });
 
   it("enforces one aggregate extraction deadline across preflight and sequential batches", async () => {
@@ -239,7 +338,7 @@ describe("OpenAI Responses structured output adapter", () => {
       parse: async (_request, options) => {
         parseCalls += 1;
         parseOptions.push(options ?? {});
-        clockMs = 120_000;
+        clockMs = OPENAI_EXTRACTION_PHASE_TIMEOUT_MS - OPENAI_MIN_PAID_BATCH_WINDOW_MS + 1;
         return {
           id: "response-before-deadline",
           output_parsed: emptyDraft(),
@@ -251,12 +350,65 @@ describe("OpenAI Responses structured output adapter", () => {
     const failure = await adapter.extract([{
       ...sourceDocument,
       parsed_markdown: "multi batch deadline text ".repeat(11_000)
-    }]).catch((error: unknown) => error);
+    }], noopPaidCallbacks).catch((error: unknown) => error);
 
     expect(parseCalls).toBe(1);
     expect(parseOptions).toEqual([{ timeout: 120_000, maxRetries: 0 }]);
     expect(failure).toBeInstanceOf(ModelBatchError);
     expect(failure).toMatchObject({ attemptedBatches: 1, completedResponseIds: ["response-before-deadline"] });
+  });
+
+  it("revalidates the paid-call window after the durable ledger write", async () => {
+    let clockMs = 0;
+    let parseCalls = 0;
+    let settlement: { status: string; estimatedCostMicroUsd: number } | undefined;
+    const client = fakeClient({
+      count: async () => ({ input_tokens: 1_000, object: "response.input_tokens" }),
+      parse: async () => {
+        parseCalls += 1;
+        throw new Error("must not dispatch with a stale timeout");
+      }
+    });
+    const adapter = new OpenAIResponsesAdapter(testConfig(), client, () => clockMs);
+
+    const failure = await adapter.extract([sourceDocument], {
+      beforePaidBatchDispatch: async () => {
+        clockMs = OPENAI_EXTRACTION_PHASE_TIMEOUT_MS - OPENAI_MIN_PAID_BATCH_WINDOW_MS + 1;
+      },
+      settlePaidBatch: async (event) => {
+        settlement = event;
+      }
+    }).catch((error: unknown) => error);
+
+    expect(parseCalls).toBe(0);
+    expect(settlement).toMatchObject({ status: "failed", estimatedCostMicroUsd: 0 });
+    expect(failure).toBeInstanceOf(ModelBatchError);
+    expect(failure).toMatchObject({ attemptedBatches: 0, completedResponseIds: [] });
+  });
+
+  it("rejects a batch plan that cannot fit before making any paid parse request", async () => {
+    let countCalls = 0;
+    let parseCalls = 0;
+    const client = fakeClient({
+      count: async () => {
+        countCalls += 1;
+        return { input_tokens: 1_000, object: "response.input_tokens" };
+      },
+      parse: async () => {
+        parseCalls += 1;
+        throw new Error("must not make a paid request");
+      }
+    });
+    const adapter = new OpenAIResponsesAdapter(testConfig({
+      OPENAI_MAX_REQUEST_INPUT_BYTES: "15000"
+    }), client);
+
+    await expect(adapter.extract([{
+      ...sourceDocument,
+      parsed_markdown: "eight batch plan text ".repeat(6_000)
+    }], noopPaidCallbacks)).rejects.toMatchObject({ code: "MODEL_UNAVAILABLE" });
+    expect(countCalls).toBeGreaterThan(6);
+    expect(parseCalls).toBe(0);
   });
 
   it("merges independently sourced evaluation rules across batches", () => {

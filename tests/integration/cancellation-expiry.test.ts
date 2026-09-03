@@ -73,6 +73,8 @@ const liveConfig = getConfig({
   MONID_RESULT_URL_PATH: "run.result_url",
   MONID_COST_VALUE_PATH: "run.cost.value",
   MONID_COST_CURRENCY_PATH: "run.cost.currency",
+  MONID_COST_VALUE_UNIT: "currency_major",
+  MONID_INSPECT_SCHEMA_SHA256: "b".repeat(64),
   MONID_ARTIFACT_HOST_ALLOWLIST: "private-blob.example",
   OPENAI_API_KEY: "test-openai-key",
   MAX_RUN_COST_MICRO_USD: "2000000",
@@ -153,7 +155,7 @@ describe("active-worker cancellation and stale-lease cleanup", () => {
     const beforeDelete = await store.get(record.id);
     expect(beforeDelete?.status).toBe("extracting");
     expect(beforeDelete?.processingLeaseId).not.toBeNull();
-    expect(beforeDelete?.processingLeaseExpiresAt).toBe("2026-09-02T00:20:00.000Z");
+    expect(beforeDelete?.processingLeaseExpiresAt).toBe("2026-09-02T00:00:45.000Z");
     expect(beforeDelete?.cleanupExpectedResourceIds.some((id) => id.startsWith("page-text:"))).toBe(true);
     expect(beforeDelete?.cleanupExpectedResourceIds.some((id) => id.startsWith("parsed:"))).toBe(true);
 
@@ -161,7 +163,7 @@ describe("active-worker cancellation and stale-lease cleanup", () => {
       beforeDelete!,
       store,
       storage,
-      new Date("2026-09-02T00:01:00.000Z")
+      new Date("2026-09-02T00:00:20.000Z")
     );
     expect(pending.status).toBe("cleanup_pending");
     expect(pending.terminalAfterCleanup).toBe("expired");
@@ -169,9 +171,9 @@ describe("active-worker cancellation and stale-lease cleanup", () => {
     expect(pending.result).toBeNull();
     expect(pending.citationReceipts).toEqual([]);
     expect(pending.processingLeaseId).toBeNull();
-    expect(pending.processingLeaseExpiresAt).toBe("2026-09-02T00:20:00.000Z");
+    expect(pending.processingLeaseExpiresAt).toBe("2026-09-02T00:00:45.000Z");
     expect(pending.processingFence).toBe((beforeDelete?.processingFence ?? 0) + 1);
-    expect(pending.expiresAt).toBe("2026-09-02T00:20:00.000Z");
+    expect(pending.expiresAt).toBe("2026-09-02T00:00:45.000Z");
     expect(pending.cleanupReceipts.some((receipt) =>
       receipt.resourceKind === "page_text" && receipt.status === "deleted"
     )).toBe(false);
@@ -180,7 +182,7 @@ describe("active-worker cancellation and stale-lease cleanup", () => {
       pending,
       store,
       storage,
-      new Date("2026-09-02T00:19:59.999Z")
+      new Date("2026-09-02T00:00:44.999Z")
     );
     expect(stillPending.status).toBe("cleanup_pending");
     expect(stillPending.cleanupConfirmed).toBe(false);
@@ -203,7 +205,7 @@ describe("active-worker cancellation and stale-lease cleanup", () => {
     // make cleanup_pending reclaimable as analysis work.
     expect(await store.claimProcessing(
       record.id,
-      new Date("2026-09-02T00:20:00.001Z")
+      new Date("2026-09-02T00:00:45.001Z")
     )).toBeNull();
 
     const sourcePurgesBeforeQuiescence = storage.purges.length;
@@ -211,7 +213,7 @@ describe("active-worker cancellation and stale-lease cleanup", () => {
       fencedWorkerResult,
       store,
       storage,
-      new Date("2026-09-02T00:20:00.001Z")
+      new Date("2026-09-02T00:00:45.001Z")
     );
     expect(expired.status).toBe("expired");
     expect(expired.cleanupConfirmed).toBe(true);
@@ -227,7 +229,7 @@ describe("active-worker cancellation and stale-lease cleanup", () => {
     expect(expired.cleanupReceipts).toContainEqual(expect.objectContaining({
       resourceId: `sha256:${sha256Hex(`staged:${record.id}:0`)}`,
       status: "deleted",
-      attemptedAt: "2026-09-02T00:20:00.001Z"
+      attemptedAt: "2026-09-02T00:00:45.001Z"
     }));
     expect(expired.cleanupReceipts.some((receipt) =>
       receipt.resourceKind === "page_text" && receipt.status === "deleted"
@@ -290,6 +292,11 @@ describe("active-worker cancellation and stale-lease cleanup", () => {
     const storage = new RevocationStorage(bytes);
     const budget = new RecordingBudgetGuard();
     const { record } = await createUploadRun(store, bytes, "guest:paid-cancel", claimedAt);
+    await store.update(record.id, (current) => ({
+      ...current,
+      reservedMicroUsd:
+        liveConfig.MONID_PARSE_RESERVE_MICRO_USD + liveConfig.OPENAI_RUN_RESERVE_MICRO_USD
+    }));
     const local = new LocalDeterministicModel();
     const received = { input: null as Parameters<typeof local.extract>[0] | null };
     let signalStarted!: () => void;
@@ -309,16 +316,25 @@ describe("active-worker cancellation and stale-lease cleanup", () => {
     const retainedMonidResult = {
       markdown: "The bidder must submit a signed form.",
       runId: "paid-monid-run",
-      // The adapter preserves the provider's USD-denominated value here;
-      // providerCost converts it to integer micro-USD.
-      costMicroUsd: 0.0045,
+      costAmount: 0.0045,
+      costValueUnit: "currency_major" as const,
       costCurrency: "USD",
+      costProvenance: {
+        kind: "credentialed_inspect" as const,
+        inspect_schema_sha256: "b".repeat(64),
+        value_path: "run.cost.value",
+        currency_path: "run.cost.currency",
+        value_unit: "currency_major" as const,
+        source_value: 0.0045,
+        source_currency: "USD" as const
+      },
       providerArtifactUrl: "https://private-blob.example/result.md",
       providerRetention: "unknown" as const,
       terminalPayload: { raw: "provider response" }
     };
     const monid = {
-      async parse() {
+      async parse(input: { beforePaidDispatch?: () => Promise<void> }) {
+        await input.beforePaidDispatch?.();
         return retainedMonidResult;
       }
     } as unknown as MonidAdapter;
@@ -336,7 +352,7 @@ describe("active-worker cancellation and stale-lease cleanup", () => {
     expect(received.input?.[0].parsed_markdown).toContain("signed form");
 
     const active = await store.get(record.id);
-    await expireRun(active!, store, storage, new Date("2026-09-02T01:01:00.000Z"));
+    await expireRun(active!, store, storage, new Date("2026-09-02T01:00:20.000Z"));
     releaseModel();
     const cancelled = await worker;
 
@@ -394,7 +410,7 @@ describe("active-worker cancellation and stale-lease cleanup", () => {
       store,
       storage,
       "failed",
-      new Date("2026-09-02T05:01:00.000Z")
+      new Date("2026-09-02T05:00:20.000Z")
     );
     expect(failedPending.terminalAfterCleanup).toBe("failed");
 
@@ -402,7 +418,7 @@ describe("active-worker cancellation and stale-lease cleanup", () => {
       failedPending,
       store,
       storage,
-      new Date("2026-09-02T05:02:00.000Z")
+      new Date("2026-09-02T05:00:30.000Z")
     );
     expect(expiredPending.terminalAfterCleanup).toBe("expired");
 
@@ -411,7 +427,7 @@ describe("active-worker cancellation and stale-lease cleanup", () => {
       store,
       storage,
       "failed",
-      new Date("2026-09-02T05:03:00.000Z")
+      new Date("2026-09-02T05:00:35.000Z")
     );
     expect(failedAgain.terminalAfterCleanup).toBe("expired");
 
@@ -419,7 +435,7 @@ describe("active-worker cancellation and stale-lease cleanup", () => {
       failedAgain,
       store,
       storage,
-      new Date("2026-09-02T05:20:00.001Z")
+      new Date("2026-09-02T05:00:45.001Z")
     );
     expect(completed.status).toBe("expired");
     expect(completed.terminalAfterCleanup).toBeNull();

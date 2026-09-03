@@ -23,6 +23,39 @@ export interface CleanupReceipt {
   detail: string;
 }
 
+export type SourceCleanupWatchdogStatus =
+  | "armed"
+  | "provider_call_started"
+  | "captured"
+  | "cleanup_pending"
+  | "cleanup_confirmed"
+  | "cancelled";
+
+/**
+ * Durable, deliberately sanitized state for one paid parse attempt. Resource
+ * identifiers are opaque application storage keys only; provider payloads,
+ * source URLs, filenames, Markdown, and evidence text must never be written
+ * here.
+ */
+export interface SourceCleanupWatchdog {
+  registrationId: string;
+  documentIndex: number;
+  documentId: string;
+  resourceIds: string[];
+  status: SourceCleanupWatchdogStatus;
+  registeredAt: string;
+  watchdogScheduledAt: string | null;
+  watchdogWorkflowRunId: string | null;
+  providerCallStartedAt: string | null;
+  sourceAccessExpiresAt: string | null;
+  providerResultCapturedAt: string | null;
+  providerResultIdSha256: string | null;
+  cleanupLastAttemptAt: string | null;
+  cleanupConfirmedAt: string | null;
+  cleanupAttempts: number;
+  cancelledAt: string | null;
+}
+
 export interface RunFailure {
   code: ErrorCode;
   message: string;
@@ -46,6 +79,8 @@ export interface RunRecord {
   cleanupConfirmed: boolean;
   cleanupExpectedResourceIds: string[];
   cleanupReceipts: CleanupReceipt[];
+  sourceCleanupWatchdogs: SourceCleanupWatchdog[];
+  paidProviderAttemptStartedAt: string | null;
   citationReceipts: QuoteVerificationReceipt[];
   manifests: DocumentManifest[];
   costs: CostEvent[];
@@ -83,6 +118,13 @@ export const STATUS_PROGRESS: Record<RunStatus, number> = {
 };
 
 export function toRunStatusResponse(record: RunRecord): RunStatusResponse {
+  const costAccountingStatus = record.paidProviderAttemptStartedAt === null
+    ? "no_paid_attempt" as const
+    : record.costs.some((event) => event.status === "pending")
+      ? "estimated_pending" as const
+      : record.costs.some((event) => event.actual_micro_usd === null)
+        ? "estimated_complete" as const
+        : "actual_complete" as const;
   return {
     run_id: record.id,
     status: record.status,
@@ -93,6 +135,7 @@ export function toRunStatusResponse(record: RunRecord): RunStatusResponse {
     expires_at: record.expiresAt,
     cleanup_confirmed: record.cleanupConfirmed,
     cost_micro_usd: record.costMicroUsd,
+    cost_accounting_status: costAccountingStatus,
     error: record.error
   };
 }

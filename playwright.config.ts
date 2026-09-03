@@ -1,15 +1,18 @@
 import { defineConfig, devices } from "@playwright/test";
 
+const remoteBaseUrl = process.env.PLAYWRIGHT_BASE_URL?.trim();
+
 export default defineConfig({
   testDir: "./tests/e2e",
+  testIgnore: remoteBaseUrl ? undefined : "**/production-smoke.spec.ts",
   fullyParallel: false,
   retries: process.env.CI ? 2 : 0,
   reporter: [["list"], ["html", { open: "never" }]],
   use: {
-    baseURL: "http://localhost:3000",
+    baseURL: remoteBaseUrl || "http://localhost:3000",
     trace: "retain-on-failure"
   },
-  webServer: {
+  webServer: remoteBaseUrl ? undefined : {
     command: "pnpm dev",
     url: "http://localhost:3000",
     reuseExistingServer: !process.env.CI,

@@ -234,6 +234,7 @@ function status(statusValue: string, progress: number, cleanupConfirmed: boolean
     expires_at: "2026-09-03T18:00:00.000Z",
     cleanup_confirmed: cleanupConfirmed,
     cost_micro_usd: 4210,
+    cost_accounting_status: "estimated_complete",
     error: null,
   };
 }

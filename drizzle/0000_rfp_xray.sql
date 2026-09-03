@@ -30,15 +30,21 @@ CREATE TABLE IF NOT EXISTS "runs" (
   "expires_at" timestamptz NOT NULL,
   "deleted_at" timestamptz
 );
+--> statement-breakpoint
 
 CREATE UNIQUE INDEX IF NOT EXISTS "runs_owner_idempotency_unique"
   ON "runs" ("owner_id", "idempotency_key") WHERE "idempotency_key" IS NOT NULL;
+--> statement-breakpoint
 CREATE UNIQUE INDEX IF NOT EXISTS "runs_owner_active_unique"
   ON "runs" ("owner_id")
   WHERE "status" IN ('queued', 'validating', 'staging', 'page_indexing', 'parsing', 'purging_source', 'extracting', 'reconciling', 'verifying', 'cleanup_pending');
+--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "runs_expires_at_idx" ON "runs" ("expires_at");
+--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "runs_audit_expires_at_idx" ON "runs" ("audit_expires_at");
+--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "runs_quota_created_idx" ON "runs" ("quota_key", "created_at");
+--> statement-breakpoint
 
 CREATE TABLE IF NOT EXISTS "run_documents" (
   "id" uuid PRIMARY KEY,
@@ -53,8 +59,11 @@ CREATE TABLE IF NOT EXISTS "run_documents" (
   "cleanup_status" text NOT NULL,
   "created_at" timestamptz NOT NULL
 );
+--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "run_documents_run_idx" ON "run_documents" ("run_id");
+--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "run_documents_sha_idx" ON "run_documents" ("sha256");
+--> statement-breakpoint
 
 CREATE TABLE IF NOT EXISTS "budget_reservations" (
   "run_id" uuid PRIMARY KEY REFERENCES "runs"("id") ON DELETE CASCADE,
@@ -65,7 +74,9 @@ CREATE TABLE IF NOT EXISTS "budget_reservations" (
   "created_at" timestamptz NOT NULL,
   "settled_at" timestamptz
 );
+--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "budget_reservations_day_idx" ON "budget_reservations" ("day");
+--> statement-breakpoint
 
 CREATE TABLE IF NOT EXISTS "question_audits" (
   "id" uuid PRIMARY KEY,
@@ -75,7 +86,9 @@ CREATE TABLE IF NOT EXISTS "question_audits" (
   "citation_count" integer NOT NULL,
   "created_at" timestamptz NOT NULL
 );
+--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "question_audits_run_idx" ON "question_audits" ("run_id");
+--> statement-breakpoint
 
 CREATE TABLE IF NOT EXISTS "incoming_uploads" (
   "blob_path" text PRIMARY KEY,
@@ -99,5 +112,7 @@ CREATE TABLE IF NOT EXISTS "incoming_uploads" (
   "created_at" timestamptz NOT NULL,
   "updated_at" timestamptz NOT NULL
 );
+--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "incoming_uploads_expiry_idx" ON "incoming_uploads" ("expires_at");
+--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "incoming_uploads_owner_idx" ON "incoming_uploads" ("owner_id");

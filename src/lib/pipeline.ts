@@ -4,9 +4,25 @@ import { LocalDeterministicModel } from "@/lib/analysis/local-model";
 import { cleanupGate, executeCleanup, type CleanupTarget } from "@/lib/cleanup";
 import { getConfig, getProductionReadiness, hasLivePipelineConfig, type AppConfig } from "@/lib/config";
 import { asAppError, AppError } from "@/lib/errors";
+import { sha256Hex } from "@/lib/crypto";
 import { auditLog } from "@/lib/logging";
+import {
+  assertWorkflowRuntimeAttested,
+  WORKFLOW_INTERNAL_DEADLINES_MS,
+  type WorkflowRuntimeCapability,
+  type WorkflowRuntimeAttestationHealth
+} from "@/lib/health/workflow-runtime";
+import {
+  assertProviderContractsActivelyVerified,
+  type ProviderContractsCapability,
+  type ProviderContractsAttestationHealth
+} from "@/lib/health/provider-contracts";
 import { buildPdfPageIndex, type PdfPageIndex } from "@/lib/pdf/page-index";
-import { MonidAdapter, type MonidParseResult } from "@/lib/providers/monid";
+import {
+  MonidAdapter,
+  MonidTerminalProviderError,
+  type MonidParseResult
+} from "@/lib/providers/monid";
 import {
   estimateOpenAiBatchFailureCostMicroUsd,
   estimateOpenAiCostMicroUsd,
@@ -14,11 +30,27 @@ import {
   OpenAIResponsesAdapter,
   type AnalysisModel,
   type ExtractionCallResult,
-  type ModelDocumentInput
+  type ModelDocumentInput,
+  type PaidExtractionCallbacks
 } from "@/lib/providers/openai";
 import { getRunStore, type RunStore } from "@/lib/runs/store";
+import { startProcessingHeartbeat } from "@/lib/runs/processing-heartbeat";
+import {
+  markPaidCostAttemptStarted,
+  openAiBatchAttemptId,
+  settlePaidCostAttempt
+} from "@/lib/runs/paid-cost-ledger";
+import {
+  allCapturedSourceWatchdogsClean,
+  armSourceCleanupWatchdog,
+  markSourceProviderCallStarted,
+  markSourceProviderResultCaptured,
+  recordSourceCleanupAttempt,
+  recordSourceCleanupWatchdogScheduled,
+  sourceCleanupAuthorized
+} from "@/lib/runs/source-cleanup-watchdog";
 import { transitionRun } from "@/lib/runs/state-machine";
-import type { CleanupReceipt, RunRecord } from "@/lib/runs/types";
+import type { CleanupReceipt, RunRecord, SourceCleanupWatchdog } from "@/lib/runs/types";
 import { getBudgetGuard, type BudgetGuard } from "@/lib/security/budget";
 import { assertAggregatePages } from "@/lib/source-validation";
 import { loadSource, type LoadedSource } from "@/lib/storage/source-reader";
@@ -33,13 +65,16 @@ interface IndexedSource {
 
 interface ParsedSource extends IndexedSource {
   markdown: string;
-  monid: Pick<MonidParseResult, "runId"> | null;
+  monid: { runIdSha256: string } | null;
 }
 
-// The live provider phase must finish before the 800-second Workflow step
-// ceiling. OpenAI has a separate 120-second timeout, leaving roughly 80
-// seconds for bounded PDF indexing, cleanup, reconciliation, and persistence.
-export const LIVE_NETWORK_BUDGET_MS = 600_000;
+// These deadlines are part of the deployment-bound Workflow attestation. A
+// release cannot reuse an older receipt after any value changes here.
+export const LIVE_NETWORK_BUDGET_MS = WORKFLOW_INTERNAL_DEADLINES_MS.live_network;
+export const PRE_MODEL_DEADLINE_MS = WORKFLOW_INTERNAL_DEADLINES_MS.pre_model;
+export const RESULT_COMMIT_DEADLINE_MS = WORKFLOW_INTERNAL_DEADLINES_MS.result_commit;
+export const MONID_PARSE_CONCURRENCY = 4;
+export const MONID_MIN_PAID_CALL_WINDOW_MS = 60_000;
 
 export interface PipelineDependencies {
   store?: RunStore;
@@ -50,6 +85,14 @@ export interface PipelineDependencies {
   monid?: MonidAdapter;
   model?: AnalysisModel;
   now?: () => Date;
+  cleanupWatchdogScheduler?: (
+    runId: string,
+    registrationId: string
+  ) => Promise<string | null>;
+  workflowRuntimeAttestationProbe?: () => Promise<WorkflowRuntimeAttestationHealth>;
+  workflowRuntimeCapability?: WorkflowRuntimeCapability;
+  providerContractsAttestationProbe?: () => Promise<ProviderContractsAttestationHealth>;
+  providerContractsCapability?: ProviderContractsCapability;
 }
 
 function amendmentFromIndex(index: PdfPageIndex): string | null {
@@ -107,7 +150,7 @@ function parsedTargets(parsed: ParsedSource[]): CleanupTarget[] {
     }];
     if (item.monid) {
       targets.push({
-        resourceId: `provider-artifact:${item.monid.runId}`,
+        resourceId: `provider-artifact:sha256:${item.monid.runIdSha256}`,
         resourceKind: "provider_artifact",
         controlScope: "provider",
         unknownDetail: "No provider artifact deletion API or retention TTL has been verified."
@@ -118,7 +161,9 @@ function parsedTargets(parsed: ParsedSource[]): CleanupTarget[] {
 }
 
 function mergeReceipts(existing: CleanupReceipt[], additions: CleanupReceipt[]) {
-  return [...existing, ...additions];
+  const byId = new Map(existing.map((receipt) => [receipt.receiptId, receipt]));
+  for (const receipt of additions) byId.set(receipt.receiptId, receipt);
+  return [...byId.values()];
 }
 
 interface ProcessingClaim {
@@ -180,20 +225,105 @@ function sourceCleanupSucceeded(source: LoadedSource, receipts: CleanupReceipt[]
   return expected.every((id) => receipts.some((receipt) => receipt.resourceId === id && receipt.status === "deleted"));
 }
 
+function monidCostMicroUsd(
+  amount: number | null,
+  currency: string | null,
+  unit: "currency_major" | "micro_dollar" | null
+) {
+  if (amount === null || !Number.isFinite(amount) || amount < 0 || currency !== "USD" || !unit) {
+    return null;
+  }
+  const microUsd = unit === "currency_major" ? Math.round(amount * 1_000_000) : amount;
+  return Number.isSafeInteger(microUsd) && microUsd >= 0 ? microUsd : null;
+}
+
 function providerCost(result: MonidParseResult, latencyMs: number, reserve: number): CostEvent {
-  const isUsd = result.costCurrency?.toUpperCase() === "USD";
-  const actual = isUsd && result.costMicroUsd !== null
-    ? Math.max(0, Math.round(result.costMicroUsd * 1_000_000))
+  const provenance = result.costProvenance;
+  const provenanceMatches = provenance !== null &&
+    provenance.value_unit === result.costValueUnit &&
+    Number(provenance.source_value) === result.costAmount &&
+    provenance.source_currency === result.costCurrency;
+  const actual = provenanceMatches
+    ? monidCostMicroUsd(result.costAmount, result.costCurrency, result.costValueUnit)
     : null;
   return {
+    attempt_id: null,
     provider: "monid",
     operation: "context_dev_parse",
     status: "succeeded",
     actual_micro_usd: actual,
     estimated_micro_usd: actual === null ? reserve : null,
     latency_ms: latencyMs,
-    retry_of: null
+    retry_of: null,
+    cost_provenance: actual === null ? null : provenance
   };
+}
+
+function terminalProviderCost(
+  error: MonidTerminalProviderError,
+  latencyMs: number,
+  reserve: number,
+  attemptId: string
+): CostEvent {
+  const candidateProvenance = error.costProvenance;
+  const provenance = candidateProvenance !== null &&
+    Number(candidateProvenance.source_value) === error.costAmount &&
+    candidateProvenance.source_currency === error.costCurrency
+    ? candidateProvenance
+    : null;
+  const actual = provenance
+    ? monidCostMicroUsd(error.costAmount, error.costCurrency, provenance.value_unit)
+    : null;
+  return {
+    attempt_id: attemptId,
+    provider: "monid",
+    operation: "context_dev_parse",
+    status: "failed",
+    actual_micro_usd: actual,
+    estimated_micro_usd: actual === null ? reserve : null,
+    latency_ms: latencyMs,
+    retry_of: null,
+    cost_provenance: actual === null ? null : provenance
+  };
+}
+
+function pendingProviderCost(attemptId: string, reserve: number): CostEvent {
+  return {
+    attempt_id: attemptId,
+    provider: "monid",
+    operation: "context_dev_parse",
+    status: "pending",
+    actual_micro_usd: null,
+    estimated_micro_usd: reserve,
+    latency_ms: 0,
+    retry_of: null,
+    cost_provenance: null
+  };
+}
+
+function mergeAttemptCosts(existing: CostEvent[], updates: CostEvent[]) {
+  const replacements = new Map(updates
+    .filter((event) => event.attempt_id)
+    .map((event) => [event.attempt_id!, event]));
+  const seen = new Set<string>();
+  const merged = existing.map((event) => {
+    if (!event.attempt_id) return event;
+    const replacement = replacements.get(event.attempt_id);
+    if (!replacement) return event;
+    seen.add(event.attempt_id);
+    return replacement;
+  });
+  for (const event of updates) {
+    if (event.attempt_id) {
+      if (!seen.has(event.attempt_id)) merged.push(event);
+      continue;
+    }
+    const serialized = JSON.stringify(event);
+    if (!merged.some((candidate) => JSON.stringify(candidate) === serialized)) {
+      merged.push(event);
+    }
+  }
+  return merged;
 }
 
 function fetchWithDeadline(fetcher: typeof fetch, deadlineAt: number): typeof fetch {
@@ -214,7 +344,48 @@ function fetchWithDeadline(fetcher: typeof fetch, deadlineAt: number): typeof fe
   }) as typeof fetch;
 }
 
+function assertBeforeDeadline(deadlineAt: number, phase: string) {
+  if (performance.now() >= deadlineAt) {
+    throw new AppError(
+      "ANALYSIS_INCOMPLETE",
+      `The ${phase} time budget was exhausted before a result could be released.`,
+      { retryable: true }
+    );
+  }
+}
+
+export function assertMonidPaidCallStartWindow(deadlineAt: number, nowMs = performance.now()) {
+  if (deadlineAt - nowMs < MONID_MIN_PAID_CALL_WINDOW_MS) {
+    throw new AppError(
+      "ANALYSIS_INCOMPLETE",
+      "The remaining live-provider window is too short to start another paid parse safely.",
+      { httpStatus: 503, retryable: true }
+    );
+  }
+}
+
+export function assertPaidProviderPlan(record: RunRecord, config: AppConfig) {
+  const documentCount = record.input?.documents.length ?? 0;
+  const monidCommitment = documentCount * config.MONID_PARSE_RESERVE_MICRO_USD;
+  const plannedCommitment = monidCommitment + config.OPENAI_RUN_RESERVE_MICRO_USD;
+  if (
+    documentCount < 1 ||
+    !Number.isSafeInteger(monidCommitment) ||
+    !Number.isSafeInteger(plannedCommitment) ||
+    !Number.isSafeInteger(record.reservedMicroUsd) ||
+    record.reservedMicroUsd > config.MAX_RUN_COST_MICRO_USD ||
+    plannedCommitment > record.reservedMicroUsd
+  ) {
+    throw new AppError(
+      "BUDGET_EXCEEDED",
+      "The complete paid-provider plan exceeds the durable run reservation.",
+      { httpStatus: 503, retryable: false }
+    );
+  }
+}
+
 export async function processRun(runId: string, dependencies: PipelineDependencies = {}): Promise<RunRecord> {
+  const workflowStarted = performance.now();
   const config = dependencies.config ?? getConfig();
   const readiness = getProductionReadiness(config);
   if (!readiness.ready) {
@@ -223,10 +394,18 @@ export async function processRun(runId: string, dependencies: PipelineDependenci
       retryable: true
     });
   }
+  await assertWorkflowRuntimeAttested(config, {
+    probe: dependencies.workflowRuntimeAttestationProbe,
+    capability: dependencies.workflowRuntimeCapability
+  });
+  await assertProviderContractsActivelyVerified(config, {
+    probe: dependencies.providerContractsAttestationProbe,
+    capability: dependencies.providerContractsCapability
+  });
   const live = hasLivePipelineConfig(config);
   const fetcher = fetchWithDeadline(
     dependencies.fetcher ?? fetch,
-    performance.now() + LIVE_NETWORK_BUDGET_MS
+    workflowStarted + LIVE_NETWORK_BUDGET_MS
   );
   const store = dependencies.store ?? await getRunStore();
   const uploadStorage = dependencies.uploadStorage ?? getUploadStorage(config);
@@ -250,8 +429,16 @@ export async function processRun(runId: string, dependencies: PipelineDependenci
     throw new AppError("ANALYSIS_INCOMPLETE", "The run input has already been scrubbed.", { httpStatus: 410 });
   }
   cleanupTargets = plannedInputTargets(initial, uploadStorage);
+  const heartbeat = startProcessingHeartbeat({ store, runId, claim, now });
+  const scheduleWatchdog = dependencies.cleanupWatchdogScheduler ??
+    (async (targetRunId: string, registrationId: string) => {
+      const { scheduleSourceCleanupWatchdog } = await import("@/lib/runs/scheduler");
+      return scheduleSourceCleanupWatchdog(targetRunId, registrationId);
+    });
 
   try {
+    if (live) assertPaidProviderPlan(initial, config);
+    heartbeat.assertHealthy();
     await stage(store, runId, "staging", claim);
     for (const document of initial.input.documents) {
       if (document.source.type !== "upload") continue;
@@ -264,6 +451,7 @@ export async function processRun(runId: string, dependencies: PipelineDependenci
       });
     }
     for (const [documentIndex, document] of initial.input.documents.entries()) {
+      heartbeat.assertHealthy();
       const source = await loadSource(document, {
         uploadStorage,
         fetcher,
@@ -286,6 +474,7 @@ export async function processRun(runId: string, dependencies: PipelineDependenci
     await stage(store, runId, "page_indexing", claim);
     let remainingPages = 300;
     for (const source of loaded) {
+      heartbeat.assertHealthy();
       const index = await buildPdfPageIndex(source.bytes, { maxPages: remainingPages });
       source.bytes.fill(0);
       remainingPages -= index.pagesTotal;
@@ -311,42 +500,128 @@ export async function processRun(runId: string, dependencies: PipelineDependenci
 
     await stage(store, runId, "parsing", claim);
     const monid = live ? dependencies.monid ?? new MonidAdapter({ config, fetcher }) : null;
-    const sourceReceipts: CleanupReceipt[] = [];
-    for (const item of indexed) {
+    type ParseOutcome = {
+      documentIndex: number;
+      parsedItem: ParsedSource | null;
+      parseError: unknown;
+      workerError: unknown;
+      cost: CostEvent | null;
+      sourceCleanupReceipts: CleanupReceipt[];
+    };
+    const parseDocument = async (
+      item: IndexedSource,
+      documentIndex: number,
+      watchdog: SourceCleanupWatchdog | null
+    ): Promise<ParseOutcome> => {
+      const started = performance.now();
+      let parsedItem: ParsedSource | null = null;
+      let parseError: unknown = null;
+      let workerError: unknown = null;
+      let providerCallStarted = false;
+      let providerResultCaptured = false;
+      let cost: CostEvent | null = null;
       if (monid) {
-        const started = performance.now();
         try {
-          const parserUrl = await item.source.parserUrl(new Date(now().getTime() + 5 * 60_000));
-          const result = await monid.parse({ fileUrl: parserUrl, extension: "pdf", ocr: true });
-          costs.push(providerCost(result, Math.round(performance.now() - started), config.MONID_PARSE_RESERVE_MICRO_USD));
+          assertMonidPaidCallStartWindow(workflowStarted + LIVE_NETWORK_BUDGET_MS);
+          const sourceAccessExpiresAt = new Date(now().getTime() + 5 * 60_000);
+          const parserUrl = await item.source.parserUrl(sourceAccessExpiresAt);
+          heartbeat.assertHealthy();
+          const attemptId = watchdog!.registrationId;
+          const result = await monid.parse({
+            fileUrl: parserUrl,
+            extension: "pdf",
+            ocr: true,
+            beforePaidDispatch: async () => {
+              // URL signing, inspect validation, DNS checks, and any prior CAS
+              // work may consume the original allowance. Recheck at the last
+              // async boundary before Monid's paid POST and durably record the
+              // estimated attempt in the same transaction that marks it live.
+              heartbeat.assertHealthy();
+              assertMonidPaidCallStartWindow(workflowStarted + LIVE_NETWORK_BUDGET_MS);
+              await markSourceProviderCallStarted({
+                store,
+                runId,
+                registrationId: attemptId,
+                claim,
+                sourceAccessExpiresAt,
+                reservedMicroUsd: config.MONID_PARSE_RESERVE_MICRO_USD,
+                totalPlannedMonidAttempts: indexed.length,
+                remainingOpenAiCommitmentMicroUsd: config.OPENAI_RUN_RESERVE_MICRO_USD,
+                maximumRunCostMicroUsd: config.MAX_RUN_COST_MICRO_USD,
+                now: now()
+              });
+              providerCallStarted = true;
+              cost = pendingProviderCost(attemptId, config.MONID_PARSE_RESERVE_MICRO_USD);
+            }
+          });
+          cost = providerCost(
+            result,
+            Math.round(performance.now() - started),
+            config.MONID_PARSE_RESERVE_MICRO_USD
+          );
+          cost.attempt_id = attemptId;
           const markdown = result.markdown;
-          const runId = result.runId;
-          // Retain only the provider run identifier needed for the disclosure
-          // receipt. Provider payloads, temporary URLs, and duplicate Markdown
-          // must not survive into ParsedSource or a terminal-state write.
+          const providerRunIdSha256 = sha256Hex(result.runId);
+          // Retain only a one-way provider identifier digest needed for the
+          // disclosure receipt. Provider payloads, temporary URLs, raw IDs,
+          // and duplicate Markdown must not survive into durable run state.
           result.markdown = "";
           result.providerArtifactUrl = "";
           result.terminalPayload = null;
-          parsed.push({ ...item, markdown, monid: { runId } });
-        } catch (error) {
-          costs.push({
-            provider: "monid",
-            operation: "context_dev_parse",
-            status: "failed",
-            actual_micro_usd: null,
-            estimated_micro_usd: config.MONID_PARSE_RESERVE_MICRO_USD,
-            latency_ms: Math.round(performance.now() - started),
-            retry_of: null
+          await markSourceProviderResultCaptured({
+            store,
+            runId,
+            registrationId: watchdog!.registrationId,
+            providerResultIdSha256: providerRunIdSha256,
+            parsedResourceId: `parsed:${item.source.documentId}`,
+            costEvent: cost,
+            claim,
+            now: now()
           });
-          throw error;
+          providerResultCaptured = true;
+          parsedItem = { ...item, markdown, monid: { runIdSha256: providerRunIdSha256 } };
+        } catch (error) {
+          const latencyMs = Math.round(performance.now() - started);
+          cost = !providerCallStarted
+            ? null
+            : error instanceof MonidTerminalProviderError
+            ? terminalProviderCost(
+                error,
+                latencyMs,
+                config.MONID_PARSE_RESERVE_MICRO_USD,
+                watchdog!.registrationId
+              )
+            : pendingProviderCost(watchdog!.registrationId, config.MONID_PARSE_RESERVE_MICRO_USD);
+          if (cost) cost.latency_ms = latencyMs;
+          parseError = error;
+          // A provider-declared terminal lifecycle is a captured outcome. It
+          // is safe to release the source once this sanitized receipt is
+          // durable. Transport failures and poll exhaustion remain unknown
+          // and deliberately retain the source until signed access expires.
+          if (providerCallStarted && error instanceof MonidTerminalProviderError) {
+            try {
+              await markSourceProviderResultCaptured({
+                store,
+                runId,
+                registrationId: watchdog!.registrationId,
+                providerResultIdSha256: sha256Hex(error.providerRunId),
+                costEvent: cost ?? undefined,
+                claim,
+                now: now()
+              });
+              providerResultCaptured = true;
+            } catch (captureError) {
+              workerError = captureError;
+            }
+          }
         }
       } else {
-        parsed.push({
+        parsedItem = {
           ...item,
           markdown: item.index.pages.map((page) => page.text).join("\n\n"),
           monid: null
-        });
-        costs.push({
+        };
+        cost = {
           provider: "monid",
           operation: "local_pdfjs_fallback",
           status: "succeeded",
@@ -354,45 +629,177 @@ export async function processRun(runId: string, dependencies: PipelineDependenci
           estimated_micro_usd: null,
           latency_ms: 0,
           retry_of: null
+        };
+      }
+
+      // Each source is removed as soon as a successful provider result is
+      // durably captured (or when no paid call started). The batch waits for
+      // every started paid call, while documentIndex keeps manifests, costs,
+      // and model documents deterministic.
+      let sourceCleanupReceipts: CleanupReceipt[] = [];
+      // A network/polling exception is not evidence that Monid stopped
+      // fetching the signed source. Keep staging intact until either a success
+      // result is durably captured or the persisted signed-URL window expires.
+      const sourceCleanupIsSafe = !monid || !providerCallStarted || providerResultCaptured;
+      if (sourceCleanupIsSafe) {
+        try {
+          sourceCleanupReceipts = await executeCleanup(item.source.cleanupTargets, now);
+          if (watchdog) {
+            await recordSourceCleanupAttempt({
+              store,
+              runId,
+              registrationId: watchdog.registrationId,
+              receipts: sourceCleanupReceipts,
+              claim,
+              cancelWithoutResult: !providerResultCaptured,
+              now: now()
+            });
+          }
+        } catch (error) {
+          workerError ??= error;
+        }
+      }
+      return { documentIndex, parsedItem, parseError, workerError, cost, sourceCleanupReceipts };
+    };
+
+    const parseOutcomes: ParseOutcome[] = [];
+    for (let batchStart = 0; batchStart < indexed.length; batchStart += MONID_PARSE_CONCURRENCY) {
+      const batch = indexed.slice(batchStart, batchStart + MONID_PARSE_CONCURRENCY);
+      const batchWatchdogs: Array<SourceCleanupWatchdog | null> = [];
+      if (monid) {
+        // Register and durably schedule every watchdog in the batch before any
+        // corresponding paid call may start. Sequential registration avoids
+        // optimistic-row conflicts while the parse calls themselves remain
+        // bounded and parallel.
+        for (const [offset, item] of batch.entries()) {
+          heartbeat.assertHealthy();
+          const documentIndex = batchStart + offset;
+          const armed = await armSourceCleanupWatchdog({
+            store,
+            runId,
+            documentIndex,
+            documentId: item.source.documentId,
+            resourceIds: item.source.cleanupTargets
+              .filter((target) => target.controlScope === "application" &&
+                (target.resourceKind === "source_blob" || target.resourceKind === "staged_source"))
+              .map((target) => target.resourceId),
+            claim,
+            now: now()
+          });
+          const workflowRunId = await scheduleWatchdog(runId, armed.registrationId);
+          if (config.NODE_ENV === "production" && !workflowRunId) {
+            throw new AppError(
+              "SOURCE_CLEANUP_PENDING",
+              "The paid provider call was blocked because its independent cleanup watchdog was not acknowledged.",
+              { retryable: true }
+            );
+          }
+          await recordSourceCleanupWatchdogScheduled({
+            store,
+            runId,
+            registrationId: armed.registrationId,
+            workflowRunId,
+            claim,
+            now: now()
+          });
+          batchWatchdogs.push(armed);
+        }
+      } else {
+        batchWatchdogs.push(...batch.map(() => null));
+      }
+      const settled = await Promise.allSettled(batch.map((item, offset) =>
+        parseDocument(item, batchStart + offset, batchWatchdogs[offset])
+      ));
+      for (const [offset, outcome] of settled.entries()) {
+        parseOutcomes.push(outcome.status === "fulfilled" ? outcome.value : {
+          documentIndex: batchStart + offset,
+          parsedItem: null,
+          parseError: null,
+          workerError: outcome.reason,
+          cost: monid ? {
+            provider: "monid",
+            operation: "context_dev_parse",
+            status: "failed",
+            actual_micro_usd: null,
+            estimated_micro_usd: config.MONID_PARSE_RESERVE_MICRO_USD,
+            latency_ms: 0,
+            retry_of: null
+          } : null,
+          sourceCleanupReceipts: []
         });
       }
-      const parsedItem = parsed.at(-1);
-      if (!parsedItem) {
-        throw new AppError("EMPTY_PARSE", "The parser produced no document representation.", {
-          retryable: true
-        });
+      const batchFailed = parseOutcomes.slice(batchStart).some((outcome) =>
+        outcome.parseError !== null || outcome.workerError !== null ||
+        outcome.sourceCleanupReceipts.some((receipt) =>
+          receipt.controlScope === "application" && receipt.status !== "deleted"
+        )
+      );
+      if (!batchFailed) continue;
+
+      // Do not start another paid batch after any failure. Sources that were
+      // already staged but not sent to Monid are still cleaned before the
+      // deterministic error is selected.
+      const unstartedStart = batchStart + batch.length;
+      const unstarted = await Promise.all(indexed.slice(unstartedStart).map(async (item, offset) => ({
+        documentIndex: unstartedStart + offset,
+        parsedItem: null,
+        parseError: null,
+        workerError: null,
+        cost: null,
+        sourceCleanupReceipts: await executeCleanup(item.source.cleanupTargets, now)
+      } satisfies ParseOutcome)));
+      parseOutcomes.push(...unstarted);
+      break;
+    }
+    parseOutcomes.sort((left, right) => left.documentIndex - right.documentIndex);
+
+    const sourceReceipts: CleanupReceipt[] = [];
+    for (const outcome of parseOutcomes) {
+      if (outcome.cost) costs.push(outcome.cost);
+      sourceReceipts.push(...outcome.sourceCleanupReceipts);
+      if (outcome.parsedItem) {
+        parsed.push(outcome.parsedItem);
+        cleanupTargets = mergeTargets(cleanupTargets, parsedTargets([outcome.parsedItem]));
       }
-      cleanupTargets = mergeTargets(cleanupTargets, parsedTargets([parsedItem]));
-      // The provider now has its document representation. Delete this
-      // document's immutable staging object immediately instead of retaining
-      // all package inputs until every provider call finishes.
-      const documentReceipts = await executeCleanup(item.source.cleanupTargets, now);
-      sourceReceipts.push(...documentReceipts);
-      await store.update(runId, (record) => ({
-        ...record,
-        costs: [...costs],
-        cleanupReceipts: mergeReceipts(record.cleanupReceipts, documentReceipts),
-        cleanupExpectedResourceIds: [...new Set([
-          ...record.cleanupExpectedResourceIds,
-          ...cleanupTargets
-            .filter((target) => target.controlScope === "application")
-            .map((target) => target.resourceId)
-        ])],
-        updatedAt: now().toISOString()
-      }), claim);
-      if (documentReceipts.some(
-        (receipt) => receipt.controlScope === "application" && receipt.status !== "deleted"
-      )) {
-        throw new AppError(
-          "SOURCE_CLEANUP_PENDING",
-          "At least one source deletion could not be confirmed.",
-          { retryable: true }
-        );
-      }
+    }
+    const afterSourceCleanup = await store.update(runId, (record) => ({
+      ...record,
+      costs: mergeAttemptCosts(record.costs, costs),
+      cleanupReceipts: mergeReceipts(record.cleanupReceipts, sourceReceipts),
+      cleanupExpectedResourceIds: [...new Set([
+        ...record.cleanupExpectedResourceIds,
+        ...cleanupTargets
+          .filter((target) => target.controlScope === "application")
+          .map((target) => target.resourceId)
+      ])],
+      updatedAt: now().toISOString()
+    }), claim);
+    const persistedDeletedSourceIds = new Set(afterSourceCleanup.cleanupReceipts
+      .filter((receipt) => receipt.controlScope === "application" && receipt.status === "deleted")
+      .map((receipt) => receipt.resourceId));
+    if (sourceReceipts.some(
+      (receipt) => receipt.controlScope === "application" &&
+        receipt.status !== "deleted" &&
+        !persistedDeletedSourceIds.has(receipt.resourceId)
+    )) {
+      throw new AppError(
+        "SOURCE_CLEANUP_PENDING",
+        "At least one source deletion could not be confirmed.",
+        { retryable: true }
+      );
+    }
+    const firstWorkerFailure = parseOutcomes.find((outcome) => outcome.workerError !== null);
+    if (firstWorkerFailure) throw firstWorkerFailure.workerError;
+    const firstParseFailure = parseOutcomes.find((outcome) => outcome.parseError !== null);
+    if (firstParseFailure) throw firstParseFailure.parseError;
+    if (parsed.length !== indexed.length) {
+      throw new AppError("EMPTY_PARSE", "The parser produced no document representation.", {
+        retryable: true
+      });
     }
     await store.update(runId, (record) => ({
       ...record,
-      costs: [...costs],
+      costs: mergeAttemptCosts(record.costs, costs),
       cleanupExpectedResourceIds: [...new Set([
         ...record.cleanupExpectedResourceIds,
         ...cleanupTargets.filter((target) => target.controlScope === "application").map((target) => target.resourceId)
@@ -401,14 +808,14 @@ export async function processRun(runId: string, dependencies: PipelineDependenci
     }), claim);
 
     await stage(store, runId, "purging_source", claim);
-    const sourceFailed = sourceReceipts.some(
-      (receipt) => receipt.controlScope === "application" && receipt.status !== "deleted"
+    const sourceFailed = loaded.some(
+      (source) => !sourceCleanupSucceeded(source, afterSourceCleanup.cleanupReceipts)
     );
     const cleanedManifests = manifests.map((manifest) => {
       const source = loaded.find((item) => item.documentId === manifest.document_id);
       return {
         ...manifest,
-        cleanup_status: source && sourceCleanupSucceeded(source, sourceReceipts)
+        cleanup_status: source && sourceCleanupSucceeded(source, afterSourceCleanup.cleanupReceipts)
           ? "deleted" as const
           : "failed" as const
       };
@@ -425,11 +832,65 @@ export async function processRun(runId: string, dependencies: PipelineDependenci
         { retryable: true }
       );
     }
+    assertBeforeDeadline(workflowStarted + PRE_MODEL_DEADLINE_MS, "pre-model");
 
     await stage(store, runId, "extracting", claim);
     const model = dependencies.model ?? (live
       ? new OpenAIResponsesAdapter(config)
       : new LocalDeterministicModel());
+    const usesDurableOpenAiLedger = live && model instanceof OpenAIResponsesAdapter;
+    const startedOpenAiAttempts = new Set<string>();
+    const paidExtractionCallbacks: PaidExtractionCallbacks | undefined = usesDurableOpenAiLedger
+      ? {
+          beforePaidBatchDispatch: async (plan) => {
+            heartbeat.assertHealthy();
+            assertBeforeDeadline(workflowStarted + RESULT_COMMIT_DEADLINE_MS, "openai-dispatch");
+            const attemptId = openAiBatchAttemptId(runId, plan.batchIndex);
+            await markPaidCostAttemptStarted({
+              store,
+              runId,
+              event: {
+                attempt_id: attemptId,
+                provider: "openai",
+                operation: "responses.parse.structured_extraction",
+                status: "pending",
+                actual_micro_usd: null,
+                estimated_micro_usd: plan.maximumEstimatedCostMicroUsd,
+                latency_ms: 0,
+                retry_of: null,
+                cost_provenance: null
+              },
+              remainingCommitmentMicroUsd: plan.remainingMaximumEstimatedCostMicroUsd,
+              maximumRunCostMicroUsd: config.MAX_RUN_COST_MICRO_USD,
+              claim,
+              now: now()
+            });
+            startedOpenAiAttempts.add(attemptId);
+          },
+          settlePaidBatch: async (settlement) => {
+            const attemptId = openAiBatchAttemptId(runId, settlement.batchIndex);
+            await settlePaidCostAttempt({
+              store,
+              runId,
+              event: {
+                attempt_id: attemptId,
+                provider: "openai",
+                operation: "responses.parse.structured_extraction",
+                status: settlement.status,
+                actual_micro_usd: null,
+                estimated_micro_usd: settlement.estimatedCostMicroUsd,
+                latency_ms: settlement.latencyMs,
+                retry_of: null,
+                cost_provenance: null
+              },
+              remainingCommitmentMicroUsd: settlement.remainingMaximumEstimatedCostMicroUsd,
+              maximumRunCostMicroUsd: config.MAX_RUN_COST_MICRO_USD,
+              claim,
+              now: now()
+            });
+          }
+        }
+      : undefined;
     const modelInput: ModelDocumentInput[] = parsed.map((item) => ({
       document_sha256: item.index.documentSha256,
       document_name: item.source.sourceName,
@@ -441,26 +902,46 @@ export async function processRun(runId: string, dependencies: PipelineDependenci
     let extraction: ExtractionCallResult;
     const modelStarted = performance.now();
     try {
-      extraction = await model.extract(modelInput);
+      extraction = await model.extract(modelInput, paidExtractionCallbacks);
       const estimatedModelCost = extraction.inputTokens === null || extraction.outputTokens === null
         ? config.OPENAI_RUN_RESERVE_MICRO_USD
         : estimateOpenAiCostMicroUsd(extraction.inputTokens, extraction.outputTokens);
-      costs.push({
-        provider: "openai",
-        operation: live ? "responses.parse.structured_extraction" : "local_deterministic_extraction",
-        status: "succeeded",
-        actual_micro_usd: live ? null : 0,
-        estimated_micro_usd: live ? estimatedModelCost : null,
-        latency_ms: extraction.latencyMs,
-        retry_of: null
-      });
+      if (usesDurableOpenAiLedger) {
+        const billed = await store.get(runId);
+        const batchCosts = billed?.costs.filter((event) =>
+          event.provider === "openai" && event.attempt_id !== null &&
+          event.attempt_id !== undefined && startedOpenAiAttempts.has(event.attempt_id)
+        ) ?? [];
+        if (
+          startedOpenAiAttempts.size < 1 ||
+          batchCosts.length !== startedOpenAiAttempts.size ||
+          batchCosts.some((event) => event.status === "pending")
+        ) {
+          throw new AppError(
+            "ANALYSIS_INCOMPLETE",
+            "OpenAI returned before every paid batch cost was durably settled.",
+            { httpStatus: 503, retryable: false }
+          );
+        }
+        costs.push(...batchCosts);
+      } else {
+        costs.push({
+          provider: "openai",
+          operation: live ? "responses.parse.structured_extraction" : "local_deterministic_extraction",
+          status: "succeeded",
+          actual_micro_usd: live ? null : 0,
+          estimated_micro_usd: live ? estimatedModelCost : null,
+          latency_ms: extraction.latencyMs,
+          retry_of: null
+        });
+      }
     } catch (error) {
       const attemptedBatchCost = error instanceof ModelBatchError
         ? estimateOpenAiBatchFailureCostMicroUsd(error)
         : null;
       if (error instanceof ModelBatchError) {
         auditLog("openai_partial_batch_failure", {
-          completed_response_ids: error.completedResponseIds,
+          completed_response_id_sha256: error.completedResponseIds.map(sha256Hex),
           completed_batches: error.completedResponseIds.length,
           attempted_batches: error.attemptedBatches,
           completed_input_unit_count: error.completedInputTokens,
@@ -471,17 +952,25 @@ export async function processRun(runId: string, dependencies: PipelineDependenci
           estimated_attempted_micro_usd: attemptedBatchCost
         });
       }
-      costs.push({
-        provider: "openai",
-        operation: live ? "responses.parse.structured_extraction" : "local_deterministic_extraction",
-        status: "failed",
-        actual_micro_usd: null,
-        estimated_micro_usd: live
-          ? attemptedBatchCost ?? config.OPENAI_RUN_RESERVE_MICRO_USD
-          : 0,
-        latency_ms: Math.round(performance.now() - modelStarted),
-        retry_of: null
-      });
+      if (usesDurableOpenAiLedger && startedOpenAiAttempts.size > 0) {
+        const billed = await store.get(runId);
+        costs.push(...(billed?.costs.filter((event) =>
+          event.provider === "openai" && event.attempt_id !== null &&
+          event.attempt_id !== undefined && startedOpenAiAttempts.has(event.attempt_id)
+        ) ?? []));
+      } else if (!usesDurableOpenAiLedger) {
+        costs.push({
+          provider: "openai",
+          operation: live ? "responses.parse.structured_extraction" : "local_deterministic_extraction",
+          status: "failed",
+          actual_micro_usd: null,
+          estimated_micro_usd: live
+            ? attemptedBatchCost ?? config.OPENAI_RUN_RESERVE_MICRO_USD
+            : 0,
+          latency_ms: Math.round(performance.now() - modelStarted),
+          retry_of: null
+        });
+      }
       throw error;
     } finally {
       // `parsedTargets` releases the parser-owned strings, but modelInput holds
@@ -489,6 +978,8 @@ export async function processRun(runId: string, dependencies: PipelineDependenci
       // cleanup receipt can unlock a public result.
       for (const document of modelInput) document.parsed_markdown = "";
     }
+
+    assertBeforeDeadline(workflowStarted + RESULT_COMMIT_DEADLINE_MS, "result-commit");
 
     await stage(store, runId, "reconciling", claim);
     const materialized = materializeAnalysis({
@@ -505,6 +996,7 @@ export async function processRun(runId: string, dependencies: PipelineDependenci
       generatedAt: now(),
       expiresAt: new Date(initial.expiresAt)
     });
+    assertBeforeDeadline(workflowStarted + RESULT_COMMIT_DEADLINE_MS, "result-commit");
 
     await stage(store, runId, "verifying", claim);
     const remainingTargets = cleanupTargets.filter(
@@ -516,7 +1008,7 @@ export async function processRun(runId: string, dependencies: PipelineDependenci
       const cleanupConfirmed = cleanupGate({
         cleanupExpectedResourceIds: record.cleanupExpectedResourceIds,
         cleanupReceipts
-      });
+      }) && allCapturedSourceWatchdogsClean(record);
       const candidate: RunRecord = {
         ...record,
         cleanupReceipts,
@@ -525,7 +1017,10 @@ export async function processRun(runId: string, dependencies: PipelineDependenci
           : record.citationReceipts,
         costs,
         costMicroUsd: materialized.result.costs.total_micro_usd,
-        result: cleanupConfirmed ? materialized.result : null,
+        // Keep the result dark until cost settlement and the final deadline
+        // gate succeed. The result endpoint keys off this field, so persisting
+        // it during `verifying` would create a brief fail-open release window.
+        result: null,
         cleanupConfirmed,
         updatedAt: now().toISOString()
       };
@@ -546,27 +1041,40 @@ export async function processRun(runId: string, dependencies: PipelineDependenci
     const finalStatus = materialized.result.decision_readiness === "ready_for_bidder_assessment"
       ? "ready"
       : "partial";
+    heartbeat.assertHealthy();
+    await heartbeat.stop();
+    assertBeforeDeadline(workflowStarted + RESULT_COMMIT_DEADLINE_MS, "final-ready-transition");
+    // Settlement is a release gate, not post-READY bookkeeping. If observed
+    // or conservatively estimated spend exceeds the reservation/cap, the
+    // catch path withholds the result and trips the budget failure closed.
+    await budget.settle(runId, updated.costMicroUsd, now());
+    assertBeforeDeadline(workflowStarted + RESULT_COMMIT_DEADLINE_MS, "final-ready-transition");
     updated = await store.update(runId, (record) => ({
       ...transitionRun(record, finalStatus),
+      result: materialized.result,
       processingLeaseId: null,
       processingLeaseExpiresAt: null
     }), claim);
-    await budget.settle(runId, updated.costMicroUsd, now());
     return updated;
   } catch (error) {
+    await heartbeat.stop({ suppressFailure: true });
     const appError = asAppError(error);
     auditLog("run_pipeline_failed", {
       run_id: runId,
       error_code: appError.code,
       error_name: error instanceof Error ? error.name : "unknown"
     });
+    const recoveryAt = now();
+    const recoveryRecord = await store.get(runId);
     const alreadyDeleted = new Set(
-      (await store.get(runId))?.cleanupReceipts
+      recoveryRecord?.cleanupReceipts
         .filter((receipt) => receipt.status === "deleted")
         .map((receipt) => receipt.resourceId) ?? []
     );
     const pendingTargets = cleanupTargets.filter(
-      (target) => target.controlScope !== "application" || !alreadyDeleted.has(target.resourceId)
+      (target) =>
+        (target.controlScope !== "application" || !alreadyDeleted.has(target.resourceId)) &&
+        (!recoveryRecord || sourceCleanupAuthorized(recoveryRecord, target.resourceId, recoveryAt))
     );
     const recoveryReceipts = pendingTargets.length > 0 ? await executeCleanup(pendingTargets, now) : [];
     let failed: RunRecord;
@@ -578,6 +1086,12 @@ export async function processRun(runId: string, dependencies: PipelineDependenci
         cleanupReceipts
       });
       const desired = cleanupConfirmed ? "failed" : "cleanup_pending";
+      const sourceAccessStillOpen = record.sourceCleanupWatchdogs.some((watchdog) =>
+        watchdog.providerCallStartedAt !== null &&
+        watchdog.providerResultCapturedAt === null &&
+        watchdog.sourceAccessExpiresAt !== null &&
+        new Date(watchdog.sourceAccessExpiresAt) > recoveryAt
+      );
       let next = record;
       if (record.status !== desired && record.status !== "ready" && record.status !== "partial" && record.status !== "expired") {
         try {
@@ -594,9 +1108,11 @@ export async function processRun(runId: string, dependencies: PipelineDependenci
         citationReceipts: [],
         terminalAfterCleanup: cleanupConfirmed ? null : "failed",
         processingLeaseId: null,
-        processingLeaseExpiresAt: null,
-        costs,
-        costMicroUsd: costs.reduce(
+        processingLeaseExpiresAt: sourceAccessStillOpen
+          ? record.processingLeaseExpiresAt
+          : null,
+        costs: mergeAttemptCosts(record.costs, costs),
+        costMicroUsd: mergeAttemptCosts(record.costs, costs).reduce(
           (total, event) => total + (event.actual_micro_usd ?? event.estimated_micro_usd ?? 0),
           0
         ),
