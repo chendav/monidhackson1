@@ -43,6 +43,26 @@ Verified: 2026-09-02. This file records implementation constraints, not secrets.
 ## Credentialed gates still required
 
 1. Inspect the exact context.dev parse schema, price, and optional ZDR field.
-2. Prove Context.dev can fetch a five-minute Vercel Private Blob signed GET URL.
+2. Prove Context.dev can fetch a five-minute Railway S3 signed GET URL. The
+   storage replay/CAS/deletion contract is already verified independently; the
+   remaining gate is Monid's ability to fetch the signed object.
 3. Compare Edmonton parsing against local PDF.js page coverage and golden facts.
 4. Record actual cost and provider retention disclosure without exposing inputs.
+
+## Current attestation status — 2026-09-03
+
+The deployment-bound provider-contract attestation implementation received an
+independent `APPROVE` with P0=0, P1=0, and P2=0. It binds a credentialed,
+non-paid Monid inspect response and a non-paid OpenAI control-plane check to the
+exact deployed release identity and a short TTL before source or paid work can
+start.
+
+This is an implementation-review result only. No attestation receipt and no
+provider call exist because the Monid API key and exact provider configuration
+are absent. Production Turnstile is also absent. The release remains
+`NOT_READY`, and no Edmonton/CER parse, cost, retention, deletion, or latency
+claim may be made from this file.
+
+The S3/runtime/provider receipt refresh heartbeat is scheduled for Sep 9 and
+Sep 10 at 12:00 MDT. A refresh can succeed only after the required deployment
+and provider credentials exist.

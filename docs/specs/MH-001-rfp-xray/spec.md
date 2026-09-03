@@ -31,7 +31,9 @@ three amendments are the multi-document live-demo fixture.
 
 ## Constraints
 
-- Next.js/TypeScript on Vercel, Neon/Postgres, Vercel Workflow and Private Blob.
+- Next.js/TypeScript on Vercel, Neon/Postgres, Vercel Workflow, and a private
+  Railway S3-compatible Bucket. Railway runs no application compute service;
+  Vercel Private Blob remains an adapter fallback.
 - Maximum five documents, 25MB each, 300 aggregate pages.
 - URL ingestion is restricted to HTTPS on `canadabuys.canada.ca`.
 - Source and raw intermediate deletion confirmations are required before READY.

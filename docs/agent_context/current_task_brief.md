@@ -2,69 +2,84 @@
 
 - Task ID: MH-001
 - Title: RFP X-Ray contest MVP
-- Status: Local release candidate approved; credentialed production gates open
+- Status: Pre-deploy release candidate; live-provider and contest gates remain open
 - Chief owner: chief
 - Updated: 2026-09-03
+- Reviewed implementation commit: `dfc8be9`; documentation/evidence changes are
+  being finalized for the same release push.
 
 ## Outcome
 
-Build an English public Web and JSON API that analyzes user-supplied tender PDFs
-without searching. The MVP replaces the document-analysis portion of bidworx
-Starter for one real RFP: summary, requirements, evaluation, risks, amendment
-reconciliation, grounded Q&A, citations, cleanup proof, and per-run cost.
+Build an English public Web and JSON API that analyzes a user-supplied tender
+pack without searching. The product targets the document-analysis portion of
+bidworx Starter: summary, requirements, evaluation, risk review, amendment
+reconciliation, grounded Q&A, page citations, cleanup proof, and per-run cost.
 
-## In Scope
+## Scope boundary
 
-- Next.js/TypeScript working surface and public API.
-- Vercel Workflow, Neon/Postgres contracts, and Vercel Private Blob ingress.
-- Monid context.dev parsing adapter and OpenAI Structured Outputs adapter.
-- Edmonton golden fixture and CER base-plus-amendments regression fixture.
-- Source cleanup gate, cost ledger, rate limits, and audit metadata.
-- Automated checks, independent review, deployment/runbook documentation.
+In scope are the Next.js/TypeScript Web and API, Vercel Workflow, Neon state,
+Railway private object storage, Monid parsing, OpenAI structured extraction,
+Edmonton and CER evidence, cleanup/cost controls, and independent review.
+Tender search, bid writing, team collaboration, CRM, SSO, billing, bidder-fit
+predictions, and long-term tender storage remain out of scope.
 
-## Out of Scope
+## Current pre-deploy evidence
 
-- Tender search, response writing, team collaboration, CV library, CRM, SSO.
-- Bid/no-bid, win probability, or bidder-fit claims without bidder data.
-- Billing, account management, long-term document retention, PDF server viewer.
+- `pnpm check`: PASS, 39 test files passed and 3 skipped; 391 tests passed and
+  7 explicitly skipped.
+- Production build: PASS, emitting 10 Workflow steps, 4 workflows, and 13
+  application pages.
+- Local Playwright: 14 passed and 2 explicit live-environment skips.
+- Official fixture audit: 3/3 passed.
+- Production dependency audit: no known vulnerabilities. The full audit has no
+  high/critical findings; four lower-severity development-chain findings remain
+  (1 low, 3 moderate) after scoped overrides.
+- Neon: 9 public tables, 8 migration-ledger rows, schema marker
+  `rfp-xray-schema-v8`; live concurrency/CAS probe passed 2/2, including a real
+  compare-and-swap loss.
+- Railway storage: bound attestation valid until 2026-09-10 04:11:53 MDT; live
+  S3 probe passed 1/1 and real Chromium storage probe with the production
+  origin `https://rfp-xray.vercel.app` passed 1/1.
+- Vercel project configuration is Node 22 with Fluid Compute enabled. The
+  deployment-bound 300-second Workflow runtime-attestation implementation was
+  independently approved with P0/P1/P2=0. No current runtime receipt can exist
+  until the clean committed deployment is available.
+- Provider-contract attestation was independently approved with P0/P1/P2=0.
+  No provider receipt or provider call exists because the Monid key and exact
+  provider configuration are absent.
+- The pinned Vercel CLI remains 59.11.2; 33 focused runtime/provider attestation
+  tests pass after dependency overrides.
+- The final security re-review returned `APPROVE`, P0=0 and P1=0; both P2
+  recommendations were implemented and tested.
+- `CRON_SECRET` was rotated consistently in Vercel production/preview and
+  GitHub Actions. The GitHub maintenance variable deliberately remains `false`
+  until the new deployment is live.
+- A sanitized bidworx price capture records Starter at £190/month with typical
+  usage of one tender. It is price evidence only.
 
-## Acceptance Criteria
+## Evidence boundary
 
-- AC-1: A user can create a package from an allowlisted CanadaBuys URL or signed
-  PDF upload, with five-document/25MB-per-document/300-page limits enforced.
-- AC-2: Runtime processing is closed-world: no search, embedded-link traversal,
-  PDF JavaScript execution, or document-originated tool calls.
-- AC-3: A run cannot become ready until every source and raw intermediate under
-  app control has a recorded deletion confirmation.
-- AC-4: Every critical visible claim has a verified SHA-bound physical-page
-  citation, while unsupported facts are omitted or marked unknown/conflicted.
-- AC-5: Edmonton golden facts, requirements, evaluation, security, pricing
-  blanks, form pages, and Annex D/E inconsistency pass deterministic tests.
-- AC-6: CER documents reconcile independent of upload order and preserve
-  superseded values while surfacing the 2050/2055 amendment conflict.
-- AC-7: The versioned API, OpenAPI document, stable status model, idempotency,
-  Q&A, deletion, sample, and health routes match the task specification.
-- AC-8: The responsive English UI exposes ingestion, progress, six analysis
-  surfaces, citations, cleanup status, source scope, and actual/estimated cost.
-- AC-9: Guest/API authentication boundaries, quotas, budget reservation,
-  sensitive-log redaction, and source retention policies are enforced.
-- AC-10: Lint, typecheck, unit, integration, golden, build, and browser E2E pass.
-- AC-11: Independent Reviewer returns PASS with P0=0 and P1=0.
+The public deployment at https://rfp-xray.vercel.app still serves the older
+sample build because reviewed implementation commit `dfc8be9` has not yet been
+pushed. Its sample endpoints must not be
+used as evidence for the new storage, runtime, provider-attestation, or
+maintenance path.
 
-## Current Phase
+No paid Monid call, real Edmonton/CER campaign, provider-retention proof,
+end-to-end production cleanup receipt, production citation click-through,
+final video, contest submission, or social publication has occurred. Turnstile
+is absent, and Chrome/in-app interactive browser control is unavailable. The
+release verdict therefore remains `NOT_READY`.
 
-Commit `cc2831c` is the independently approved local release candidate.
-`pnpm check` passes 234 tests with 3 credential/fixture-gated skips; the official
-PDF audit passes 3/3, the production build emits 9 Workflow steps/3 workflows,
-and Playwright passes 14/14. Two bounded adversarial reviewers and the final
-Independent Reviewer report P0=0 and P1=0. Credentialed Monid, Blob, Neon,
-Workflow, Turnstile, cost, latency, deployment, video, and publication gates
-remain open, so this is not yet a production or contest-completion claim.
+## Immediate next action
 
-## Immediate Next Action
+Commit the reviewed documentation/evidence and push the two local release
+commits, allow the new Vercel production deployment, then create the
+deployment-bound runtime receipt and recheck fail-closed health. Enable GitHub
+maintenance only after that deployment and one successful bounded heartbeat.
+Obtain the Monid and Turnstile credentials before any provider call or public
+mutation. Run the budget-capped Edmonton/CER campaign and independent deployed
+citation review only after every preflight gate passes.
 
-Run the Monid contract spike and credentialed Vercel/Neon evidence suite, then
-execute the Edmonton ten-run benchmark and complete CER production demo. Keep
-production fail-closed until all provider configuration and cleanup receipts are
-verified. Continue with Vercel Workflow; add Railway only if measured runtime or
-long-lived-worker requirements invalidate the current architecture.
+The S3, runtime, and provider receipt refresh heartbeat is scheduled for
+2026-09-09 and 2026-09-10 at 12:00 MDT.

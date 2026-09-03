@@ -4,58 +4,90 @@ Updated: 2026-09-03
 
 ## Confirmed
 
-- The repository is initialized on `main`, is connected to origin, and the
-  independently approved local release candidate is commit `cc2831c`.
-- Next.js Web/API, local deterministic pipeline, Neon/Blob/Workflow adapters,
-  Monid/OpenAI adapters, golden fixtures, and automated tests are implemented.
-- There is no `.codegraph/` directory and no existing application scaffold.
-- The selected target is bidworx Starter at its current public £190/month price.
-- Edmonton RFP 100022184-A is a 55-page closed development fixture.
-- CER 84084-26-0009/A plus amendments 001-003 is the final live package.
-- Vercel Functions have a 4.5MB request/response body limit; browser uploads
-  therefore require signed direct Blob upload rather than multipart API proxy.
-- Official OpenAI documentation currently supports Responses API Structured
-  Outputs with the JavaScript SDK and Zod helpers.
-- Monid CLI 0.1.7 is installed from the official scoped package
-  `@monid-ai/cli`; the local Monid keystore currently has no configured key.
-- Current Monid run input is nested under `input.body`, `input.queryParams`, and
-  `input.pathParams`; adapter code must not rely on older flat examples.
-- Context.dev parse currently advertises a 25MB limit, a short-lived Markdown
-  download link, and a longer provider-side artifact lifetime.
-- Ontology's reusable strengths are fail-closed SHA/page/quote verification,
-  append-only receipts, conflict preservation, and bounded grounded queries.
-- Evidence validation now binds polarity, modality, objective bounds, scalar
-  roles, deadline and submission objects, selection outcomes, mandatory
-  predicates, and source-authorized mutation targets to local source spans.
-- Reconciliation preserves subfield identities, complete-document replacements,
-  amendment ordering, conflicts, and stale-risk invalidation across documents.
-- Current local evidence: `pnpm check` 234 passed/3 optional skips; official
-  fixture audit 3/3; build pass with 9 steps/3 workflows and 13 static pages;
-  Playwright 14/14; zero high/critical dependency advisories and one moderate
-  development-chain advisory.
-- Bounded reconciliation and security reviewers both returned APPROVE with
-  P0=0/P1=0. The final Independent Reviewer returned PASS with P0=0/P1=0 for
-  `cc2831c`.
+- The repository is on `main`, connected to origin, and reviewed implementation
+  commit `dfc8be9` is local. The remaining working-tree changes are release
+  documentation/evidence; the public Vercel deployment is still the older
+  sample until the release commits are pushed.
+- The application is a single Next.js/TypeScript repository using Vercel for
+  Web/API/Workflow compute, Neon for durable state, and the dedicated Railway
+  `rfp-xray-private` S3-compatible Bucket for temporary private objects.
+  Railway runs no compute service and the unrelated `ontology-ai-ready` project
+  was not changed.
+- The Vercel project is configured for Node 22 and Fluid Compute. The current
+  code requires a deployment-bound 300-second Workflow runtime attestation
+  before source or paid work.
+- Runtime-attestation code was independently reviewed: `APPROVE`, P0=0,
+  P1=0, P2=0. There is intentionally no current receipt before a clean committed
+  deployment whose exact ID, URL, project, team, Git SHA, runtime, duration,
+  region, memory, SDK version, internal deadlines, TTL, and payload hash can be
+  bound together.
+- Provider-contract attestation code was independently reviewed: `APPROVE`,
+  P0=0, P1=0, P2=0. It performs a credentialed non-paid Monid inspect and a
+  non-paid OpenAI control-plane check and binds the result to deployment
+  identity. No receipt exists because the Monid key/configuration is absent.
+- The release tooling pins Vercel CLI 59.11.2. Thirty-three focused
+  runtime/provider attestation tests pass after the dependency overrides.
+- The security re-review returned `APPROVE`, P0=0 and P1=0. Its two P2
+  recommendations were subsequently implemented and tested.
+- Current local regression evidence is: `pnpm check` 39 files passed/3 skipped,
+  391 tests passed/7 skipped; build PASS with 10 Workflow steps, 4 workflows,
+  and 13 pages; local E2E 14 passed/2 explicit live skips; official fixture
+  audit 3/3; production dependency audit reports no known vulnerabilities. The
+  full dependency audit has no high/critical findings and retains 1 low/3
+  moderate development-chain findings after scoped overrides.
+- Neon is at schema v8: 9 public tables, 8 migration-ledger rows, marker
+  `rfp-xray-schema-v8`. The migration rerun is idempotent. The live concurrency
+  suite passed 2/2, including application contention and an actual CAS-loss
+  path.
+- Railway storage has a target-bound safety attestation expiring
+  2026-09-10 04:11:53 MDT. The current live S3 suite passed 1/1. A real Chromium
+  PUT/read/fence/replay/delete probe using
+  `https://rfp-xray.vercel.app` as the browser Origin passed 1/1. These are
+  storage component facts, not end-to-end Monid facts.
+- `CRON_SECRET` is rotated consistently across Vercel production/preview and
+  GitHub Actions. `RFP_XRAY_MAINTENANCE_ENABLED` remains deliberately false
+  until the new build is deployed; no production maintenance heartbeat is yet
+  claimed.
+- The bidworx pricing screenshot at
+  `docs/specs/MH-001-rfp-xray/release-evidence/bidworx-pricing-2026-09-03.png`
+  is 714876 bytes with SHA-256
+  `5a4d44ba608131cabb7770a28321d85d5552ba52fb4f86fb0b3520340b4f9b34`.
+  It was captured at `2026-09-03T11:46:40.5885646Z` from the official pricing
+  page and shows Starter at £190/month with typical usage of one tender.
+- Chrome and in-app interactive browser automation are unavailable. Local and
+  remote automated probes do not substitute for the required human production
+  citation review.
+- The S3/runtime/provider receipt refresh heartbeat is scheduled for
+  2026-09-09 and 2026-09-10 at 12:00 MDT.
 
 ## Inferred
 
-- A single Next.js application with Neon and Vercel Workflow is the lowest
-  coordination-cost architecture for the eight-day build.
+- Vercel Fluid Compute can host this release candidate without Railway compute,
+  provided the deployment-bound runtime receipt and real provider benchmarks
+  pass.
+- The single-application architecture remains the lowest-coordination option;
+  Railway compute should be reconsidered only if measured Monid/CER execution
+  cannot preserve the 285-second commit deadline and cleanup headroom.
 
-## Unknown
+## Unknown or not yet proven
 
-- Exact account-visible context.dev inspect schema, ZDR propagation, signed-URL
-  compatibility, and provider deletion semantics require a credentialed spike.
-- Vercel, Neon, Blob, Turnstile, and deployment credentials are not yet verified.
-- Full-document extraction quality of the configured OpenAI model is not yet
-  verified. A live count probe and exact-schema synthetic Structured Output
-  probe succeeded.
+- Exact account-visible Monid parse/price/retention behavior, signed-URL
+  compatibility, actual parse cost, and Edmonton/CER quality remain unverified.
+- Turnstile production configuration is absent.
+- No current Vercel runtime receipt or provider-contract receipt exists.
+- The new build has not been deployed, so its health, Workflow execution,
+  maintenance heartbeat, hard-kill recovery, end-to-end source cleanup timing,
+  and production citation links remain unverified.
+- No paid Monid work, real Edmonton/CER campaign, 90-second video, contest
+  submission, or social publication has occurred.
 
-## Active Constraints
+## Active constraints
 
-- Follow applicable repository governance and the MH-001 task packet.
-- Do not store secrets, raw PDFs, raw parsed Markdown, or signed source URLs.
-- Preserve user-authored untracked governance files and unrelated work.
-- Node must be at least 22.13 because of the installed PDF.js runtime.
-- Current runtime decision remains Vercel Pro + Fluid Compute, not Railway. Local
-  memory adapters are development/test only and production must fail closed.
+- Production must fail closed when storage, database, runtime, provider,
+  maintenance, Monid, OpenAI, or Turnstile requirements are missing.
+- Never persist or disclose API keys, database URLs, signed object URLs, raw
+  tender PDFs, parsed Markdown, or provider payloads in release evidence.
+- The 105/150/285-second internal deadlines and 300-second route capability are
+  enforced design facts, not latency evidence.
+- A passing component probe is not an end-to-end release. The current verdict
+  is `NOT_READY` until the committed deployment and all live-provider gates pass.

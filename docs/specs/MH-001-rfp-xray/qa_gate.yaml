@@ -36,5 +36,96 @@ regression_checks:
   - unsupported claim and prompt-injection fixtures
 review:
   required: true
-  verdict: pass-local-cc2831c
+  release_verdict: not_ready
+  reviewed_implementation_commit: dfc8be9
+  reviewed_release_candidate:
+    pnpm_check: 39_files_passed_3_skipped_391_tests_passed_7_skipped
+    build: pass_10_steps_4_workflows_13_pages
+    local_e2e: 14_passed_2_live_skipped
+    official_fixture_audit: 3_passed
+    production_audit: no_known_vulnerabilities
+    full_audit: 0_high_0_critical_1_low_3_moderate_development_chain
+    focused_runtime_provider_attestation_tests: 33_passed_vercel_cli_59_11_2
+  runtime_attestation: approve_p0_0_p1_0_p2_0_no_receipt_before_clean_deploy
+  provider_attestation: approve_p0_0_p1_0_p2_0_no_receipt_or_call_without_monid_config
+  security_rereview: approve_p0_0_p1_0_both_p2_implemented_and_tested
+  paid_live_verifier_component: pass-p0-0-p1-0
 max_revision_rounds: 3
+external_release_evidence:
+  public_sample:
+    url: https://rfp-xray.vercel.app
+    landing_http_status: 200
+    openapi_http_status: 200
+    edmonton_sample_http_status: 200
+    observed_at: 2026-09-03T03:16:28-06:00
+    result: passed_for_sample_distribution_only
+    remote_read_only_playwright: 4_passed
+    live_mutations_exercised: false
+    citation_click_through_exercised: false
+    build_currency: predates_reviewed_implementation_commit
+    committed_redeploy_required: true
+  deployed_health:
+    expected_http_status_until_live_gates_close: 503
+    observed_http_status: 503
+    body_status: not_ready
+    result: passed_fail_closed
+  neon_migrations:
+    public_tables: 9
+    migration_rows: 8
+    schema_version: 8
+    schema_marker: rfp-xray-schema-v8
+    rerun: passed
+    result: passed
+  neon_concurrency:
+    live_suite: 2_passed
+    real_cas_loss: passed
+    evidence: release-evidence/neon-concurrency-probe.md
+    result: passed
+  railway_private_storage:
+    role: private_s3_storage_only
+    compute_service_created: false
+    signed_put_and_replay_rejection: passed
+    cas_fence_and_post_fence_replay_rejection: passed
+    conditional_delete_and_absence_confirmation: passed
+    production_origin_cors_upload_and_replay: passed
+    bucket_versioning: disabled
+    bound_attestation_expires: 2026-09-10T04:11:53-06:00
+    s3_live_suite: 1_passed
+    chromium_production_origin_suite: 1_passed
+    evidence: release-evidence/railway-storage-probe.md
+    result: passed_contract_probe_only
+  vercel_fluid_runtime_policy:
+    node: 22.x
+    fluid_compute: enabled
+    max_step_seconds: 300
+    monid_network_deadline_seconds: 105
+    pre_model_deadline_seconds: 150
+    result_commit_deadline_seconds: 285
+    monid_parse_concurrency: 4
+    attestation_implementation_review: approve_p0_0_p1_0_p2_0
+    current_attestation_receipt: absent_until_clean_committed_deploy
+    real_benchmark: pending
+    result: implemented_not_live_benchmarked
+  paid_live_verifier:
+    exists: true
+    independent_audit: pass_p0_0_p1_0
+    paid_path_executed: false
+    result: ready_for_credentialed_use_not_run
+  live_provider_release:
+    required: true
+    result: blocked
+    blockers:
+      - Monid API key is unavailable.
+      - Production Turnstile is absent.
+      - No provider-contract receipt or provider call exists.
+      - The 300-second Fluid Compute design has not passed the required real Monid benchmark.
+      - Reviewed implementation commit dfc8be9 is local and the public deployment predates it.
+      - Interactive in-app browser automation is unavailable; read-only smoke does not satisfy the deployed mutation-flow and citation-review gate.
+  maintenance:
+    cron_secret_rotated_consistently: true
+    github_enablement_variable: false_until_new_deployment
+    successful_production_heartbeat: not_claimed
+  receipt_refresh_heartbeat: Sep_9_and_Sep_10_at_12_00_MDT
+  release_verdict: not_ready
+  railway: adopted_for_private_s3_storage_only_no_compute
+  rule: Never convert sample-route availability, component probes, or local Reviewer PASS into a live-provider or contest-completion claim.

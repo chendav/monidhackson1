@@ -1,62 +1,118 @@
-reviewer: final_independent_reviewer
-independent: true
-verdict: PASS
-reviewed_commit: cc2831c2ebf30d78d43b53a6331d7d646d06243f
-review_scope: local_release_candidate
-summary:
-  p0: 0
-  p1: 0
-  full_check: 234_passed_3_skipped
-  focused_materialization_and_cer: 144_passed
-  official_pdf_audit: 3_passed
-  playwright: 14_passed
-  build: 9_steps_3_workflows_13_static_pages
-criteria:
-  - id: AC-1
-    result: met_locally
-    evidence: URL/upload contracts, MIME/size/count/page limits, presign quotas, and replay-safe upload lifecycle tests pass.
-  - id: AC-2
-    result: met_locally
-    evidence: Closed-world tests prohibit search, embedded-link traversal, PDF JavaScript, and document-originated instructions.
-  - id: AC-3
-    result: met_locally
-    evidence: Cleanup, expiry, abandoned upload, failed deletion, result-read denial, and orphan-fence regressions pass.
-  - id: AC-4
-    result: met_locally
-    evidence: SHA/page/quote verification, field-local relation binding, polarity, objective bounds, scalar roles, and cross-document stale-risk invalidation pass.
-  - id: AC-5
-    result: met_locally
-    evidence: Official Edmonton PDF audit and golden assertions pass for 55 pages, forms, M1-M4, pricing blanks, selection, security, and Annex D/E conflict.
-  - id: AC-6
-    result: met_locally
-    evidence: CER order permutations, complete Basis of Payment and 37-row M3 replacement, superseded facts, and the 2050/2055 three-page conflict pass.
-  - id: AC-7
-    result: met_locally
-    evidence: API, OpenAPI, state, idempotency, Q&A, deletion, sample, health, and production fail-closed tests pass.
-  - id: AC-8
-    result: met_locally
-    evidence: Responsive desktop/mobile Web flow and trust-state E2E tests pass 14/14.
-  - id: AC-9
-    result: met_locally
-    evidence: Turnstile lifecycle, sessions, quotas, spend bounds, SSRF controls, logging, and configuration gates pass locally.
-  - id: AC-10
-    result: met_locally
-    evidence: Lint, typecheck, 234 tests, official PDF audit, production build, and Playwright pass; audit has zero high/critical and one moderate development-chain advisory.
-  - id: AC-11
-    result: met_locally
-    evidence: Independent Reviewer returned PASS with P0=0 and P1=0 for cc2831c.
-adversarial_evidence:
-  - reconciliation_adversary: APPROVE_P0_0_P1_0
-  - revision3_security_audit: APPROVE_P0_0_P1_0
-  - final_independent_reviewer: PASS_P0_0_P1_0
-external_gates_open:
-  - Credentialed Monid inspect/parse, pricing receipt, artifact TTL, and provider retention/deletion verification.
-  - Live Vercel Private Blob deletion receipt, Neon concurrency, Workflow crash recovery, and production Turnstile verification.
-  - Ten-run Edmonton latency/cost benchmark and complete CER production run.
-  - Reviewer production-UI click-through of at least 12 high-risk citations.
-  - Production URL, final 90-second video, and five social publication links.
+review_scope: pre_deploy_release_candidate
+recorded_at: 2026-09-03
+reviewed_implementation_commit: dfc8be9
+working_tree_state: documentation_only_before_release_evidence_commit
+public_deployment_state: older_sample_build
+release_verdict: NOT_READY
+
+local_verification:
+  pnpm_check:
+    result: pass
+    test_files_passed: 39
+    test_files_skipped: 3
+    tests_passed: 391
+    tests_skipped: 7
+  production_build:
+    result: pass
+    workflow_steps: 10
+    workflows: 4
+    application_pages: 13
+  local_playwright:
+    result: pass
+    passed: 14
+    skipped: 2
+    skip_scope: explicit_live_environment_checks
+  official_fixture_audit:
+    result: pass
+    passed: 3
+  production_dependency_audit:
+    result: pass
+    known_vulnerabilities: 0
+  full_dependency_audit:
+    high: 0
+    critical: 0
+    low: 1
+    moderate: 3
+    scope_of_remaining_findings: development_chain
+  focused_runtime_provider_attestation_tests:
+    result: pass
+    passed: 33
+    pinned_vercel_cli: 59.11.2
+
+independent_reviews:
+  runtime_attestation:
+    verdict: APPROVE
+    p0: 0
+    p1: 0
+    p2: 0
+    limitation: implementation review only; no current receipt until a clean committed deployment exists
+  provider_contract_attestation:
+    verdict: APPROVE
+    p0: 0
+    p1: 0
+    p2: 0
+    limitation: implementation review only; no receipt or provider call because the Monid key and exact configuration are absent
+  security_rereview:
+    verdict: APPROVE
+    p0: 0
+    p1: 0
+    p2_follow_up: both recommendations implemented and tested after review
+
+live_component_evidence:
+  neon:
+    result: pass
+    public_tables: 9
+    migration_rows: 8
+    schema_version: 8
+    schema_marker: rfp-xray-schema-v8
+    live_concurrency_tests: 2_passed
+    real_cas_loss_tested: true
+    evidence: release-evidence/neon-concurrency-probe.md
+  railway_private_storage:
+    result: pass
+    bound_attestation_expires: 2026-09-10T04:11:53-06:00
+    s3_live_tests: 1_passed
+    chromium_production_origin_tests: 1_passed
+    browser_origin: https://rfp-xray.vercel.app
+    railway_compute_service: none
+    evidence: release-evidence/railway-storage-probe.md
+
+release_configuration:
+  vercel_node: 22.x
+  vercel_fluid_compute: enabled
+  cron_secret_rotated_in_vercel_production_preview_and_github: true
+  github_maintenance_enabled: false
+  github_maintenance_enablement_reason: wait_for_new_committed_deployment
+  receipt_refresh_heartbeat: Sep_9_and_Sep_10_at_12_00_MDT
+
+price_evidence:
+  screenshot: release-evidence/bidworx-pricing-2026-09-03.png
+  bytes: 714876
+  sha256: 5a4d44ba608131cabb7770a28321d85d5552ba52fb4f86fb0b3520340b4f9b34
+  captured_at: 2026-09-03T11:46:40.5885646Z
+  official_url: https://bidworx.io/pricing
+  supported_claims:
+    - Starter is shown at £190/month.
+    - Typical usage is shown as one tender.
+
+open_release_gates:
+  - Commit the reviewed documentation/evidence and push both local release commits; the public deployment is older.
+  - Inspect the resulting production deployment and store a deployment-bound runtime receipt.
+  - Enable GitHub maintenance only after the new deployment, then verify a bounded production heartbeat.
+  - Obtain the Monid key and exact configuration and store a current provider-contract receipt before any source or paid call.
+  - Configure production Turnstile and verify the deployed guest mutation lifecycle.
+  - Run the budget-capped Edmonton ten-run benchmark and complete CER package campaign.
+  - Verify end-to-end Workflow recovery, cleanup timing, cost, latency, and every required citation.
+  - Complete an independent deployed review of at least 12 high-risk citations.
+  - Record the final video and complete the contest submission and five social publications.
+
 limitations:
-  - PASS applies to the local release candidate, not to production readiness or contest submission completion.
-  - Three default-suite skips are credential/fixture-gated; the official fixture audit was run separately and passed 3/3.
-  - The remaining moderate advisory is in the drizzle-kit development dependency chain and is not a high/critical production advisory.
-next_gate: Configure provider credentials and execute the documented Monid/Vercel/Neon production evidence run; do not claim READY for release until those external gates pass.
+  - No paid Monid or other live provider call has occurred.
+  - No runtime or provider-contract receipt currently exists.
+  - Chrome and in-app interactive browser control are unavailable.
+  - Turnstile is absent.
+  - The real Edmonton/CER campaign, video, submission, and social publication have not occurred.
+  - Component checks do not prove end-to-end production readiness.
+  - The public sample must not be represented as the current release candidate.
+
+next_gate: Push and deploy the reviewed release commits, then create the exact deployment-bound runtime receipt while all live-provider gates remain fail-closed.

@@ -92,5 +92,35 @@ exclude_paths: []
 edits_allowed: true
 acceptance: [AC-1, AC-3, AC-5, AC-6, AC-8, AC-9, AC-10]
 handoff: qa_report.md
-status: blocked-on-provider-and-deployment-credentials
+status: predeploy-checks-passed-redeploy-attest-monid-turnstile-open
+confirmed_progress:
+  - Public sample deployment is reachable at https://rfp-xray.vercel.app.
+  - Landing, OpenAPI, and Edmonton sample returned HTTP 200 on 2026-09-03.
+  - Health returned 503 not_ready, preserving the production fail-closed gate.
+  - Remote read-only Playwright deployment smoke passed 4/4 without mutations or paid calls.
+  - Active Neon reports nine public tables, eight migration rows, schema v8 marker; live concurrency including a real CAS-loss passed 2/2.
+  - Dedicated Railway private Bucket has a bound attestation through 2026-09-10 04:11:53 MDT; current S3 live and real Chromium production-Origin probes each passed 1/1.
+  - Railway is adopted only as private S3-compatible storage; no Railway compute service exists.
+  - Vercel project settings are Node 22 with Fluid Compute enabled; deployment-bound runtime attestation code is independently approved P0/P1/P2=0.
+  - Provider-contract attestation code is independently approved P0/P1/P2=0, but no receipt/call exists without the Monid key and exact configuration.
+  - Security re-review returned APPROVE P0=0/P1=0; both P2 recommendations are implemented and tested.
+  - Current regression gate is 39 files/391 tests passed with 3 files/7 tests skipped; build 10 steps/4 workflows/13 pages; local E2E 14/2; fixtures 3/3.
+  - Production dependency audit has no known vulnerabilities; full audit has zero high/critical findings with one low and three moderate development-chain findings.
+  - The paid live verifier exists and received an independent PASS with P0=0/P1=0; its paid path has never been executed.
+open_blockers:
+  - Reviewed implementation commit dfc8be9 is local and the public deployment predates it; push and exact deployment inspection are required.
+  - No current runtime receipt exists until the clean committed deployment can be bound.
+  - CRON_SECRET is rotated consistently, but the GitHub maintenance variable remains false until the new deployment; a successful bounded heartbeat is not yet claimed.
+  - Vercel Fluid Compute is bounded at 300 seconds with 105/150/285-second deadlines and Monid concurrency 4, but still requires a real Monid benchmark.
+  - Monid CLI has no active API key, so the paid contract spike and real cost/retention evidence cannot run.
+  - No provider-contract receipt or provider call exists.
+  - Production Turnstile is absent, so guest live mutations cannot be released.
+  - Interactive in-app browser automation is unavailable; no full live mutation flow or production citation click-through evidence is captured.
+evidence:
+  - release-evidence/railway-storage-probe.md
+  - release-evidence/neon-concurrency-probe.md
+  - release-evidence/deployment-summary.md
+  - release-evidence/bidworx-pricing-2026-09-03.md
+scheduled_refresh: S3/runtime/provider receipts on Sep 9 and Sep 10 at 12:00 MDT
+truth_boundary: The public sample, private-storage contract probe, and Neon probes are partial release evidence only. They do not establish deployed end-to-end source cleanup, Monid readiness, provider retention, latency, cost, video, submission, or publication completion.
 ```

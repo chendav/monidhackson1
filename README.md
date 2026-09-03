@@ -9,8 +9,8 @@ closed-world Q&A.
 
 ## Trust boundary
 
-- Monid/context.dev is an optional live normalization adapter for difficult PDF
-  and Office inputs.
+- Monid/context.dev is the production normalization adapter for user-supplied
+  PDF inputs; the current public contract does not accept Office files.
 - PDF.js creates the authoritative 1-based physical-page index.
 - Models return evidence text and chunk identifiers, never page numbers.
 - The server verifies quotes against the page index and binds receipts to the
@@ -36,7 +36,7 @@ for development and test evidence; the UI labels it and never presents it as a
 paid-provider execution.
 
 Live provider credentials stay server-side. Do not commit `.env.local`, PDFs,
-parsed Markdown, signed Blob URLs, or tender contents.
+parsed Markdown, signed object-storage URLs, or tender contents.
 
 ## Quality gates
 
@@ -49,7 +49,11 @@ pnpm test:e2e
 
 The golden suites encode the stable Edmonton document checks and the CER
 amendment ordering/replacement/conflict checks without redistributing the source
-PDFs. Credentialed live probes are separate from deterministic CI.
+PDFs. Credentialed live probes are separate from deterministic CI. The
+default-skipped Railway and Neon probes can be invoked through
+`pnpm test:live:storage` and `pnpm test:live:neon` only after their explicit
+environment gates and credentials are supplied. `pnpm verify:live` remains
+read-only unless `RFP_XRAY_ALLOW_PAID_LIVE=true` is set exactly.
 
 ## API
 
@@ -63,8 +67,12 @@ described in the health and audit responses rather than hidden.
 
 ## Deployment
 
-The target runtime is Vercel with Vercel Workflow and Private Blob, plus Neon
-Postgres. Configure the variables documented in `.env.example`, apply generated
+The target runtime is Vercel with Vercel Workflow, a dedicated private Railway
+S3-compatible Bucket, and Neon Postgres. Railway hosts no compute service for
+the contest build. Vercel Private Blob remains a local/test compatibility
+adapter, but cannot satisfy production readiness until it has an equivalent
+target-bound, expiring safety attestation.
+Configure the variables documented in `.env.example`, apply the checked-in
 Drizzle migrations, run every quality gate, then deploy from `main`.
 
 See [`docs/specs/MH-001-rfp-xray`](docs/specs/MH-001-rfp-xray) for the product

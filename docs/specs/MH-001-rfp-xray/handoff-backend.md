@@ -1,5 +1,12 @@
 # Backend Implementation Handoff
 
+> Historical implementation handoff. Revisions 1–5 preserve the evidence
+> available at each handoff and are superseded by Revision 6 for current schema,
+> test, audit, and runtime status. The current path uses Vercel Node 22 with
+> Fluid Compute, deployment-bound runtime/provider attestations, bounded
+> parallel Monid parsing, and a dedicated Railway private Bucket. See
+> `runtime-decision.md` and `release-evidence/railway-storage-probe.md`.
+
 ## Assignment
 
 Implemented MH-001 T2: the API, run lifecycle, PDF/evidence pipeline, provider adapters,
@@ -569,3 +576,94 @@ review and does not replace any credentialed provider/deployment gate.
   receipts with credentials.
 - Verify Workflow enqueue ambiguity/recovery, Monid parse/cost/retention, deployed
   Turnstile, ten Edmonton timings, and the complete live CER package.
+
+---
+
+## Revision 5 — Durable Maintenance Liveness Gate
+
+This working-tree revision replaces configuration-only cron readiness with
+runtime evidence. It is implementation handoff, not an independent Reviewer
+verdict.
+
+- At Revision 5, additive migration `0006_maintenance_heartbeat.sql` advanced
+  the application marker to `rfp-xray-schema-v7` and added a singleton
+  maintenance heartbeat. This historical revision was subsequently superseded
+  by schema v8 and migration `0007_release_attestations.sql`.
+  The row stores only completion time, bounded duration/budget, and aggregate
+  counts—never credentials, run IDs, or tender content.
+- The authenticated endpoint processes at most five admission candidates, five
+  cleanup candidates, and ten incoming-upload cleanup candidates per call. It
+  has a 45-second internal deadline inside the 60-second function limit.
+- A timeout or any reconciliation/storage/database failure returns a sanitized
+  `503` and does not refresh the heartbeat. The heartbeat write occurs only
+  after all bounded phases complete.
+- Production health and run admission require a valid successful heartbeat no
+  older than 15 minutes. `CRON_SECRET` alone is not liveness proof. Missing,
+  stale, or unreachable heartbeat state keeps production unavailable.
+- The GitHub caller now uses a five-second connection timeout and 50-second
+  request timeout, below the Vercel function limit.
+
+### Revision 5 Focused Verification
+
+- Maintenance/health/migration/live-verifier unit suites: PASS.
+- Cancellation/expiry and retention cleanup integrations: PASS.
+- Focused ESLint: PASS.
+- Full typecheck must be rerun after concurrent provider/security edits settle;
+  the maintenance files themselves introduced no remaining diagnostic in the
+  last run.
+
+### Deployment Gate
+
+- Schema v8 is applied to the active Neon resource. Do not infer release
+  readiness from schema state alone.
+- `CRON_SECRET` is rotated consistently in Vercel production/preview and GitHub
+  Actions, but the GitHub maintenance variable remains intentionally false
+  until the new committed deployment exists. Enable it only then and require a
+  successful authenticated bounded production heartbeat.
+
+---
+
+## Revision 6 — Current Pre-Deploy Attestation and Security Handoff
+
+This section supersedes earlier current-state counts while preserving their
+historical implementation record.
+
+### Verified implementation
+
+- Neon probe: 9 public tables, 8 migration rows, schema version 8, marker
+  `rfp-xray-schema-v8`; live contention/CAS suite passed 2/2, including a real
+  CAS-loss path.
+- Railway: bound attestation expires 2026-09-10 04:11:53 MDT; S3 live suite
+  passed 1/1 and a real Chromium storage flow with
+  `https://rfp-xray.vercel.app` as Origin passed 1/1.
+- Vercel project settings use Node 22 and Fluid Compute.
+- Deployment-bound runtime-attestation code was independently approved with
+  P0/P1/P2=0. No current runtime receipt exists before a clean committed
+  deployment.
+- Deployment-bound provider-contract attestation code was independently
+  approved with P0/P1/P2=0. No provider receipt or call exists because the
+  Monid key/exact configuration are absent.
+- Security re-review returned `APPROVE`, P0=0/P1=0. Both P2 recommendations are
+  now implemented and tested.
+
+### Current regression gate
+
+- `pnpm check`: PASS, 39 files passed/3 skipped and 391 tests passed/7 skipped.
+- `pnpm build`: PASS, 10 Workflow steps, 4 workflows, 13 pages.
+- Local Playwright: PASS, 14 passed/2 explicit live skips.
+- Official fixture audit: PASS, 3/3.
+- Production dependency audit: PASS, no known vulnerabilities.
+- Full dependency audit: zero high/critical findings; 1 low/3 moderate
+  development-chain findings remain after scoped overrides. Vercel CLI remains
+  pinned at 59.11.2, and 33 focused runtime/provider attestation tests pass.
+
+### Release boundary
+
+Reviewed implementation commit `dfc8be9` is local; the public deployment is the
+older sample until the release commits are pushed.
+Production Turnstile is absent. Chrome/in-app interactive browser control is
+unavailable. No paid Monid call, real Edmonton/CER campaign, end-to-end live
+cleanup/cost/latency proof, video, submission, or social publication exists.
+The release remains `NOT_READY`.
+
+The receipt-refresh heartbeat is scheduled for Sep 9 and Sep 10 at 12:00 MDT.
