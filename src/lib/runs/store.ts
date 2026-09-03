@@ -48,8 +48,14 @@ export interface RunStore {
   update(
     id: string,
     mutate: (record: RunRecord) => RunRecord,
-    claim?: { leaseId: string; fence: number }
+    claim?: { leaseId: string; fence: number } | { admissionLeaseId: string }
   ): Promise<RunRecord>;
+  claimAdmission(
+    id: string,
+    now?: Date,
+    leaseMs?: number,
+    rescheduleBefore?: Date
+  ): Promise<{ record: RunRecord; admissionLeaseId: string } | null>;
   claimProcessing(
     id: string,
     now?: Date,
@@ -98,6 +104,8 @@ export function newRunRecord(input: CreateRunRecordInput): RunRecord {
     result: null,
     error: null,
     workflowRunId: null,
+    admissionLeaseId: null,
+    admissionLeaseExpiresAt: null,
     processingLeaseId: null,
     processingLeaseExpiresAt: null,
     processingFence: 0,
@@ -157,14 +165,17 @@ export class InMemoryRunStore implements RunStore {
   async update(
     id: string,
     mutate: (record: RunRecord) => RunRecord,
-    claim?: { leaseId: string; fence: number }
+    claim?: { leaseId: string; fence: number } | { admissionLeaseId: string }
   ): Promise<RunRecord> {
     const current = this.records.get(id);
     if (!current) {
       throw new AppError("ANALYSIS_INCOMPLETE", "The run was not found.", { httpStatus: 404 });
     }
-    if (claim && (current.processingLeaseId !== claim.leaseId || current.processingFence !== claim.fence)) {
-      throw new AppError("ANALYSIS_INCOMPLETE", "The processing lease is no longer current.", {
+    const staleClaim = claim && ("admissionLeaseId" in claim
+      ? current.admissionLeaseId !== claim.admissionLeaseId
+      : current.processingLeaseId !== claim.leaseId || current.processingFence !== claim.fence);
+    if (staleClaim) {
+      throw new AppError("ANALYSIS_INCOMPLETE", "The run lease is no longer current.", {
         httpStatus: 409,
         retryable: false
       });
@@ -180,6 +191,33 @@ export class InMemoryRunStore implements RunStore {
     }
     this.records.set(id, clone(next));
     return clone(next);
+  }
+
+  async claimAdmission(
+    id: string,
+    now = new Date(),
+    leaseMs = 2 * 60_000,
+    rescheduleBefore?: Date
+  ) {
+    const current = this.records.get(id);
+    if (!current) {
+      throw new AppError("ANALYSIS_INCOMPLETE", "The run was not found.", { httpStatus: 404 });
+    }
+    const leaseAvailable = current.admissionLeaseId === null ||
+      (current.admissionLeaseExpiresAt !== null && new Date(current.admissionLeaseExpiresAt) <= now);
+    const schedulingAllowed = current.workflowRunId === null ||
+      Boolean(rescheduleBefore && new Date(current.updatedAt) <= rescheduleBefore);
+    if (current.status !== "queued" || !leaseAvailable || !schedulingAllowed) return null;
+    const admissionLeaseId = crypto.randomUUID();
+    const record: RunRecord = {
+      ...current,
+      admissionLeaseId,
+      admissionLeaseExpiresAt: new Date(now.getTime() + leaseMs).toISOString(),
+      updatedAt: now.toISOString(),
+      version: current.version + 1
+    };
+    this.records.set(id, clone(record));
+    return { record: clone(record), admissionLeaseId };
   }
 
   async claimProcessing(id: string, now = new Date(), leaseMs = 20 * 60_000) {
@@ -229,8 +267,7 @@ export class InMemoryRunStore implements RunStore {
     const boundedLimit = Math.min(Math.max(Math.trunc(limit), 1), 100);
     return [...this.records.values()]
       .filter((record) =>
-        record.status === "queued" && record.workflowRunId === null &&
-        new Date(record.createdAt) <= before
+        record.status === "queued" && new Date(record.updatedAt) <= before
       )
       .sort((left, right) =>
         new Date(left.createdAt).getTime() - new Date(right.createdAt).getTime() ||

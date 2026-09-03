@@ -78,6 +78,10 @@ describe("SHA-bound citation verification", () => {
       .toBe(true);
     expect(assertionTokensSupportedByCitations("Closes September 15, 2026 at 2:00 PM EST.", [citation]))
       .toBe(false);
+    expect(assertionTokensSupportedByCitations(
+      "Closes 2026-09-15 at 14:00 -05:00 with a 70% technical weight.",
+      [citation]
+    )).toBe(false);
   });
 
   it("compares objective units, currencies, magnitudes, and quantity bounds", () => {

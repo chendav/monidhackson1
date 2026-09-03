@@ -57,6 +57,7 @@ export async function handleMaintenance(
     ok: true,
     recovered_run_count: recovered.recoveredRunIds.length,
     admission_failure_count: recovered.failedRunIds.length,
+    admission_deferred_count: recovered.deferredRunIds.length,
     expired_run_count: expired.length
   }, { headers: NO_STORE });
 }

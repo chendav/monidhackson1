@@ -68,7 +68,7 @@ function retryableTargets(record: RunRecord, storage: UploadStorage): CleanupTar
         resourceKind: "source_blob",
         controlScope: "application",
         successDetail: "Incoming source content was purged and a verified replay-blocking fence remains until grant expiry.",
-        remove: () => storage.purgeIncomingToFence(blobPath)
+        remove: () => storage.purgeIncomingToFence(blobPath, record.id)
       },
       stageTarget
     ];
@@ -85,6 +85,8 @@ function scrubForAudit(record: RunRecord, now: Date): RunRecord {
     citationReceipts: [],
     manifests: [],
     workflowRunId: null,
+    admissionLeaseId: null,
+    admissionLeaseExpiresAt: null,
     cleanupExpectedResourceIds: [],
     cleanupReceipts: record.cleanupReceipts.map((receipt) => ({
       ...receipt,
@@ -131,6 +133,8 @@ export async function cleanupRun(
       result: null,
       citationReceipts: [],
       terminalAfterCleanup: terminalWinner(current.terminalAfterCleanup, terminal),
+      admissionLeaseId: null,
+      admissionLeaseExpiresAt: null,
       processingLeaseId: null,
       processingLeaseExpiresAt: quiescenceDeadline,
       processingFence: current.processingFence + (hadProcessingClaim ? 1 : 0),
@@ -152,7 +156,10 @@ export async function cleanupRun(
     // A still-running worker might recreate a deterministic staging object
     // after an early deletion. Once the lease has elapsed, always delete and
     // reconfirm every durable target instead of trusting historical receipts.
-    .filter((target) => revokedWorkerHasQuiesced || !alreadyDeleted.has(target.resourceId));
+    .filter((target) =>
+      !alreadyDeleted.has(target.resourceId) ||
+      (revokedWorkerHasQuiesced && target.resourceKind === "staged_source")
+    );
   const receipts = await executeCleanup(targets, () => now);
   return store.update(record.id, (current) => {
     if (current.status === "expired") return current;
@@ -169,10 +176,11 @@ export async function cleanupRun(
       (resourceId) => resourceId.startsWith("blob:") || resourceId.startsWith("staged:")
     );
     const durableReconfirmedAfterQuiescence = hasQuiesced && durableExpected.length > 0 &&
-      durableExpected.every((resourceId) => receipts.some(
-        (receipt) => receipt.resourceId === resourceId &&
-          receipt.controlScope === "application" && receipt.status === "deleted"
-      ));
+      durableExpected.every((resourceId) => {
+        const evidence = resourceId.startsWith("staged:") ? receipts : cleanupReceipts;
+        return evidence.some((receipt) => receipt.resourceId === resourceId &&
+          receipt.controlScope === "application" && receipt.status === "deleted");
+      });
     const cleanupConfirmed = durableReconfirmedAfterQuiescence && cleanupGate({
       cleanupExpectedResourceIds: current.cleanupExpectedResourceIds,
       cleanupReceipts

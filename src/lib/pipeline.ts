@@ -33,7 +33,7 @@ interface IndexedSource {
 
 interface ParsedSource extends IndexedSource {
   markdown: string;
-  monid: MonidParseResult | null;
+  monid: Pick<MonidParseResult, "runId"> | null;
 }
 
 // The live provider phase must finish before the 800-second Workflow step
@@ -161,7 +161,7 @@ function plannedInputTargets(record: RunRecord, storage: UploadStorage): Cleanup
         resourceKind: "source_blob",
         controlScope: "application",
         successDetail: "Incoming source content was purged and a verified replay-blocking fence remains until grant expiry.",
-        remove: () => storage.purgeIncomingToFence(blobPath)
+        remove: () => storage.purgeIncomingToFence(blobPath, record.id)
       },
       {
         resourceId: stageId,
@@ -319,7 +319,15 @@ export async function processRun(runId: string, dependencies: PipelineDependenci
           const parserUrl = await item.source.parserUrl(new Date(now().getTime() + 5 * 60_000));
           const result = await monid.parse({ fileUrl: parserUrl, extension: "pdf", ocr: true });
           costs.push(providerCost(result, Math.round(performance.now() - started), config.MONID_PARSE_RESERVE_MICRO_USD));
-          parsed.push({ ...item, markdown: result.markdown, monid: result });
+          const markdown = result.markdown;
+          const runId = result.runId;
+          // Retain only the provider run identifier needed for the disclosure
+          // receipt. Provider payloads, temporary URLs, and duplicate Markdown
+          // must not survive into ParsedSource or a terminal-state write.
+          result.markdown = "";
+          result.providerArtifactUrl = "";
+          result.terminalPayload = null;
+          parsed.push({ ...item, markdown, monid: { runId } });
         } catch (error) {
           costs.push({
             provider: "monid",

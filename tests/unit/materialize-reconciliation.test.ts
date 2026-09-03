@@ -31,7 +31,9 @@ const baseIndex = index(baseSha, [
   "The bidder must submit a signed form. A bid that fails a mandatory requirement will be non-compliant.",
   "The ratio is 70% for technical merit and 30% for price. Selection uses the highest combined rating.",
   "Bidders must obtain a minimum score of fifty (50) points on a scale of ninety-four (94) points.",
-  "Issuer: Canada. Solicitation number: CER-1. Closing date: September 15, 2026."
+  "RFP title: Real Contract. Issuer: Fake Corp. Issuer: Canada. Solicitation number: CER-1. " +
+    "Closing date: September 15, 2026 at 14:00 -06:00. " +
+    "Closing date: September 15, 2026 at 14:00 MDT. Questions are due September 15, 2026 at 14:00 EST."
 ]);
 const amendmentIndex = index(amendmentSha, [
   "cover", "Amendment replaces the contract end date with 2050.", "three", "four",
@@ -282,6 +284,273 @@ describe("server-owned materialization and reconciliation", () => {
     expect(result.summary.issuer).toBe("Canada");
   });
 
+  it("binds title and issuer values to their own spans within a shared quote", () => {
+    const sharedQuote = "RFP title: Real Contract. Issuer: Fake Corp.";
+    const analyze = (title: string) => {
+      const value = addMinimumCoverage(draft([]));
+      value.summary.title = title;
+      value.claims = [{
+        claim_id: `title-${title}`, topic: "RFP title", claim_text: title,
+        claim_type: "source", confidence: 1, document_sha256: baseSha, amendment_number: null,
+        effect: "add", citations: [citation(baseSha, sharedQuote)], supersedes_claim_ids: []
+      }];
+      return materializeAnalysis({
+        draft: value,
+        documents: [{ name: "base.pdf", sourceUrl: null, index: baseIndex, role: "base", amendmentNumber: null }],
+        manifests: [manifests[0]], costs: [], expiresAt: new Date("2026-09-03T00:00:00Z")
+      }).result;
+    };
+    const fake = analyze("Fake Corp");
+    expect(fake.claims.find((claim) => claim.claim_id === "title-Fake Corp")?.status).toBe("needs_review");
+    expect(fake.summary.title).toBe("Document-only RFP analysis");
+    const real = analyze("Real Contract");
+    expect(real.claims.find((claim) => claim.claim_id === "title-Real Contract")?.status).toBe("active");
+    expect(real.summary.title).toBe("Real Contract");
+
+    const issuerDraft = addMinimumCoverage(draft([]));
+    issuerDraft.summary.issuer = "Fake Corp";
+    issuerDraft.claims = [{
+      claim_id: "issuer-fake-corp", topic: "issuer", claim_text: "Fake Corp",
+      claim_type: "source", confidence: 1, document_sha256: baseSha, amendment_number: null,
+      effect: "add", citations: [citation(baseSha, sharedQuote)], supersedes_claim_ids: []
+    }];
+    const issuer = materializeAnalysis({
+      draft: issuerDraft,
+      documents: [{ name: "base.pdf", sourceUrl: null, index: baseIndex, role: "base", amendmentNumber: null }],
+      manifests: [manifests[0]], costs: [], expiresAt: new Date("2026-09-03T00:00:00Z")
+    }).result;
+    expect(issuer.summary.issuer).toBe("Fake Corp");
+  });
+
+  it("withholds a closing timestamp with the wrong explicit UTC offset", () => {
+    const value = addMinimumCoverage(draft([]));
+    value.summary.closing_date = "2026-09-15 14:00 -05:00";
+    value.claims = [{
+      claim_id: "wrong-offset", topic: "closing date", claim_text: "2026-09-15 14:00 -05:00",
+      claim_type: "source", confidence: 1, document_sha256: baseSha, amendment_number: null,
+      effect: "add",
+      citations: [citation(baseSha, "Closing date: September 15, 2026 at 14:00 -06:00.")],
+      supersedes_claim_ids: []
+    }];
+    const result = materializeAnalysis({
+      draft: value,
+      documents: [{ name: "base.pdf", sourceUrl: null, index: baseIndex, role: "base", amendmentNumber: null }],
+      manifests: [manifests[0]], costs: [], expiresAt: new Date("2026-09-03T00:00:00Z")
+    }).result;
+    expect(result.claims.find((claim) => claim.claim_id === "wrong-offset")?.status).toBe("needs_review");
+    expect(result.summary.closing_date).toBeNull();
+  });
+
+  it("binds a closing timezone to the closing span rather than a later question span", () => {
+    const sharedQuote = "Closing date: September 15, 2026 at 14:00 MDT. " +
+      "Questions are due September 15, 2026 at 14:00 EST.";
+    const analyze = (timezone: "MDT" | "EST") => {
+      const value = addMinimumCoverage(draft([]));
+      value.summary.closing_date = `September 15, 2026 at 14:00 ${timezone}`;
+      value.claims = [{
+        claim_id: `closing-${timezone}`, topic: "solicitation closing date",
+        claim_text: `September 15, 2026 at 14:00 ${timezone}`,
+        claim_type: "source", confidence: 1, document_sha256: baseSha, amendment_number: null,
+        effect: "add", citations: [citation(baseSha, sharedQuote)], supersedes_claim_ids: []
+      }];
+      return materializeAnalysis({
+        draft: value,
+        documents: [{ name: "base.pdf", sourceUrl: null, index: baseIndex, role: "base", amendmentNumber: null }],
+        manifests: [manifests[0]], costs: [], expiresAt: new Date("2026-09-03T00:00:00Z")
+      }).result;
+    };
+    const wrong = analyze("EST");
+    expect(wrong.claims.find((claim) => claim.claim_id === "closing-EST")?.status).toBe("needs_review");
+    expect(wrong.summary.closing_date).toBeNull();
+    const correct = analyze("MDT");
+    expect(correct.claims.find((claim) => claim.claim_id === "closing-MDT")?.status).toBe("active");
+    expect(correct.summary.closing_date).toBe("September 15, 2026 at 14:00 MDT");
+  });
+
+  it("routes a mislabeled amendment to the server-derived question-deadline chain", () => {
+    const deadlineBaseIndex = index(baseSha, [
+      "Solicitation closing date: September 10, 2026 at 14:00 MDT.",
+      "Questions must be received by September 3, 2026 at 14:00 MDT.",
+      "The bidder must submit a signed form. A bid that fails a mandatory requirement will be non-compliant."
+    ]);
+    const deadlineAmendmentIndex = index(amendmentSha, [
+      "The deadline for submitting questions is revised to September 5, 2026 at 14:00 MDT."
+    ]);
+    const value = addMinimumCoverage(draft([
+      {
+        id: "closing", topic: "solicitation closing date", document_sha256: baseSha,
+        amendment_number: null, effect: "add", category: "submission",
+        text: "Solicitation closing date: September 10, 2026 at 14:00 MDT.",
+        evidence_needed: null, consequence: null,
+        citations: [citation(baseSha, "Solicitation closing date: September 10, 2026 at 14:00 MDT.")]
+      },
+      {
+        id: "questions-old", topic: "question deadline", document_sha256: baseSha,
+        amendment_number: null, effect: "add", category: "submission",
+        text: "Questions must be received by September 3, 2026 at 14:00 MDT.",
+        evidence_needed: null, consequence: null,
+        citations: [citation(baseSha, "Questions must be received by September 3, 2026 at 14:00 MDT.")]
+      },
+      {
+        id: "questions-new", topic: "solicitation closing date", document_sha256: amendmentSha,
+        amendment_number: "001", effect: "replace", category: "submission",
+        text: "The deadline for submitting questions is revised to September 5, 2026 at 14:00 MDT.",
+        evidence_needed: null, consequence: null,
+        citations: [citation(amendmentSha,
+          "The deadline for submitting questions is revised to September 5, 2026 at 14:00 MDT.")]
+      }
+    ]));
+    const result = materializeAnalysis({
+      draft: value,
+      documents: [
+        { name: "base.pdf", sourceUrl: null, index: deadlineBaseIndex, role: "base", amendmentNumber: null },
+        { name: "a001.pdf", sourceUrl: null, index: deadlineAmendmentIndex, role: "amendment", amendmentNumber: "001" }
+      ],
+      manifests: [manifests[0], { ...manifests[1], amendment_number: "001", pages: 1 }],
+      costs: [], expiresAt: new Date("2026-09-03T00:00:00Z")
+    }).result;
+    expect(result.requirements.find((item) => item.id === "closing")?.status).toBe("active");
+    expect(result.requirements.find((item) => item.id === "questions-old")?.status).toBe("superseded");
+    expect(result.requirements.find((item) => item.id === "questions-new")?.status).toBe("active");
+    expect(result.conflicts).toEqual([]);
+  });
+
+  it("withholds an amendment whose generic deadline wording does not identify the field", () => {
+    const deadlineBaseIndex = index(baseSha, [
+      "Solicitation closing date: September 10, 2026 at 14:00 MDT.",
+      "Questions must be received by September 3, 2026 at 14:00 MDT.",
+      "The bidder must submit a signed form. A bid that fails a mandatory requirement will be non-compliant."
+    ]);
+    const ambiguousAmendmentIndex = index(amendmentSha, [
+      "Amendment 001 updates the deadline to September 15, 2026 at 14:00 MDT."
+    ]);
+    const value = addMinimumCoverage(draft([
+      {
+        id: "closing-old", topic: "solicitation closing date", document_sha256: baseSha,
+        amendment_number: null, effect: "add", category: "submission",
+        text: "Solicitation closing date: September 10, 2026 at 14:00 MDT.",
+        evidence_needed: null, consequence: null,
+        citations: [citation(baseSha, "Solicitation closing date: September 10, 2026 at 14:00 MDT.")]
+      },
+      {
+        id: "deadline-ambiguous", topic: "solicitation closing date", document_sha256: amendmentSha,
+        amendment_number: "001", effect: "replace", category: "submission",
+        text: "Amendment 001 updates the deadline to September 15, 2026 at 14:00 MDT.",
+        evidence_needed: null, consequence: null,
+        citations: [citation(amendmentSha,
+          "Amendment 001 updates the deadline to September 15, 2026 at 14:00 MDT.")]
+      }
+    ]));
+    const result = materializeAnalysis({
+      draft: value,
+      documents: [
+        { name: "base.pdf", sourceUrl: null, index: deadlineBaseIndex, role: "base", amendmentNumber: null },
+        { name: "a001.pdf", sourceUrl: null, index: ambiguousAmendmentIndex, role: "amendment", amendmentNumber: "001" }
+      ],
+      manifests: [manifests[0], { ...manifests[1], amendment_number: "001", pages: 1 }],
+      costs: [], expiresAt: new Date("2026-09-03T00:00:00Z")
+    }).result;
+    expect(result.requirements.find((item) => item.id === "closing-old")?.status).toBe("active");
+    expect(result.requirements.find((item) => item.id === "deadline-ambiguous")?.status).toBe("needs_review");
+    expect(result.conflicts).toEqual([]);
+  });
+
+  it("does not let an Amendment label authorize replacement of an unrelated object", () => {
+    const insuranceBaseIndex = index(baseSha, [
+      "Insurance coverage of 5000000 CAD is required.",
+      "The bidder must submit a signed form. A bid that fails a mandatory requirement will be non-compliant."
+    ]);
+    const meetingsAmendmentIndex = index(amendmentSha, [
+      "Amendment 001. Project meetings will be held weekly."
+    ]);
+    const value = addMinimumCoverage(draft([
+      {
+        id: "insurance", topic: "insurance coverage", document_sha256: baseSha,
+        amendment_number: null, effect: "add", category: "contractual",
+        text: "Insurance coverage of 5000000 CAD is required.", evidence_needed: null,
+        consequence: null, citations: [citation(baseSha, "Insurance coverage of 5000000 CAD is required.")]
+      },
+      {
+        id: "meetings", topic: "insurance coverage", document_sha256: amendmentSha,
+        amendment_number: "001", effect: "replace", category: "contractual",
+        text: "Project meetings will be held weekly.", evidence_needed: null,
+        consequence: null,
+        citations: [citation(amendmentSha, "Amendment 001. Project meetings will be held weekly.")]
+      }
+    ]));
+    const result = materializeAnalysis({
+      draft: value,
+      documents: [
+        { name: "base.pdf", sourceUrl: null, index: insuranceBaseIndex, role: "base", amendmentNumber: null },
+        { name: "a001.pdf", sourceUrl: null, index: meetingsAmendmentIndex, role: "amendment", amendmentNumber: "001" }
+      ],
+      manifests: [manifests[0], { ...manifests[1], amendment_number: "001", pages: 1 }],
+      costs: [], expiresAt: new Date("2026-09-03T00:00:00Z")
+    }).result;
+    expect(result.requirements.find((item) => item.id === "insurance")?.status).toBe("active");
+    expect(result.requirements.find((item) => item.id === "meetings")?.status).toBe("needs_review");
+  });
+
+  it("does not borrow an adjacent solicitation label to scope an ambiguous deadline mutation", () => {
+    const deadlineBaseIndex = index(baseSha, [
+      "Solicitation closing date: September 10, 2026.",
+      "The bidder must submit a signed form. A bid that fails a mandatory requirement will be non-compliant."
+    ]);
+    const ambiguousAmendmentIndex = index(amendmentSha, [
+      "Amendment updates the deadline to September 5, 2026. Solicitation number: CER-1."
+    ]);
+    const value = addMinimumCoverage(draft([
+      {
+        id: "closing", topic: "solicitation closing date", document_sha256: baseSha,
+        amendment_number: null, effect: "add", category: "submission",
+        text: "Solicitation closing date: September 10, 2026.", evidence_needed: null,
+        consequence: null,
+        citations: [citation(baseSha, "Solicitation closing date: September 10, 2026.")]
+      },
+      {
+        id: "fake-scope", topic: "schedule update", document_sha256: amendmentSha,
+        amendment_number: "001", effect: "replace", category: "submission",
+        text: "Solicitation deadline updates to September 5, 2026.", evidence_needed: null,
+        consequence: null,
+        citations: [citation(amendmentSha,
+          "Amendment updates the deadline to September 5, 2026. Solicitation number: CER-1.")]
+      }
+    ]));
+    const result = materializeAnalysis({
+      draft: value,
+      documents: [
+        { name: "base.pdf", sourceUrl: null, index: deadlineBaseIndex, role: "base", amendmentNumber: null },
+        { name: "a001.pdf", sourceUrl: null, index: ambiguousAmendmentIndex, role: "amendment", amendmentNumber: "001" }
+      ],
+      manifests: [manifests[0], { ...manifests[1], amendment_number: "001", pages: 1 }],
+      costs: [], expiresAt: new Date("2026-09-03T00:00:00Z")
+    }).result;
+    expect(result.requirements.find((item) => item.id === "closing")?.status).toBe("active");
+    expect(result.requirements.find((item) => item.id === "fake-scope")?.status).toBe("needs_review");
+  });
+
+  it("separates a comma-delimited question timezone from the closing tuple", () => {
+    const quote = "Closing date: September 15, 2026 at 14:00 MDT, " +
+      "questions close at September 15, 2026 at 14:00 EST.";
+    const commaIndex = index(baseSha, [quote,
+      "The bidder must submit a signed form. A bid that fails a mandatory requirement will be non-compliant."]);
+    const value = addMinimumCoverage(draft([]));
+    value.summary.closing_date = "September 15, 2026 at 14:00 EST";
+    value.claims = [{
+      claim_id: "comma-closing", topic: "closing date",
+      claim_text: "September 15, 2026 at 14:00 EST", claim_type: "source", confidence: 1,
+      document_sha256: baseSha, amendment_number: null, effect: "add",
+      citations: [citation(baseSha, quote)], supersedes_claim_ids: []
+    }];
+    const result = materializeAnalysis({
+      draft: value,
+      documents: [{ name: "base.pdf", sourceUrl: null, index: commaIndex, role: "base", amendmentNumber: null }],
+      manifests: [manifests[0]], costs: [], expiresAt: new Date("2026-09-03T00:00:00Z")
+    }).result;
+    expect(result.claims.find((item) => item.claim_id === "comma-closing")?.status).toBe("needs_review");
+    expect(result.summary.closing_date).toBeNull();
+  });
+
   it("binds each evaluation weight to its own label instead of accepting swapped 30/70 values", () => {
     const weightQuote = "The ratio is 70% for technical merit and 30% for price.";
     const analyze = (technical: string, financial: string) => {
@@ -474,6 +743,106 @@ describe("server-owned materialization and reconciliation", () => {
       .toBe("active");
     expect(result.risks).toEqual([]);
   });
+
+  it("removes a cross-page risk that repeats a superseded closing date", () => {
+    const deadlineBaseIndex = index(baseSha, [
+      "Closing date September 1, 2026.",
+      "Bids received after September 1, 2026 will be rejected.",
+      "The bidder must submit a signed form. A bid that fails a mandatory requirement will be non-compliant."
+    ]);
+    const deadlineAmendmentIndex = index(amendmentSha, [
+      "The closing date is revised to September 15, 2026."
+    ]);
+    const value = addMinimumCoverage(draft([
+      {
+        id: "old-closing", topic: "closing date", document_sha256: baseSha,
+        amendment_number: null, effect: "add", category: "submission",
+        text: "Closing date September 1, 2026.", evidence_needed: null, consequence: null,
+        citations: [citation(baseSha, "Closing date September 1, 2026.")]
+      },
+      {
+        id: "new-closing", topic: "closing date", document_sha256: amendmentSha,
+        amendment_number: "001", effect: "replace", category: "submission",
+        text: "Closing date September 15, 2026.", evidence_needed: null, consequence: null,
+        citations: [citation(amendmentSha, "The closing date is revised to September 15, 2026.")]
+      }
+    ]));
+    value.risks = [{
+      id: "old-deadline-risk", topic: "late bid", document_sha256: baseSha,
+      amendment_number: null, effect: "add", severity: "high", category: "submission",
+      finding: "Bids received after September 1, 2026 will be rejected.",
+      impact: "A late submission can be rejected.", recommended_action: "Submit early.",
+      citations: [citation(baseSha, "Bids received after September 1, 2026 will be rejected.")]
+    }];
+    const result = materializeAnalysis({
+      draft: value,
+      documents: [
+        { name: "base.pdf", sourceUrl: null, index: deadlineBaseIndex, role: "base", amendmentNumber: null },
+        { name: "a001.pdf", sourceUrl: null, index: deadlineAmendmentIndex, role: "amendment", amendmentNumber: "001" }
+      ],
+      manifests: [manifests[0], { ...manifests[1], amendment_number: "001", pages: 1 }],
+      costs: [], expiresAt: new Date("2026-09-03T00:00:00Z")
+    }).result;
+    expect(result.requirements.find((requirement) => requirement.id === "old-closing")?.status).toBe("superseded");
+    expect(result.requirements.find((requirement) => requirement.id === "new-closing")?.status).toBe("active");
+    expect(result.risks).toEqual([]);
+  });
+
+  it.each(["impact", "recommended_action"] as const)(
+    "removes a stale risk when the superseded date appears only in %s",
+    (location) => {
+      const riskQuote = location === "impact"
+        ? "Late bids will be rejected. Submissions after September 1, 2026 are non-compliant. Submit early."
+        : "Late bids will be rejected. A late submission is non-compliant. Submit before September 1, 2026.";
+      const deadlineBaseIndex = index(baseSha, [
+        "Closing date September 1, 2026.",
+        riskQuote,
+        "The bidder must submit a signed form. A bid that fails a mandatory requirement will be non-compliant."
+      ]);
+      const deadlineAmendmentIndex = index(amendmentSha, [
+        "The closing date is revised to September 15, 2026."
+      ]);
+      const value = addMinimumCoverage(draft([
+        {
+          id: "old-closing", topic: "closing date", document_sha256: baseSha,
+          amendment_number: null, effect: "add", category: "submission",
+          text: "Closing date September 1, 2026.", evidence_needed: null, consequence: null,
+          citations: [citation(baseSha, "Closing date September 1, 2026.")]
+        },
+        {
+          id: "new-closing", topic: "closing date", document_sha256: amendmentSha,
+          amendment_number: "001", effect: "replace", category: "submission",
+          text: "Closing date September 15, 2026.", evidence_needed: null,
+          consequence: null,
+          citations: [citation(amendmentSha, "The closing date is revised to September 15, 2026.")]
+        }
+      ]));
+      value.risks = [{
+        id: `stale-risk-${location}`, topic: "late bid", document_sha256: baseSha,
+        amendment_number: null, effect: "add", severity: "high", category: "submission",
+        finding: "Late bids will be rejected.",
+        impact: location === "impact"
+          ? "Submissions after September 1, 2026 are non-compliant."
+          : "A late submission is non-compliant.",
+        recommended_action: location === "recommended_action"
+          ? "Submit before September 1, 2026."
+          : "Submit early.",
+        citations: [citation(baseSha, riskQuote)]
+      }];
+      const result = materializeAnalysis({
+        draft: value,
+        documents: [
+          { name: "base.pdf", sourceUrl: null, index: deadlineBaseIndex, role: "base", amendmentNumber: null },
+          { name: "a001.pdf", sourceUrl: null, index: deadlineAmendmentIndex, role: "amendment", amendmentNumber: "001" }
+        ],
+        manifests: [manifests[0], { ...manifests[1], amendment_number: "001", pages: 1 }],
+        costs: [], expiresAt: new Date("2026-09-03T00:00:00Z")
+      }).result;
+      expect(result.requirements.find((item) => item.id === "old-closing")?.status).toBe("superseded");
+      expect(result.requirements.find((item) => item.id === "new-closing")?.status).toBe("active");
+      expect(result.risks).toEqual([]);
+    }
+  );
 
   it("removes risks tied to a clause deleted by a later amendment", () => {
     const value = addMinimumCoverage(draft([]));

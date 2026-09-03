@@ -296,7 +296,7 @@ export function buildOpenApiDocument(origin: string) {
             "409": errorResponse("Idempotency key was reused with different input or upload state is not claimable."),
             "413": errorResponse("JSON body or declared PDF size exceeds its limit."),
             "422": errorResponse("Document count, role, source metadata, URL, or package-page limit is invalid."),
-            "429": errorResponse("Active-run or hourly run limit reached.", true),
+            "429": errorResponse("Active-run or daily run limit reached.", true),
             "503": errorResponse("Persistent production dependencies or workflow scheduling are unavailable."),
             "500": errorResponse("Unexpected run-creation failure.")
           }

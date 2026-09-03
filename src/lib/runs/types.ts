@@ -54,6 +54,8 @@ export interface RunRecord {
   result: AnalysisResult | null;
   error: RunFailure | null;
   workflowRunId: string | null;
+  admissionLeaseId: string | null;
+  admissionLeaseExpiresAt: string | null;
   processingLeaseId: string | null;
   processingLeaseExpiresAt: string | null;
   processingFence: number;

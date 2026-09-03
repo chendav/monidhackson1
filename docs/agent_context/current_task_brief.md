@@ -2,7 +2,7 @@
 
 - Task ID: MH-001
 - Title: RFP X-Ray contest MVP
-- Status: Revision 3 release candidate awaiting independent re-review
+- Status: Revision 4 release candidate awaiting independent re-review
 - Chief owner: chief
 - Updated: 2026-09-03
 
@@ -53,16 +53,17 @@ reconciliation, grounded Q&A, citations, cleanup proof, and per-run cost.
 
 ## Current Phase
 
-The latest independent exact-commit review of `230e382` found four P1 lifecycle
-issues and no P0. Specialist audits found semantic reconciliation and upload
-issuance weaknesses. The Revision 3 working tree fixes those findings and passes
-104 local tests, the five-official-PDF audit, production build, and 14 browser
-tests. Credentialed Monid/Blob/Neon/Workflow/Turnstile deployment gates remain;
-this is not yet a release approval.
+The latest independent exact-commit review of `97c1417` found five P1 issues and
+no P0. Revision 4 closes admission concurrency, evidence-field binding,
+source-authorized amendment scope, cross-page stale risks, quota retention,
+uncertain Workflow acknowledgement, and orphan Blob-fence paths. It passes 122
+local tests, the five-official-PDF audit, production build, and 14 browser tests.
+Credentialed Monid/Blob/Neon/Workflow/Turnstile deployment gates remain; this is
+not yet a release approval.
 
 ## Immediate Next Action
 
-Commit the Revision 3 candidate, rerun the exact-commit QA gate, and return it to
+Commit the Revision 4 candidate, rerun the exact-commit QA gate, and return it to
 the same independent Reviewer. Require `APPROVE`, P0=0, and P1=0 before any
 release claim; keep production fail-closed until platform credentials and live
 provider evidence are configured.

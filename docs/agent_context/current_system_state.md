@@ -5,8 +5,8 @@ Updated: 2026-09-03
 ## Confirmed
 
 - The repository is initialized on `main`, is connected to origin, and Revision
-  2 through commit `230e382` is pushed. Revision 3 is an uncommitted review
-  candidate.
+  2 through commit `230e382` is pushed. Revision 3 is committed locally as
+  `97c1417`; the current Revision 4 fixes are an uncommitted review candidate.
 - Next.js Web/API, local deterministic pipeline, Neon/Blob/Workflow adapters,
   Monid/OpenAI adapters, golden fixtures, and automated tests are implemented.
 - There is no `.codegraph/` directory and no existing application scaffold.
@@ -25,13 +25,16 @@ Updated: 2026-09-03
   download link, and a longer provider-side artifact lifetime.
 - Ontology's reusable strengths are fail-closed SHA/page/quote verification,
   append-only receipts, conflict preservation, and bounded grounded queries.
-- Exact-commit review of `230e382` found P0=0/P1=4: copied Markdown lifetime,
-  aggregate OpenAI deadline, cancellation spend settlement, and stranded run
-  admission. The Revision 3 candidate fixes all four with regressions.
+- Exact-commit review of `97c1417` found P0=0/P1=5. Revision 4 adds a durable
+  single-writer admission lease, citation field-span binding, source-derived
+  deadline keys, cross-page stale-risk invalidation, and 30-day quota-event
+  retention. Follow-up adversarial review found and Revision 4 also closes
+  ambiguous scheduler acknowledgement and missing-ledger Blob-fence paths.
 - Specialist findings for duplicate model IDs, model-authorized supersession,
   evaluation/summary semantic laundering, topic-drift conflict loss, stale
-  risks, and unbounded presign issuance are fixed in the candidate.
-- Current local evidence: `pnpm check` 104/104 tests with 3 optional skips;
+  risks, unbounded presign issuance, daily quota drift, and non-monotonic spend
+  settlement are fixed in the candidate.
+- Current local evidence: `pnpm check` 122/122 tests with 3 optional skips;
   official fixture audit 3/3; build pass with 9 steps/3 workflows; Playwright
   14/14; zero high dependency advisories.
 

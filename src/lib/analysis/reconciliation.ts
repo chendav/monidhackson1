@@ -42,6 +42,8 @@ function topicTokens(topic: string) {
 
 function canonicalTopicKey(fact: VersionedFact) {
   if (fact.factKey) return `owned:${normalizeEvidenceText(fact.factKey)}`;
+  const deadlineKey = sourceDeadlineFactKey(fact);
+  if (deadlineKey) return deadlineKey;
   const semanticText = normalizeEvidenceText([
     fact.topic,
     ...fact.citations.map((citation) => citation.evidence_quote)
@@ -56,6 +58,41 @@ function canonicalTopicKey(fact: VersionedFact) {
   return topicTokens(fact.topic).toSorted().join(":");
 }
 
+export function deriveDeadlineFactKey(value: string, citations: Citation[]): string | null {
+  const classify = (input: string): "deadline:questions" | "deadline:solicitation" | null => {
+    const sourceText = normalizeEvidenceText(input);
+    const questionScope = /\b(?:questions?|enquir(?:y|ies)|clarifications?|request for clarification)\b/.test(sourceText) &&
+      /\b(?:close|closes|closing|cut[ -]?off|deadline|due|received|submitted)\b/.test(sourceText);
+    if (questionScope) return "deadline:questions";
+    const explicitClosing = /\b(?:closing date|closing time|submission deadline|bid deadline|tender deadline|solicitation deadline)\b/.test(sourceText);
+    const submissionTiming = /\b(?:bid|bids|proposal|proposals|tender|offer|offers|solicitation|submission)\b.{0,80}\b(?:close|closes|closing|deadline|due|received|submitted)\b/.test(sourceText) ||
+      /\b(?:close|closes|closing|deadline|due|received|submitted)\b.{0,80}\b(?:bid|bids|proposal|proposals|tender|offer|offers|solicitation|submission)\b/.test(sourceText);
+    return explicitClosing || submissionTiming ? "deadline:solicitation" : null;
+  };
+  // The value and topic are model-controlled. Scope must come from one
+  // verified source clause that also contains every objective value token;
+  // otherwise an adjacent "solicitation" or "questions" sentence could be
+  // borrowed to authorize the wrong deadline chain.
+  const assertedTokens = extractAssertionTokens(value);
+  if (assertedTokens.size === 0) return null;
+  const supportedScopes = new Set(citations.flatMap((citation) =>
+    normalizeEvidenceText(citation.evidence_quote)
+      .split(/(?<!a\.m)(?<!p\.m)\.\s+|[;\n]+/)
+      .flatMap((clause) => {
+        const scope = classify(clause);
+        if (!scope) return [];
+        const evidenceTokens = extractAssertionTokens(clause);
+        return [...assertedTokens].every((token) => evidenceTokens.has(token)) ? [scope] : [];
+      })
+  ));
+  return supportedScopes.size === 1 ? [...supportedScopes][0] : null;
+}
+
+function sourceDeadlineFactKey(fact: VersionedFact): string | null {
+  const key = deriveDeadlineFactKey(fact.value, fact.citations);
+  return key ? `derived:${key}` : null;
+}
+
 function hasVerifiedCitations(fact: VersionedFact) {
   return fact.citations.length > 0 && fact.citations.every(
     (citation) => citation.verified && citation.pdf_page_1based !== null &&
@@ -63,12 +100,25 @@ function hasVerifiedCitations(fact: VersionedFact) {
   );
 }
 
+const REPLACE_ACTION = /\b(?:amend(?:ed|s)?|replace(?:s|d)?|substitut(?:e|ed|es)|revis(?:e|ed|es)|chang(?:e|ed|es)|extend(?:s|ed)?|updat(?:e|ed|es)|supersed(?:e|ed|es))\b/;
+const DELETE_ACTION = /\b(?:delete(?:d|s)?|remove(?:d|s)?|strike|stricken|cancel(?:led|ed|s)?|no longer applies)\b/;
+
+function evidenceClauses(fact: VersionedFact) {
+  return fact.citations.flatMap((citation) =>
+    normalizeEvidenceText(citation.evidence_quote)
+      .split(/(?<!a\.m)(?<!p\.m)\.\s+|[;\n]+/)
+      .map((clause) => clause.trim())
+      .filter(Boolean)
+  );
+}
+
+function mutationClauses(fact: VersionedFact) {
+  const action = fact.effect === "delete" ? DELETE_ACTION : REPLACE_ACTION;
+  return evidenceClauses(fact).filter((clause) => action.test(clause));
+}
+
 function hasMutationLanguage(fact: VersionedFact) {
-  const evidence = normalizeEvidenceText(fact.citations.map((citation) => citation.evidence_quote).join(" "));
-  if (fact.effect === "delete") {
-    return /\b(delete(?:d)?|remove(?:d)?|strike|stricken|cancel(?:led|ed)?|no longer applies)\b/.test(evidence);
-  }
-  return /\b(amend(?:ed|s|ment)?|replace(?:s|d)?|substitut(?:e|ed)|revis(?:e|ed)|chang(?:e|ed)|extend(?:s|ed)?|updat(?:e|ed)|supersed(?:e|ed))\b/.test(evidence);
+  return mutationClauses(fact).length > 0;
 }
 
 function mutationScopeTokens(fact: VersionedFact) {
@@ -77,20 +127,56 @@ function mutationScopeTokens(fact: VersionedFact) {
   );
 }
 
-function sharesMutationScope(left: VersionedFact, right: VersionedFact) {
-  const rightTokens = new Set(mutationScopeTokens(right));
-  return mutationScopeTokens(left).filter((token) => rightTokens.has(token)).length >= 2;
+function mutationClauseSupportsTopic(target: VersionedFact, directive: VersionedFact) {
+  const targetTokens = mutationScopeTokens(target).filter((token) =>
+    !["amend", "amended", "change", "changed", "delete", "deleted", "replace", "replaced",
+      "revise", "revised", "update", "updated"].includes(token)
+  );
+  if (targetTokens.length === 0) return false;
+  return mutationClauses(directive).some((clause) => {
+    const sourceTokens = new Set(topicTokens(clause));
+    const shared = targetTokens.filter((token) => sourceTokens.has(token));
+    const explicitStructuralToken = shared.some((token) =>
+      /^(?:[a-z]+\d+|\d+(?:\.\d+)+)$/.test(token)
+    );
+    // One-token topics such as "insurance" are already specific. Broader
+    // model topics must bind at least two object words unless a structural
+    // identifier such as M3 is present in the mutation clause.
+    return explicitStructuralToken || shared.length >= Math.min(2, targetTokens.length);
+  });
 }
 
 function mutationIsSourceAuthorized(fact: VersionedFact, allFacts: VersionedFact[]) {
   if (fact.effect === "add") return true;
   if (fact.documentRole !== "amendment" || !hasVerifiedCitations(fact)) return false;
-  if (hasMutationLanguage(fact)) return true;
+  const groundedDeadlineKey = sourceDeadlineFactKey(fact);
+  const topicLooksLikeDeadline = /\b(?:closing|deadline|due date|submission date)\b/.test(
+    normalizeEvidenceText(fact.topic)
+  );
+  if (groundedDeadlineKey) {
+    const assertedDates = new Set([...extractAssertionTokens(fact.value)]
+      .filter((token) => token.startsWith("date:")));
+    return mutationClauses(fact).some((clause) => {
+      const scoped = deriveDeadlineFactKey(fact.value, [{
+        ...fact.citations[0], evidence_quote: clause
+      }]);
+      if (scoped && `derived:${scoped}` === groundedDeadlineKey) return true;
+      const clauseDates = [...extractAssertionTokens(clause)]
+        .filter((token) => token.startsWith("date:"));
+      // Some official amendments put the complete new closing tuple in one
+      // clause and "extended from <old date> until <new date>" in another.
+      // Link those clauses only through an old/new date pair, never through
+      // adjacent generic words supplied by the model.
+      return clauseDates.length >= 2 && clauseDates.some((token) => assertedDates.has(token));
+    });
+  }
+  if (topicLooksLikeDeadline) return false;
+  if (hasMutationLanguage(fact) && mutationClauseSupportsTopic(fact, fact)) return true;
   return allFacts.some((directive) =>
     directive !== fact && directive.documentSha256 === fact.documentSha256 &&
     sameStage(directive, fact) && hasVerifiedCitations(directive) &&
     directive.effect !== "add" && hasMutationLanguage(directive) &&
-    sharesMutationScope(directive, fact)
+    mutationClauseSupportsTopic(fact, directive)
   );
 }
 
@@ -205,9 +291,13 @@ function scalarValuesConflict(candidates: VersionedFact[]) {
 export function reconcileVersionedFacts(input: VersionedFact[]): {
   facts: ReconciledFact[];
   conflicts: Conflict[];
+  unauthorizedMutationIds: string[];
 } {
   const result = new Map<string, ReconciledFact>();
   const conflicts: Conflict[] = [];
+  const unauthorizedMutationIds = new Set(input
+    .filter((fact) => fact.effect !== "add" && !mutationIsSourceAuthorized(fact, input))
+    .map((fact) => fact.id));
 
   for (const unsortedFacts of groupedFacts(input).values()) {
     const facts = [...unsortedFacts].sort(compareFacts);
@@ -223,7 +313,7 @@ export function reconcileVersionedFacts(input: VersionedFact[]): {
 
       const authoritative = stage.filter(hasVerifiedCitations);
       const replacesCurrent = authoritative.some(
-        (fact) => mutationIsSourceAuthorized(fact, input) &&
+        (fact) => !unauthorizedMutationIds.has(fact.id) &&
           (fact.effect === "replace" || fact.effect === "delete")
       );
       active = active.filter((fact) => {
@@ -234,10 +324,7 @@ export function reconcileVersionedFacts(input: VersionedFact[]): {
       if (replacesCurrent) currentConflict = null;
 
       const candidates = authoritative
-        .filter((fact) => fact.effect !== "delete")
-        .map((fact): VersionedFact => mutationIsSourceAuthorized(fact, input)
-          ? fact
-          : { ...fact, effect: "add" });
+        .filter((fact) => fact.effect !== "delete" && !unauthorizedMutationIds.has(fact.id));
       const distinctValues = new Map<string, string>();
       for (const fact of candidates) {
         const key = normalizeEvidenceText(fact.value);
@@ -266,7 +353,9 @@ export function reconcileVersionedFacts(input: VersionedFact[]): {
         }
       }
 
-      for (const fact of stage.filter((item) => !hasVerifiedCitations(item) || item.effect === "delete")) {
+      for (const fact of stage.filter((item) =>
+        !hasVerifiedCitations(item) || item.effect === "delete" || unauthorizedMutationIds.has(item.id)
+      )) {
         // Unsupported mutations and deletion tombstones are retained only as
         // history. Neither can become a current assertion.
         result.set(fact.id, { ...fact, status: "superseded" });
@@ -300,7 +389,8 @@ export function reconcileVersionedFacts(input: VersionedFact[]): {
   }
   return {
     facts: [...result.values()].sort((left, right) => left.id.localeCompare(right.id)),
-    conflicts: conflicts.sort((left, right) => left.id.localeCompare(right.id))
+    conflicts: conflicts.sort((left, right) => left.id.localeCompare(right.id)),
+    unauthorizedMutationIds: [...unauthorizedMutationIds].sort()
   };
 }
 

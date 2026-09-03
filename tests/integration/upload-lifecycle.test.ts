@@ -60,6 +60,19 @@ describe("incoming upload lifecycle", () => {
     await expect(storage.presign(request, context)).rejects.toMatchObject({ code: "RATE_LIMITED" });
   });
 
+  it("prunes non-body upload quota identity events after 30 days", async () => {
+    let clock = Date.parse("2026-09-02T00:00:00Z");
+    const storage = new LocalUploadStorage(config.SESSION_SIGNING_SECRET, () => clock, config);
+    await storage.presign({ filename: "quota.pdf", size_bytes: 1_000, sha256: "a".repeat(64) }, {
+      ownerId: principal.id, quotaKey: principal.quotaKey, principalKind: principal.kind,
+      origin: "http://localhost:3000"
+    });
+    expect((storage as unknown as { quotaEvents: unknown[] }).quotaEvents).toHaveLength(1);
+    clock += 30 * 24 * 60 * 60_000 + 1;
+    await storage.sweepExpiredIncoming(new Date(clock), 10);
+    expect((storage as unknown as { quotaEvents: unknown[] }).quotaEvents).toHaveLength(0);
+  });
+
   it("enforces a global daily upload-byte cap across owners and quota keys", async () => {
     const quotaConfig = getConfig({
       NODE_ENV: "test",
@@ -135,15 +148,13 @@ describe("incoming upload lifecycle", () => {
       .rejects.toMatchObject({ code: "UNSAFE_URL", httpStatus: 409 });
   });
 
-  it.each(["budget", "schedule"] as const)("cleans a claimed upload when %s fails", async (failure) => {
+  it("cleans a claimed upload when pre-scheduling budget admission fails", async () => {
     const storage = new LocalUploadStorage(config.SESSION_SIGNING_SECRET);
     const bytes = makeMinimalPdf(["cleanup on failed creation"]);
     const grant = await uploaded(storage, bytes);
     const store = new InMemoryRunStore();
     const budget: BudgetGuard = {
-      reserve: async () => {
-        if (failure === "budget") throw new AppError("BUDGET_EXCEEDED", "test rejection", { httpStatus: 402 });
-      },
+      reserve: async () => { throw new AppError("BUDGET_EXCEEDED", "test rejection", { httpStatus: 402 }); },
       settle: async () => undefined
     };
     const creation = createRun({ documents: [{ role: "base", source: {
@@ -151,16 +162,31 @@ describe("incoming upload lifecycle", () => {
       size_bytes: bytes.byteLength, filename: "source.pdf"
     } }] }, principal, null, {
       config, store, budget, uploadStorage: storage,
-      schedule: async () => {
-        if (failure === "schedule") throw new AppError("ANALYSIS_INCOMPLETE", "schedule failed");
-        return null;
-      }
+      schedule: async () => null
     });
-    await expect(creation).rejects.toMatchObject({
-      code: failure === "budget" ? "BUDGET_EXCEEDED" : "ANALYSIS_INCOMPLETE"
-    });
+    await expect(creation).rejects.toMatchObject({ code: "BUDGET_EXCEEDED" });
     await expect(storage.read(grant.blob_path)).rejects.toMatchObject({ code: "SOURCE_UNREACHABLE" });
     expect(await store.listExpired(new Date("2100-01-01T00:00:00Z"))).toEqual([]);
+  });
+
+  it("preserves a claimed upload and queued run when scheduler acknowledgement is uncertain", async () => {
+    const storage = new LocalUploadStorage(config.SESSION_SIGNING_SECRET);
+    const bytes = makeMinimalPdf(["uncertain scheduler delivery"]);
+    const grant = await uploaded(storage, bytes);
+    const store = new InMemoryRunStore();
+    const created = await createRun({ documents: [{ role: "base", source: {
+      type: "upload", blob_path: grant.blob_path, sha256: grant.sha256,
+      size_bytes: bytes.byteLength, filename: "source.pdf"
+    } }] }, principal, "uncertain-enqueue", {
+      config,
+      store,
+      budget: { reserve: async () => undefined, settle: async () => undefined },
+      uploadStorage: storage,
+      schedule: async () => { throw new Error("enqueue may already have succeeded"); }
+    });
+    expect(created.record).toMatchObject({ status: "queued", cleanupConfirmed: false });
+    expect(await storage.read(grant.blob_path)).toEqual(bytes);
+    expect(await store.get(created.record.id)).toMatchObject({ status: "queued" });
   });
 
   it("preclaims and cleans every declared upload when the nth load fails", async () => {

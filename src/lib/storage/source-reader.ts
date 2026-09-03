@@ -193,7 +193,7 @@ export async function loadSource(
   // Staging has been read back and verified by the storage adapter. Replace the
   // replayable incoming URL's raw bytes immediately; Monid reads only staging.
   try {
-    await dependencies.uploadStorage.purgeIncomingToFence(blobPath);
+    await dependencies.uploadStorage.purgeIncomingToFence(blobPath, dependencies.runId);
   } catch (error) {
     throw new AppError(
       "SOURCE_CLEANUP_PENDING",
@@ -217,7 +217,7 @@ export async function loadSource(
         resourceKind: "source_blob",
         controlScope: "application",
         successDetail: "Incoming source content was purged and a verified replay-blocking fence remains until grant expiry.",
-        remove: () => dependencies.uploadStorage.purgeIncomingToFence(blobPath)
+        remove: () => dependencies.uploadStorage.purgeIncomingToFence(blobPath, dependencies.runId)
       },
       stagedCleanupTarget(dependencies.uploadStorage, stagedPath, stageResourceId, bytes)
     ]

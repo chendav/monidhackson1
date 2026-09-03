@@ -36,20 +36,19 @@ export class InMemoryBudgetGuard implements BudgetGuard {
       });
     }
     const now = input.now ?? new Date();
-    const hourlyLimit = input.principalKind === "api"
-      ? this.config.API_RUNS_PER_HOUR
-      : this.config.GUEST_RUNS_PER_HOUR;
-    const oneHourAgo = now.getTime() - 3_600_000;
+    const dailyLimit = input.principalKind === "api"
+      ? this.config.API_RUNS_PER_DAY
+      : this.config.GUEST_RUNS_PER_DAY;
+    const day = now.toISOString().slice(0, 10);
     const recent = [...this.reservations.values()].filter(
-      (reservation) => reservation.quotaKey === input.quotaKey && reservation.createdAt >= oneHourAgo
+      (reservation) => reservation.quotaKey === input.quotaKey && reservation.day === day
     ).length;
-    if (recent >= hourlyLimit) {
-      throw new AppError("RATE_LIMITED", "The hourly run quota has been reached.", {
+    if (recent >= dailyLimit) {
+      throw new AppError("RATE_LIMITED", "The daily run quota has been reached.", {
         httpStatus: 429,
         retryable: true
       });
     }
-    const day = now.toISOString().slice(0, 10);
     const dailyCommitted = [...this.reservations.values()]
       .filter((reservation) => reservation.day === day)
       .reduce((total, reservation) => total + (reservation.settled ?? reservation.reserved), 0);
@@ -71,7 +70,7 @@ export class InMemoryBudgetGuard implements BudgetGuard {
   async settle(runId: string, actualMicroUsd: number): Promise<void> {
     const reservation = this.reservations.get(runId);
     if (!reservation) return;
-    reservation.settled = Math.max(0, Math.round(actualMicroUsd));
+    reservation.settled = Math.max(reservation.settled ?? 0, Math.max(0, Math.round(actualMicroUsd)));
   }
 
   clear() {
@@ -96,9 +95,10 @@ export class NeonBudgetGuard implements BudgetGuard {
     }
     const now = input.now ?? new Date();
     const day = now.toISOString().slice(0, 10);
-    const hourlyLimit = input.principalKind === "api"
-      ? this.config.API_RUNS_PER_HOUR
-      : this.config.GUEST_RUNS_PER_HOUR;
+    const dailyLimit = input.principalKind === "api"
+      ? this.config.API_RUNS_PER_DAY
+      : this.config.GUEST_RUNS_PER_DAY;
+    const dayStart = `${day}T00:00:00.000Z`;
     const queries = [
       this.sql`SELECT pg_advisory_xact_lock(hashtext(${`rfp-xray-budget:${day}`}))`,
       this.sql`
@@ -118,8 +118,8 @@ export class NeonBudgetGuard implements BudgetGuard {
           AND (
             SELECT COUNT(*) FROM runs
             WHERE quota_key = ${input.quotaKey}
-              AND created_at >= ${new Date(now.getTime() - 3_600_000).toISOString()}::timestamptz
-          ) <= ${hourlyLimit}
+              AND created_at >= ${dayStart}::timestamptz
+          ) <= ${dailyLimit}
         ON CONFLICT (run_id) DO NOTHING
         RETURNING run_id
       `
@@ -143,10 +143,10 @@ export class NeonBudgetGuard implements BudgetGuard {
       const recent = await this.sql`
         SELECT COUNT(*)::int AS count FROM runs
         WHERE quota_key = ${input.quotaKey}
-          AND created_at >= ${new Date(now.getTime() - 3_600_000).toISOString()}::timestamptz
+          AND created_at >= ${dayStart}::timestamptz
       ` as unknown as Array<{ count: number }>;
-      if ((recent[0]?.count ?? 0) > hourlyLimit) {
-        throw new AppError("RATE_LIMITED", "The hourly run quota has been reached.", {
+      if ((recent[0]?.count ?? 0) > dailyLimit) {
+        throw new AppError("RATE_LIMITED", "The daily run quota has been reached.", {
           httpStatus: 429,
           retryable: true
         });
@@ -161,7 +161,10 @@ export class NeonBudgetGuard implements BudgetGuard {
   async settle(runId: string, actualMicroUsd: number, now = new Date()): Promise<void> {
     await this.sql`
       UPDATE budget_reservations
-      SET settled_micro_usd = ${Math.max(0, Math.round(actualMicroUsd))},
+      SET settled_micro_usd = GREATEST(
+            COALESCE(settled_micro_usd, 0),
+            ${Math.max(0, Math.round(actualMicroUsd))}
+          ),
           settled_at = ${now.toISOString()}::timestamptz
       WHERE run_id = ${runId}::uuid
     `;

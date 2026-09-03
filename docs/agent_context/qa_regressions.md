@@ -23,3 +23,7 @@ Updated: 2026-09-03
 | QR-17 | Labels and numbers are semantically swapped (70/30, 50/94, MDT/EST) | Field-binding citation tests | pass |
 | QR-18 | Run row survives a crash before Workflow scheduling | Idempotent replay and maintenance recovery tests | pass locally |
 | QR-19 | Presign flood bypasses run quota | Outstanding/daily/global concurrent issuance tests | pass locally; live Neon gate open |
+| QR-20 | Hourly counting or a lower retry settlement weakens daily spend controls | Cross-hour daily quota and monotonic settlement tests | pass locally |
+| QR-21 | Concurrent create or enqueue acknowledgement loss kills an admitted run | Admission lease, delayed-workflow, and uncertain-scheduler tests | pass locally; live Workflow gate open |
+| QR-22 | Adjacent title/issuer/timezone labels or a false amendment topic authorize another fact | Span binding, ambiguous-deadline, non-deadline mutation, and comma-separator adversarial tests | pass locally |
+| QR-23 | Missing upload ledger causes cleanup to create an orphan fence | No-ledger/no-object and orphan-object Blob adapter tests | pass locally; live Blob gate open |

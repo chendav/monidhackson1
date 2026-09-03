@@ -37,6 +37,8 @@ export const runs = pgTable(
     result: jsonb("result").$type<AnalysisResult>(),
     error: jsonb("error").$type<RunFailure>(),
     workflowRunId: text("workflow_run_id"),
+    admissionLeaseId: uuid("admission_lease_id"),
+    admissionLeaseExpiresAt: timestamp("admission_lease_expires_at", { withTimezone: true }),
     processingLeaseId: uuid("processing_lease_id"),
     processingLeaseExpiresAt: timestamp("processing_lease_expires_at", { withTimezone: true }),
     processingFence: integer("processing_fence").notNull().default(0),
@@ -57,8 +59,8 @@ export const runs = pgTable(
     index("runs_audit_expires_at_idx").on(table.auditExpiresAt),
     index("runs_processing_lease_expiry_idx").on(table.processingLeaseExpiresAt),
     index("runs_queued_admission_idx")
-      .on(table.createdAt)
-      .where(sql`${table.status} = 'queued' AND ${table.workflowRunId} IS NULL`),
+      .on(table.updatedAt)
+      .where(sql`${table.status} = 'queued'`),
     index("runs_quota_created_idx").on(table.quotaKey, table.createdAt)
   ]
 );
@@ -107,7 +109,8 @@ export const uploadQuotaEvents = pgTable(
   },
   (table) => [
     index("upload_quota_events_quota_day_idx").on(table.quotaKey, table.day),
-    index("upload_quota_events_day_idx").on(table.day)
+    index("upload_quota_events_day_idx").on(table.day),
+    index("upload_quota_events_created_at_idx").on(table.createdAt)
   ]
 );
 

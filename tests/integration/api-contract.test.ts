@@ -371,4 +371,37 @@ describe("versioned public API contract", () => {
     expect(schedule).toHaveBeenCalledExactlyOnceWith(stranded.record.id);
     expect((await store.get(stranded.record.id))?.workflowRunId).toBe("workflow-recovered");
   });
+
+  it("uses a single-writer admission lease for concurrent idempotent creates", async () => {
+    const store = new InMemoryRunStore();
+    const budget = new InMemoryBudgetGuard(config);
+    const principal = { id: "guest:admission-race", quotaKey: "ip:admission-race", kind: "guest" as const };
+    const input = {
+      documents: [{ role: "base", source: { type: "url", url: "https://canadabuys.canada.ca/race.pdf" } }]
+    };
+    let entered!: () => void;
+    let release!: () => void;
+    const scheduleEntered = new Promise<void>((resolve) => { entered = resolve; });
+    const scheduleBlocked = new Promise<void>((resolve) => { release = resolve; });
+    const schedule = vi.fn(async () => {
+      entered();
+      await scheduleBlocked;
+      throw new Error("scheduler failed after the peer replayed");
+    });
+
+    const first = createRun(input, principal, "same-request", { config, store, budget, schedule });
+    await scheduleEntered;
+    const replay = await createRun(input, principal, "same-request", { config, store, budget, schedule });
+    expect(replay.created).toBe(false);
+    expect(replay.record.status).toBe("queued");
+    release();
+    await expect(first).resolves.toMatchObject({
+      record: { id: replay.record.id, status: "queued" }
+    });
+
+    expect(schedule).toHaveBeenCalledOnce();
+    expect(await store.get(replay.record.id)).toMatchObject({
+      id: replay.record.id, status: "queued", cleanupConfirmed: false
+    });
+  });
 });

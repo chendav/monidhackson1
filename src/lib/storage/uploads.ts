@@ -15,6 +15,8 @@ const GRANT_LIFETIME_MS = 5 * 60_000;
 const GRANT_EXPIRY_GRACE_MS = 5 * 60_000;
 const GRANT_HARD_DELETE_MS = 30 * 60_000;
 const CLEANUP_LEASE_MS = 60_000;
+const QUOTA_EVENT_RETENTION_MS = 30 * 24 * 60 * 60_000;
+const QUOTA_EVENT_CLEANUP_BATCH_SIZE = 1_000;
 
 interface PresignContext {
   ownerId: string;
@@ -37,7 +39,7 @@ export interface UploadStorage {
   read(blobPath: string): Promise<Uint8Array>;
   stage(blobPath: string, bytes: Uint8Array, sourceBlobPath?: string): Promise<void>;
   temporaryReadUrl(blobPath: string, validUntil: Date): Promise<string>;
-  purgeIncomingToFence(blobPath: string): Promise<void>;
+  purgeIncomingToFence(blobPath: string, claimedRunId?: string): Promise<void>;
   remove(blobPath: string): Promise<void>;
   sweepExpiredIncoming(now?: Date, limit?: number): Promise<string[]>;
 }
@@ -58,6 +60,7 @@ interface LocalQuotaEvent {
   quotaKey: string;
   sizeBytes: number;
   day: string;
+  createdAt: number;
 }
 
 export function stagingBlobPath(runId: string, documentIndex: number) {
@@ -122,7 +125,7 @@ export class LocalUploadStorage implements UploadStorage {
     };
     this.grantsByToken.set(token, grant);
     this.grantsByPath.set(blobPath, grant);
-    this.quotaEvents.push({ quotaKey: context.quotaKey, sizeBytes: input.size_bytes, day });
+    this.quotaEvents.push({ quotaKey: context.quotaKey, sizeBytes: input.size_bytes, day, createdAt: now });
     return {
       blob_path: blobPath,
       upload_url: new URL(`/api/v1/uploads/local/${token}`, context.origin).toString(),
@@ -206,9 +209,14 @@ export class LocalUploadStorage implements UploadStorage {
     );
   }
 
-  async purgeIncomingToFence(blobPath: string): Promise<void> {
+  async purgeIncomingToFence(blobPath: string, claimedRunId?: string): Promise<void> {
     const grant = this.grantsByPath.get(blobPath);
-    if (!grant || !["claimed", "fenced"].includes(grant.status)) {
+    if (!grant) {
+      this.objects.delete(blobPath);
+      return;
+    }
+    if (!["claimed", "fenced"].includes(grant.status) ||
+      (claimedRunId !== undefined && grant.claimedRunId !== claimedRunId)) {
       throw new Error("Incoming upload is not owned by an active claim.");
     }
     this.objects.delete(blobPath);
@@ -221,6 +229,10 @@ export class LocalUploadStorage implements UploadStorage {
   }
 
   async sweepExpiredIncoming(now = new Date(this.now()), limit = 100): Promise<string[]> {
+    const quotaCutoff = now.getTime() - QUOTA_EVENT_RETENTION_MS;
+    for (let index = this.quotaEvents.length - 1; index >= 0; index -= 1) {
+      if (this.quotaEvents[index].createdAt <= quotaCutoff) this.quotaEvents.splice(index, 1);
+    }
     const deleted: string[] = [];
     for (const grant of this.grantsByPath.values()) {
       if (deleted.length >= limit || grant.expiresAt + GRANT_EXPIRY_GRACE_MS > now.getTime() || grant.status === "deleted") continue;
@@ -503,20 +515,47 @@ export class VercelBlobUploadStorage implements UploadStorage {
     return presignedUrl;
   }
 
-  async purgeIncomingToFence(blobPath: string): Promise<void> {
+  async purgeIncomingToFence(blobPath: string, claimedRunId?: string): Promise<void> {
+    const ledger = await this.db.query.incomingUploads.findFirst({
+      where: eq(incomingUploads.blobPath, blobPath)
+    });
     let sourceEtag: string | undefined;
     const current = await get(blobPath, {
       access: "private", token: this.token, useCache: false,
       abortSignal: AbortSignal.timeout(10_000)
     });
+    if (!ledger) {
+      // A path whose durable grant was already swept must never be recreated
+      // as an untracked zero-byte fence. Remove any orphan that does exist;
+      // if neither ledger nor object exists, cleanup is already complete.
+      await current?.stream?.cancel();
+      if (current) await this.remove(blobPath);
+      return;
+    }
+    if (claimedRunId !== undefined &&
+      (ledger.claimedRunId !== claimedRunId || !["claimed", "fenced"].includes(ledger.status))) {
+      await current?.stream?.cancel();
+      throw new Error("Incoming upload is not owned by the expected run claim.");
+    }
+    const now = new Date();
+    if (ledger.expiresAt <= now) {
+      await current?.stream?.cancel();
+      if (current) await this.remove(blobPath);
+      return;
+    }
     if (current && current.statusCode === 200) {
       sourceEtag = current.blob.etag;
       await current.stream.cancel();
       if (current.blob.size === 0) {
         this.sourceEtags.set(blobPath, sourceEtag);
-        await this.db.update(incomingUploads).set({
+        const [updated] = await this.db.update(incomingUploads).set({
           status: "fenced", fenceEtag: sourceEtag, updatedAt: new Date()
-        }).where(eq(incomingUploads.blobPath, blobPath));
+        }).where(and(
+          eq(incomingUploads.blobPath, blobPath),
+          eq(incomingUploads.version, ledger.version),
+          gt(incomingUploads.expiresAt, now)
+        )).returning({ blobPath: incomingUploads.blobPath });
+        if (!updated) await this.remove(blobPath);
         return;
       }
     }
@@ -554,10 +593,14 @@ export class VercelBlobUploadStorage implements UploadStorage {
       throw new Error("The incoming raw bytes were not replaced by the replay fence.");
     }
     await remaining.stream?.cancel();
-    await this.db.update(incomingUploads).set({
+    const [updated] = await this.db.update(incomingUploads).set({
       status: "fenced", fenceEtag: this.sourceEtags.get(blobPath) ?? null, updatedAt: new Date()
-    })
-      .where(eq(incomingUploads.blobPath, blobPath));
+    }).where(and(
+      eq(incomingUploads.blobPath, blobPath),
+      eq(incomingUploads.version, ledger.version),
+      gt(incomingUploads.expiresAt, now)
+    )).returning({ blobPath: incomingUploads.blobPath });
+    if (!updated) await this.remove(blobPath);
   }
 
   async remove(blobPath: string): Promise<void> {
@@ -629,6 +672,19 @@ export class VercelBlobUploadStorage implements UploadStorage {
         }
       }
     }
+    const quotaCutoff = new Date(now.getTime() - QUOTA_EVENT_RETENTION_MS);
+    await this.sqlClient`
+      WITH expired AS (
+        SELECT id
+        FROM upload_quota_events
+        WHERE created_at <= ${quotaCutoff.toISOString()}::timestamptz
+        ORDER BY created_at, id
+        LIMIT ${QUOTA_EVENT_CLEANUP_BATCH_SIZE}
+      )
+      DELETE FROM upload_quota_events AS events
+      USING expired
+      WHERE events.id = expired.id
+    `;
     return deleted;
   }
 }

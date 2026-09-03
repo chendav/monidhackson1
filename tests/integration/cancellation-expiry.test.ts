@@ -206,6 +206,7 @@ describe("active-worker cancellation and stale-lease cleanup", () => {
       new Date("2026-09-02T00:20:00.001Z")
     )).toBeNull();
 
+    const sourcePurgesBeforeQuiescence = storage.purges.length;
     const expired = await expireRun(
       fencedWorkerResult,
       store,
@@ -222,6 +223,7 @@ describe("active-worker cancellation and stale-lease cleanup", () => {
     expect(storage.removals.filter((path) => path === stagePath)).toHaveLength(
       removalsBeforeRecreate + 1
     );
+    expect(storage.purges).toHaveLength(sourcePurgesBeforeQuiescence);
     expect(expired.cleanupReceipts).toContainEqual(expect.objectContaining({
       resourceId: `sha256:${sha256Hex(`staged:${record.id}:0`)}`,
       status: "deleted",
@@ -304,19 +306,20 @@ describe("active-worker cancellation and stale-lease cleanup", () => {
       },
       answer: local.answer.bind(local)
     };
+    const retainedMonidResult = {
+      markdown: "The bidder must submit a signed form.",
+      runId: "paid-monid-run",
+      // The adapter preserves the provider's USD-denominated value here;
+      // providerCost converts it to integer micro-USD.
+      costMicroUsd: 0.0045,
+      costCurrency: "USD",
+      providerArtifactUrl: "https://private-blob.example/result.md",
+      providerRetention: "unknown" as const,
+      terminalPayload: { raw: "provider response" }
+    };
     const monid = {
       async parse() {
-        return {
-          markdown: "The bidder must submit a signed form.",
-          runId: "paid-monid-run",
-          // The adapter preserves the provider's USD-denominated value here;
-          // providerCost converts it to integer micro-USD.
-          costMicroUsd: 0.0045,
-          costCurrency: "USD",
-          providerArtifactUrl: "https://private-blob.example/result.md",
-          providerRetention: "unknown" as const,
-          terminalPayload: {}
-        };
+        return retainedMonidResult;
       }
     } as unknown as MonidAdapter;
 
@@ -340,6 +343,9 @@ describe("active-worker cancellation and stale-lease cleanup", () => {
     expect(cancelled.status).toBe("cleanup_pending");
     expect(cancelled.result).toBeNull();
     expect(received.input?.[0].parsed_markdown).toBe("");
+    expect(retainedMonidResult).toMatchObject({
+      markdown: "", providerArtifactUrl: "", terminalPayload: null
+    });
     expect(budget.settlements).toEqual([{
       runId: record.id,
       // Monid actual 4,500 + model estimate (1,000 * .75 + 500 * 4.5).

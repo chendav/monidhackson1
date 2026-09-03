@@ -25,6 +25,7 @@ const state = vi.hoisted(() => ({
   deleteFailures: 0,
   quotaRemaining: 1,
   quotaTransactions: [] as unknown[][],
+  rawSql: [] as string[],
   putOptions: [] as Array<Record<string, unknown>>,
   getOptions: [] as Array<Record<string, unknown>>
 }));
@@ -37,7 +38,10 @@ function promiseWithReturning<T>(value: T, returned: unknown[]) {
 
 vi.mock("@neondatabase/serverless", () => ({
   neon: vi.fn(() => {
-    const tagged = ((strings: TemplateStringsArray, ...values: unknown[]) => ({ strings, values })) as {
+    const tagged = ((strings: TemplateStringsArray, ...values: unknown[]) => {
+      state.rawSql.push(strings.join("?"));
+      return { strings, values };
+    }) as {
       (strings: TemplateStringsArray, ...values: unknown[]): unknown;
       transaction: (queries: unknown[]) => Promise<unknown[][]>;
     };
@@ -80,6 +84,10 @@ vi.mock("drizzle-orm/neon-http", () => ({
           row.leaseExpiresAt = null;
           row.lastCleanupErrorCode = values.lastCleanupErrorCode as string;
           row.version += 1;
+        } else if (row && values.status === "fenced") {
+          row.status = "fenced";
+          row.fenceEtag = values.fenceEtag;
+          returned = [{ blobPath: row.blobPath }];
         }
         return promiseWithReturning(undefined, returned);
       })
@@ -166,6 +174,7 @@ describe("Vercel Blob upload recovery", () => {
     state.deleteFailures = 0;
     state.quotaRemaining = 1;
     state.quotaTransactions.length = 0;
+    state.rawSql.length = 0;
     state.putOptions.length = 0;
     state.getOptions.length = 0;
     vi.restoreAllMocks();
@@ -228,6 +237,9 @@ describe("Vercel Blob upload recovery", () => {
     expect(results.flat()).toEqual([path]);
     expect(state.rows).toHaveLength(0);
     expect(state.objects.has(path)).toBe(false);
+    expect(state.rawSql.some((statement) =>
+      statement.includes("DELETE FROM upload_quota_events") && statement.includes("LIMIT")
+    )).toBe(true);
   });
 
   it("allows only the owning run to resume an expired durable claim after fencing", async () => {
@@ -259,15 +271,37 @@ describe("Vercel Blob upload recovery", () => {
   it("creates the replay fence with source ETag CAS and treats an existing zero fence as a no-op", async () => {
     const storage = new VercelBlobUploadStorage(config);
     const path = "incoming/owner/claimed/source.pdf";
+    const row = grantRow(path, new Date("2026-09-03T00:00:00Z"));
+    row.status = "claimed";
+    row.claimedRunId = "0d20b7aa-48c2-4514-a401-5d4ea180074f";
+    row.expiresAt = new Date("2100-01-01T00:00:00Z");
+    state.rows.push(row);
     state.objects.set(path, { bytes: new TextEncoder().encode("raw source"), etag: "raw-etag" });
 
-    await storage.purgeIncomingToFence(path);
+    await storage.purgeIncomingToFence(path, row.claimedRunId);
     expect(state.objects.get(path)?.bytes.byteLength).toBe(0);
     expect(state.putOptions).toHaveLength(1);
     expect(state.putOptions[0]).toMatchObject({ allowOverwrite: true, ifMatch: "raw-etag" });
 
-    await storage.purgeIncomingToFence(path);
+    await storage.purgeIncomingToFence(path, row.claimedRunId);
     expect(state.putOptions).toHaveLength(1);
+  });
+
+  it("does not create an orphan fence when both upload ledger and object are absent", async () => {
+    const storage = new VercelBlobUploadStorage(config);
+    const path = "incoming/owner/already-swept/source.pdf";
+    await expect(storage.purgeIncomingToFence(path, crypto.randomUUID())).resolves.toBeUndefined();
+    expect(state.objects.has(path)).toBe(false);
+    expect(state.putOptions).toHaveLength(0);
+  });
+
+  it("conditionally removes an orphan object instead of fencing it when its ledger is absent", async () => {
+    const storage = new VercelBlobUploadStorage(config);
+    const path = "incoming/owner/orphan/source.pdf";
+    state.objects.set(path, { bytes: new TextEncoder().encode("orphan"), etag: "orphan-etag" });
+    await expect(storage.purgeIncomingToFence(path, crypto.randomUUID())).resolves.toBeUndefined();
+    expect(state.objects.has(path)).toBe(false);
+    expect(state.putOptions).toHaveLength(0);
   });
 
   it("releases a failed lease, logs only a hashed overdue identifier, and retries", async () => {

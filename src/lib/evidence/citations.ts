@@ -71,10 +71,30 @@ const TIME_ZONE_ALIASES: ReadonlyArray<readonly [RegExp, string]> = [
   [/\b(?:newfoundland daylight time|ndt)\b/g, "ndt"]
 ];
 
+const TIME_ZONE_UTC_OFFSETS = new Map([
+  ["utc", "+00:00"], ["gmt", "+00:00"],
+  ["mst", "-07:00"], ["mdt", "-06:00"],
+  ["cst", "-06:00"], ["cdt", "-05:00"],
+  ["est", "-05:00"], ["edt", "-04:00"],
+  ["pst", "-08:00"], ["pdt", "-07:00"],
+  ["ast", "-04:00"], ["adt", "-03:00"],
+  ["nst", "-03:30"], ["ndt", "-02:30"]
+]);
+
 function recordObjectiveModifiers(value: string, tokens: Set<string>) {
   for (const [pattern, canonical] of TIME_ZONE_ALIASES) {
-    if (pattern.test(value)) tokens.add(`timezone:${canonical}`);
+    if (pattern.test(value)) {
+      tokens.add(`timezone:${canonical}`);
+      const offset = TIME_ZONE_UTC_OFFSETS.get(canonical);
+      if (offset) tokens.add(`utc-offset:${offset}`);
+    }
     pattern.lastIndex = 0;
+  }
+
+  for (const match of value.matchAll(/(?<![\p{L}\p{N}])([+\-])(\d{2}):(\d{2})\b/gu)) {
+    const hours = Number(match[2]);
+    const minutes = Number(match[3]);
+    if (hours <= 14 && minutes <= 59) tokens.add(`utc-offset:${match[1]}${match[2]}:${match[3]}`);
   }
 
   for (const match of value.matchAll(/(?<![\p{L}\p{N}])(\d+(?:\.\d+)?)\s*(?:%|per\s*cent|percent(?:age)?)(?![\p{L}])/gu)) {
@@ -145,8 +165,8 @@ export function extractAssertionTokens(value: string): Set<string> {
     remainder = blankRange(remainder, start, end);
   }
 
-  // UTC offsets are metadata for an already captured time, not an additional
-  // asserted quantity that a human-readable "MDT" quote needs to spell out.
+  // Explicit UTC offsets were recorded before date/time ranges were blanked.
+  // Remove their digits here so they are not also treated as ordinary numbers.
   remainder = remainder.replace(/[+\-]\d{2}:\d{2}\b/g, (offset) => " ".repeat(offset.length));
 
   for (const match of remainder.matchAll(/(?<![\p{L}\p{N}])(?:\d{1,3}(?:[ ,]\d{3})+|\d+)(?:\.\d+)?(?![\p{L}\p{N}])/gu)) {

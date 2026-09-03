@@ -1,7 +1,6 @@
 import { getConfig } from "@/lib/config";
 import { AppError } from "@/lib/errors";
 import { processRun } from "@/lib/pipeline";
-import { getRunStore } from "@/lib/runs/store";
 
 export async function scheduleRun(runId: string): Promise<string | null> {
   const config = getConfig();
@@ -11,12 +10,6 @@ export async function scheduleRun(runId: string): Promise<string | null> {
       import("@/workflows/analyze-run")
     ]);
     const workflowRun = await start(analyzeRunWorkflow, [runId]);
-    const store = await getRunStore();
-    await store.update(runId, (record) => ({
-      ...record,
-      workflowRunId: workflowRun.runId,
-      updatedAt: new Date().toISOString()
-    }));
     return workflowRun.runId;
   }
 

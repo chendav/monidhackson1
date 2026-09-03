@@ -6,11 +6,12 @@ import {
   type DocumentManifest
 } from "@/contracts";
 import type { DraftAnalysis } from "@/lib/analysis/draft";
-import { reconcileVersionedFacts } from "@/lib/analysis/reconciliation";
+import { deriveDeadlineFactKey, reconcileVersionedFacts } from "@/lib/analysis/reconciliation";
 import {
   allCitationsVerified,
   assertionTokensSupportedByCitations,
   citationsMatchDocument,
+  extractAssertionTokens,
   verifyCitationBatch,
   type CitationDocument,
   type QuoteVerificationReceipt
@@ -55,8 +56,55 @@ function citationsDescribeSameSourceFact(left: Citation, right: Citation) {
 }
 
 function significantWords(value: string) {
-  const ignored = new Set(["a", "an", "and", "for", "in", "of", "on", "the", "to", "with"]);
+  const ignored = new Set([
+    "a", "an", "and", "are", "as", "at", "be", "been", "by", "for", "from", "has", "have",
+    "in", "is", "it", "of", "on", "or", "that", "the", "this", "to", "was", "were", "will", "with"
+  ]);
   return [...new Set(normalizeEvidenceText(value).match(/[a-z]{3,}/g)?.filter((word) => !ignored.has(word)) ?? [])];
+}
+
+/**
+ * Scalar matching prevents altered numbers and dates. This companion check
+ * prevents a model from attaching a real quote to different prose (for
+ * example, "Fake Contract" cited to "RFP title: Real Contract"). Extraction
+ * is intentionally conservative: every meaningful asserted word must appear
+ * somewhere in the verified evidence unless the complete assertion does.
+ */
+function proseAssertionSupportedByCitations(assertion: string, citations: Citation[]) {
+  const normalizedAssertion = normalizeEvidenceText(assertion);
+  const normalizedEvidence = normalizeEvidenceText(citations.map((citation) => citation.evidence_quote).join(" "));
+  if (normalizedAssertion.length >= 3 && normalizedEvidence.includes(normalizedAssertion)) return true;
+  const words = significantWords(assertion);
+  const evidenceWords = new Set(significantWords(normalizedEvidence));
+  return words.length === 0 || words.every((word) => evidenceWords.has(word));
+}
+
+function semanticDependencyTokens(value: string) {
+  const aliases = new Map([
+    ["deadline", "closing"], ["due", "closing"], ["late", "closing"],
+    ["bid", "submission"], ["bids", "submission"], ["bidder", "submission"],
+    ["bidders", "submission"], ["proposal", "submission"], ["proposals", "submission"],
+    ["tender", "submission"], ["term", "period"], ["duration", "period"]
+  ]);
+  return new Set(significantWords(value).map((word) => aliases.get(word) ?? word));
+}
+
+function riskSemanticallyDependsOnSupersededFact(
+  risk: { topic: string; value: string; documentSha256: string; citations: Citation[] },
+  superseded: { topic: string; value: string; documentSha256: string; citations: Citation[] }
+) {
+  if (risk.documentSha256 !== superseded.documentSha256) return false;
+  if (risk.citations.some((riskCitation) => superseded.citations.some((sourceCitation) =>
+    citationsDescribeSameSourceFact(riskCitation, sourceCitation)))) return true;
+
+  const riskObjectiveTokens = extractAssertionTokens(risk.value);
+  const sourceObjectiveTokens = extractAssertionTokens(superseded.value);
+  if (riskObjectiveTokens.size === 0 || sourceObjectiveTokens.size === 0) return false;
+  if (![...sourceObjectiveTokens].some((token) => riskObjectiveTokens.has(token))) return false;
+
+  const riskTopics = semanticDependencyTokens(risk.topic);
+  const sourceTopics = semanticDependencyTokens(superseded.topic);
+  return [...riskTopics].some((token) => sourceTopics.has(token));
 }
 
 function evaluationCitationIsRelevant(field: EvaluationField, citation: Citation) {
@@ -228,12 +276,99 @@ const SUMMARY_TOPIC_PATTERNS = {
   title: /\b(title|tender name|rfp name|solicitation name)\b/i,
   solicitation_number: /\b(solicitation|tender|rfp|reference)\b.*\b(number|no|id)\b/i,
   issuer: /\b(issuer|buyer|contracting authority|department|agency)\b/i,
-  closing_date: /\b(closing|deadline|due date|submission date)\b/i,
+  closing_date: /\b(closing(?: date| time)?|submission (?:date|deadline)|bid deadline|tender deadline|solicitation deadline)\b/i,
   overview: /\b(overview|summary|project description|scope)\b/i,
   scope: /\b(scope|deliverable|service|statement of work|work requirement)\b/i,
   submission_method: /\b(submission|submit)\b.*\b(method|portal|email|electronic|instructions?)\b/i,
   current_selection_method: /\b(selection|award)\b.*\b(method|basis|rating|price)\b/i
 } as const;
+
+type SummaryField = keyof typeof SUMMARY_TOPIC_PATTERNS;
+type AnchoredSpan = { full: string; value: string };
+
+const STRONG_FIELD_ANCHORS: ReadonlyArray<readonly [string, SummaryField | "question_deadline"]> = [
+  ["\\b(?:rfp|tender|solicitation)\\s+(?:title|name)\\b", "title"],
+  ["\\b(?:solicitation|tender|rfp|reference)\\s*(?:number|no\\.?|id)\\b", "solicitation_number"],
+  ["\\b(?:issuer|buyer|contracting authority|department|agency)\\b", "issuer"],
+  ["\\b(?:(?:solicitation|bid|tender)\\s+)?(?:closing date|closing time)|\\b(?:submission deadline|submission date|bid deadline|tender deadline|solicitation deadline)\\b", "closing_date"],
+  ["\\b(?:questions?|enquir(?:y|ies)|clarifications?)\\b.{0,40}\\b(?:close|closes|closing|cut[ -]?off|deadline|due|received|submitted)\\b", "question_deadline"],
+  ["\\bdeadline\\s+for\\s+(?:submitting\\s+)?(?:questions?|enquir(?:y|ies)|clarifications?)\\b", "question_deadline"],
+  ["\\bsubmission (?:method|portal|instructions?)\\b", "submission_method"]
+];
+
+function firstSentenceBoundary(value: string, start: number, maximum: number) {
+  const suffix = value.slice(start, maximum);
+  for (const match of suffix.matchAll(/[;\n]|\.\s+/g)) {
+    const boundary = start + match.index;
+    const prefix = value.slice(Math.max(start, boundary - 5), boundary + 1);
+    if (/\b[ap]\.m\.$/.test(prefix)) continue;
+    return boundary;
+  }
+  return maximum;
+}
+
+function anchoredFieldSpans(field: SummaryField, quote: string): AnchoredSpan[] {
+  if (!["title", "solicitation_number", "issuer", "closing_date", "submission_method"].includes(field)) {
+    return SUMMARY_TOPIC_PATTERNS[field].test(quote)
+      ? [{ full: quote, value: quote }]
+      : [];
+  }
+  const normalized = normalizeEvidenceText(quote);
+  const anchors = STRONG_FIELD_ANCHORS.flatMap(([source, anchorField]) =>
+    [...normalized.matchAll(new RegExp(source, "g"))].map((match) => ({
+      field: anchorField,
+      start: match.index,
+      end: match.index + match[0].length
+    }))
+  ).sort((left, right) => left.start - right.start || left.end - right.end);
+
+  return anchors.flatMap((anchor, index): AnchoredSpan[] => {
+    if (anchor.field !== field) return [];
+    const nextAnchor = anchors.slice(index + 1).find((candidate) => candidate.start >= anchor.end);
+    const maximum = nextAnchor?.start ?? normalized.length;
+    const end = firstSentenceBoundary(normalized, anchor.end, maximum);
+    const rawValue = normalized.slice(anchor.end, end)
+      .replace(/^\s*(?:(?:is|are)\s+)?(?:(?:has|have)\s+been\s+)?(?:revised|changed|extended|updated)?\s*(?:to)?\s*[:#=-]?\s*/i, "")
+      .replace(/[\s,.:;=-]+$/g, "")
+      .trim();
+    if (!rawValue) return [];
+    return [{ full: `${normalized.slice(anchor.start, anchor.end)} ${rawValue}`, value: rawValue }];
+  });
+}
+
+function citationSupportsSummaryValue(field: SummaryField, value: string, citation: Citation) {
+  if (!citation.verified) return false;
+  const spans = anchoredFieldSpans(field, citation.evidence_quote);
+  return spans.some((span) => {
+    if (field === "closing_date") {
+      if (/\b(?:questions?|enquir(?:y|ies)|clarifications?)\b/i.test(span.full)) return false;
+      const objective = [...extractAssertionTokens(span.full)];
+      const distinct = (prefix: string) => objective.filter((token) => token.startsWith(prefix)).length;
+      if (distinct("date:") > 1 || distinct("time:") > 1 ||
+        distinct("timezone:") > 1 || distinct("utc-offset:") > 1) return false;
+    }
+    const scopedCitation = { ...citation, evidence_quote: span.full };
+    if (!assertionTokensSupportedByCitations(value, [scopedCitation]) ||
+      !proseAssertionSupportedByCitations(value, [scopedCitation])) return false;
+    return ["title", "solicitation_number", "issuer"].includes(field)
+      ? normalizeEvidenceText(value) === span.value
+      : true;
+  });
+}
+
+function topicFieldBindingSupported(topic: string, value: string, citations: Citation[]) {
+  const field = (["title", "solicitation_number", "issuer", "closing_date"] as const)
+    .find((candidate) => SUMMARY_TOPIC_PATTERNS[candidate].test(topic));
+  if (field === "closing_date" &&
+    deriveDeadlineFactKey(value, citations) === "deadline:questions" &&
+    /\b(?:questions?|enquir(?:y|ies)|clarifications?|request for clarification)\b/i.test(value)) {
+    // The model mislabeled the topic, but the server can still safely route the
+    // fact into the question-deadline chain. It cannot populate closing_date
+    // because summary publication independently requires a closing span.
+    return true;
+  }
+  return !field || citations.some((citation) => citationSupportsSummaryValue(field, value, citation));
+}
 
 export function materializeAnalysis(input: MaterializeInput): {
   result: AnalysisResult;
@@ -306,7 +441,9 @@ export function materializeAnalysis(input: MaterializeInput): {
     const sourceConsistent = Boolean(document && checked.everyCandidateVerified &&
       citationsMatchDocument(checked.citations, claim.document_sha256));
     const scalarSupported = assertionTokensSupportedByCitations(claim.claim_text, matchingCitations);
-    if (!sourceConsistent || !scalarSupported) {
+    const proseSupported = proseAssertionSupportedByCitations(claim.claim_text, matchingCitations);
+    const fieldBound = topicFieldBindingSupported(claim.topic, claim.claim_text, matchingCitations);
+    if (!sourceConsistent || !scalarSupported || !proseSupported || !fieldBound) {
       unsupportedItemsRemoved += 1;
       truthReviewItems += 1;
       if (claim.effect !== "delete") {
@@ -328,6 +465,7 @@ export function materializeAnalysis(input: MaterializeInput): {
   const claimReconciliation = reconcileVersionedFacts(validClaimDrafts.map(({ claim, citations, document }) => ({
     id: claim.claim_id,
     topic: claim.topic,
+    factKey: deriveDeadlineFactKey(claim.claim_text, citations) ?? undefined,
     value: claim.claim_text,
     documentSha256: claim.document_sha256,
     documentRole: document.role,
@@ -336,6 +474,9 @@ export function materializeAnalysis(input: MaterializeInput): {
     citations,
     supersedesIds: claim.supersedes_claim_ids
   })));
+  const unauthorizedClaimMutations = new Set(claimReconciliation.unauthorizedMutationIds);
+  unsupportedItemsRemoved += unauthorizedClaimMutations.size;
+  truthReviewItems += unauthorizedClaimMutations.size;
   const claims: AnalysisResult["claims"] = [
     ...claimReconciliation.facts.flatMap((fact) => {
       const draft = validClaimDrafts.find((item) => item.claim.claim_id === fact.id)?.claim;
@@ -343,8 +484,9 @@ export function materializeAnalysis(input: MaterializeInput): {
       return [{
         claim_id: fact.id,
         claim_text: fact.value,
-        claim_type: fact.status === "conflicted" ? "conflict" as const : draft.claim_type,
-        status: fact.status,
+        claim_type: fact.status === "conflicted" && !unauthorizedClaimMutations.has(fact.id)
+          ? "conflict" as const : draft.claim_type,
+        status: unauthorizedClaimMutations.has(fact.id) ? "needs_review" as const : fact.status,
         confidence: draft.confidence,
         citations: fact.citations,
         formula_and_inputs: null
@@ -373,7 +515,9 @@ export function materializeAnalysis(input: MaterializeInput): {
     );
     const supported = Boolean(document && checked.everyCandidateVerified &&
       citationsMatchDocument(checked.citations, requirement.document_sha256) &&
-      assertionTokensSupportedByCitations(requirement.text, matchingCitations));
+      assertionTokensSupportedByCitations(requirement.text, matchingCitations) &&
+      proseAssertionSupportedByCitations(requirement.text, matchingCitations) &&
+      topicFieldBindingSupported(requirement.topic, requirement.text, matchingCitations));
     if (!supported) {
       unsupportedItemsRemoved += 1;
       truthReviewItems += 1;
@@ -396,6 +540,7 @@ export function materializeAnalysis(input: MaterializeInput): {
     ({ requirement, citations, document }) => ({
       id: requirement.id,
       topic: requirement.topic,
+      factKey: deriveDeadlineFactKey(requirement.text, citations) ?? undefined,
       value: requirement.text,
       documentSha256: requirement.document_sha256,
       documentRole: document.role,
@@ -404,6 +549,9 @@ export function materializeAnalysis(input: MaterializeInput): {
       citations
     })
   ));
+  const unauthorizedRequirementMutations = new Set(requirementReconciliation.unauthorizedMutationIds);
+  unsupportedItemsRemoved += unauthorizedRequirementMutations.size;
+  truthReviewItems += unauthorizedRequirementMutations.size;
   const requirements: AnalysisResult["requirements"] = [
     ...requirementReconciliation.facts.flatMap((fact) => {
       const draft = validRequirementDrafts.find((item) => item.requirement.id === fact.id)?.requirement;
@@ -411,7 +559,7 @@ export function materializeAnalysis(input: MaterializeInput): {
       return [{
         id: draft.id,
         category: draft.category,
-        status: fact.status,
+        status: unauthorizedRequirementMutations.has(fact.id) ? "needs_review" as const : fact.status,
         text: fact.value,
         evidence_needed: draft.evidence_needed && assertionTokensSupportedByCitations(draft.evidence_needed, fact.citations)
           ? draft.evidence_needed : null,
@@ -460,6 +608,8 @@ export function materializeAnalysis(input: MaterializeInput): {
       citations
     })
   ));
+  unsupportedItemsRemoved += evaluationReconciliation.unauthorizedMutationIds.length;
+  truthReviewItems += evaluationReconciliation.unauthorizedMutationIds.length;
   const evaluationValues: {
     mandatory_gate: boolean | null;
     rated_threshold: string | null;
@@ -505,6 +655,8 @@ export function materializeAnalysis(input: MaterializeInput): {
     const document = input.documents.find((item) => item.index.documentSha256 === risk.document_sha256);
     const supported = Boolean(document && checked.everyCandidateVerified &&
       citationsMatchDocument(checked.citations, risk.document_sha256) &&
+      proseAssertionSupportedByCitations(risk.finding, checked.citations) &&
+      topicFieldBindingSupported(risk.topic, risk.finding, checked.citations) &&
       assertionTokensSupportedByCitations(
         `${risk.finding} ${risk.impact} ${risk.recommended_action}`,
         checked.citations
@@ -526,18 +678,21 @@ export function materializeAnalysis(input: MaterializeInput): {
     effect: risk.effect,
     citations
   })));
-  const supersededSourceCitations = [
+  unsupportedItemsRemoved += riskReconciliation.unauthorizedMutationIds.length;
+  truthReviewItems += riskReconciliation.unauthorizedMutationIds.length;
+  const supersededSourceFacts = [
     ...claimReconciliation.facts,
     ...requirementReconciliation.facts,
     ...evaluationReconciliation.facts
-  ].filter((fact) => fact.status === "superseded").flatMap((fact) => fact.citations);
+  ].filter((fact) => fact.status === "superseded");
   const risks: AnalysisResult["risks"] = riskReconciliation.facts.flatMap((fact) => {
     const draft = validRiskDrafts.find((item) => item.risk.id === fact.id)?.risk;
     if (!draft || draft.effect === "delete" || fact.status !== "active") return [];
-    const dependsOnSupersededFact = fact.citations.some((riskCitation) =>
-      supersededSourceCitations.some((sourceCitation) =>
-        citationsDescribeSameSourceFact(riskCitation, sourceCitation)
-      )
+    const dependsOnSupersededFact = supersededSourceFacts.some((sourceFact) =>
+      riskSemanticallyDependsOnSupersededFact({
+        ...fact,
+        value: [draft.finding, draft.impact, draft.recommended_action].join(" ")
+      }, sourceFact)
     );
     if (dependsOnSupersededFact) {
       unsupportedItemsRemoved += 1;
@@ -611,21 +766,19 @@ export function materializeAnalysis(input: MaterializeInput): {
     const draft = validClaimDrafts.find((item) => item.claim.claim_id === fact.id)?.claim;
     return draft ? [{ topic: draft.topic, value: fact.value, citations: fact.citations }] : [];
   });
-  const citationHasSummaryAnchor = (field: keyof typeof SUMMARY_TOPIC_PATTERNS, citation: Citation) =>
-    citation.verified && SUMMARY_TOPIC_PATTERNS[field].test(citation.evidence_quote);
   const sourceSupportsSummary = (field: keyof typeof SUMMARY_TOPIC_PATTERNS, value: string | null) => {
     if (value === null) return false;
     const normalized = normalizeEvidenceText(value);
     if (field === "current_selection_method" && evaluationValues.selection_method &&
       normalizeEvidenceText(evaluationValues.selection_method) === normalized &&
-      uniqueEvaluationCitations.some((citation) => citationHasSummaryAnchor(field, citation))) return true;
+      uniqueEvaluationCitations.some((citation) => citationSupportsSummaryValue(field, value, citation))) return true;
     if (field === "scope" && requirements.some((requirement) =>
       requirement.status === "active" && normalizeEvidenceText(requirement.text) === normalized &&
-      requirement.citations.some((citation) => citationHasSummaryAnchor(field, citation))
+      requirement.citations.some((citation) => citationSupportsSummaryValue(field, value, citation))
     )) return true;
     return activeClaimSources.some((source) =>
       SUMMARY_TOPIC_PATTERNS[field].test(source.topic) && normalizeEvidenceText(source.value) === normalized &&
-      source.citations.some((citation) => citationHasSummaryAnchor(field, citation))
+      source.citations.some((citation) => citationSupportsSummaryValue(field, value, citation))
     );
   };
   const safeSummary = {

@@ -104,7 +104,7 @@ left for the root integrator to disposition.
 - Signed uploads bind owner, opaque blob path, declared size, SHA-256, and expiry;
   direct PUT is streamed with a hard byte bound.
 - Run creation/status/result/idempotency/delete, immutable owner identity, allowed
-  state transitions, cleanup gating, budget reservation/settlement, hourly run quota,
+  state transitions, cleanup gating, budget reservation/settlement, daily run quota,
   one-active-run quota, and ten-question quota have automated coverage.
 - OpenAI uses `responses.parse` with `zodTextFormat`, `store:false`, no tools, bounded
   document input, document-only instructions, a 120-second timeout, and no SDK retry.
@@ -174,8 +174,8 @@ left for the root integrator to disposition.
   will supply database/blob/provider/auth/Turnstile secrets through the platform.
 - Live provider execution will use Vercel Pro with Fluid Compute and permit the
   Workflow-generated step endpoint to use the declared 800-second maximum.
-- The product accepts the stricter hourly defaults (3 guest runs/hour, 30 API
-  runs/hour) in addition to one active run and the global daily cost budget.
+- The product enforces daily defaults (3 guest runs/day, 30 API runs/day) in
+  addition to one active run and the global daily cost budget.
 - CanadaBuys is the sole supported URL origin in v1; other PDFs use signed upload.
 
 ## Risks
@@ -508,3 +508,64 @@ deployment gates listed below.
 - Ten live Edmonton timings, one live four-document CER run, deployed load and
   accessibility evidence, and an independent Reviewer `APPROVE` are still required
   before public release or competition-complete claims.
+
+---
+
+## Revision 4 — Evidence Scope, Admission Fencing, and Cleanup Recovery
+
+This candidate responds to the exact-commit review of `97c1417` and two
+incremental adversarial audits. It remains subject to independent exact-commit
+review and does not replace any credentialed provider/deployment gate.
+
+### Implemented Corrections
+
+- Run creation now acquires an atomic admission lease before upload claim,
+  budget reservation, or Workflow start. Idempotent peers cannot schedule or
+  fail the same row concurrently. Stale queued rows are recoverable even when a
+  prior Workflow ID exists.
+- Scheduler delivery errors are treated as ambiguous acknowledgement, not proof
+  of failure. The queued row, source claim, budget reservation, old Workflow ID,
+  and admission lease remain available for a delayed worker or bounded cron
+  retry. Processing CAS still permits only one paid pipeline execution.
+- Claims, requirements, and summary identity/deadline fields bind asserted
+  values to their own label-local source spans. Explicit UTC offsets are
+  objective tokens. Question and closing deadlines cannot borrow each other's
+  dates/timezones across sentences, semicolons, newlines, or comma-delimited
+  question anchors.
+- Deadline reconciliation keys are derived only from a unique cited source
+  clause containing the asserted objective tuple. Model value/topic text cannot
+  manufacture scope from an adjacent solicitation label. Other replace/delete
+  operations require a real mutation verb and source-clause object tokens;
+  unsupported destructive operations become `needs_review` rather than
+  superseding verified history.
+- Stale-risk invalidation checks the complete finding, impact, and recommended
+  action across pages, so a superseded date cannot survive merely by moving into
+  another risk field.
+- Monid parse objects retain only the run ID after copied Markdown is isolated;
+  provider payload, artifact URL, and duplicate Markdown references are cleared.
+- Guest/API run quotas are UTC-day based. Budget settlement is monotonic across
+  retries. Upload quota events receive a bounded, indexed 30-day purge.
+- Source purge reads the durable upload ledger first. If both ledger and object
+  are absent it performs no Blob write; if only an orphan object exists it is
+  conditionally removed. Replay fences require a live matching run claim and a
+  successful ledger update, preventing untracked zero-byte objects.
+
+### Revision 4 Verification
+
+- `pnpm check`: PASS; 22 files passed, 1 optional file skipped; 122 tests passed,
+  3 fixture-dependent tests skipped.
+- Official external fixture audit: PASS, 3/3; all five PDFs remained outside Git.
+- `pnpm build`: PASS; 9 Workflow steps, 3 workflows, and all routes compiled.
+- `CI=1 pnpm test:e2e`: PASS, 14/14 desktop/mobile tests.
+- `pnpm audit --audit-level=high`: PASS at the gate; zero high findings and one
+  moderate development-only transitive esbuild advisory.
+- `git diff --check`: PASS apart from Windows line-ending notices.
+
+### Remaining External Gates
+
+- Apply migration `0004_admission_and_quota_retention.sql` and verify real Neon
+  concurrency/advisory-lock behavior.
+- Verify Vercel Private Blob CAS, signed-PUT expiry, replay fencing, and deletion
+  receipts with credentials.
+- Verify Workflow enqueue ambiguity/recovery, Monid parse/cost/retention, deployed
+  Turnstile, ten Edmonton timings, and the complete live CER package.

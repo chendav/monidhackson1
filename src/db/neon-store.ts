@@ -36,6 +36,10 @@ function toRow(record: RunRecord): typeof runs.$inferInsert {
     result: record.result,
     error: record.error,
     workflowRunId: record.workflowRunId,
+    admissionLeaseId: record.admissionLeaseId,
+    admissionLeaseExpiresAt: record.admissionLeaseExpiresAt
+      ? new Date(record.admissionLeaseExpiresAt)
+      : null,
     processingLeaseId: record.processingLeaseId,
     processingLeaseExpiresAt: record.processingLeaseExpiresAt
       ? new Date(record.processingLeaseExpiresAt)
@@ -76,6 +80,8 @@ function fromRow(row: RunRow): RunRecord {
     result: row.result,
     error: row.error,
     workflowRunId: row.workflowRunId,
+    admissionLeaseId: row.admissionLeaseId,
+    admissionLeaseExpiresAt: row.admissionLeaseExpiresAt?.toISOString() ?? null,
     processingLeaseId: row.processingLeaseId,
     processingLeaseExpiresAt: row.processingLeaseExpiresAt?.toISOString() ?? null,
     processingFence: row.processingFence,
@@ -153,7 +159,7 @@ export class NeonRunStore implements RunStore {
   async update(
     id: string,
     mutate: (record: RunRecord) => RunRecord,
-    claim?: { leaseId: string; fence: number }
+    claim?: { leaseId: string; fence: number } | { admissionLeaseId: string }
   ): Promise<RunRecord> {
     for (let attempt = 0; attempt < 5; attempt += 1) {
       const current = await this.get(id);
@@ -163,12 +169,18 @@ export class NeonRunStore implements RunStore {
       const mutated = mutate(structuredClone(current));
       const next = { ...mutated, version: current.version + 1 };
       const guard = claim
-        ? and(
-            eq(runs.id, id),
-            eq(runs.version, current.version),
-            eq(runs.processingLeaseId, claim.leaseId),
-            eq(runs.processingFence, claim.fence)
-          )
+        ? "admissionLeaseId" in claim
+          ? and(
+              eq(runs.id, id),
+              eq(runs.version, current.version),
+              eq(runs.admissionLeaseId, claim.admissionLeaseId)
+            )
+          : and(
+              eq(runs.id, id),
+              eq(runs.version, current.version),
+              eq(runs.processingLeaseId, claim.leaseId),
+              eq(runs.processingFence, claim.fence)
+            )
         : and(eq(runs.id, id), eq(runs.version, current.version));
       const [updated] = await this.db
         .update(runs)
@@ -181,6 +193,41 @@ export class NeonRunStore implements RunStore {
       httpStatus: 409,
       retryable: true
     });
+  }
+
+  async claimAdmission(
+    id: string,
+    now = new Date(),
+    leaseMs = 2 * 60_000,
+    rescheduleBefore?: Date
+  ) {
+    const admissionLeaseId = crypto.randomUUID();
+    const schedulingGuard = rescheduleBefore
+      ? or(isNull(runs.workflowRunId), lte(runs.updatedAt, rescheduleBefore))
+      : isNull(runs.workflowRunId);
+    const [claimed] = await this.db
+      .update(runs)
+      .set({
+        admissionLeaseId,
+        admissionLeaseExpiresAt: new Date(now.getTime() + leaseMs),
+        updatedAt: now,
+        version: sql`${runs.version} + 1`
+      })
+      .where(and(
+        eq(runs.id, id),
+        eq(runs.status, "queued"),
+        schedulingGuard,
+        or(isNull(runs.admissionLeaseId), lte(runs.admissionLeaseExpiresAt, now))
+      ))
+      .returning();
+    if (!claimed) {
+      const existing = await this.get(id);
+      if (!existing) {
+        throw new AppError("ANALYSIS_INCOMPLETE", "The run was not found.", { httpStatus: 404 });
+      }
+      return null;
+    }
+    return { record: fromRow(claimed), admissionLeaseId };
   }
 
   async claimProcessing(id: string, now = new Date(), leaseMs = 20 * 60_000) {
@@ -232,10 +279,9 @@ export class NeonRunStore implements RunStore {
       .from(runs)
       .where(and(
         eq(runs.status, "queued"),
-        isNull(runs.workflowRunId),
-        lte(runs.createdAt, before)
+        lte(runs.updatedAt, before)
       ))
-      .orderBy(asc(runs.createdAt), asc(runs.id))
+      .orderBy(asc(runs.updatedAt), asc(runs.id))
       .limit(boundedLimit);
     return rows.map(fromRow);
   }

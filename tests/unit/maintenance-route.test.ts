@@ -47,6 +47,7 @@ describe("maintenance cron route", () => {
       ok: true,
       recovered_run_count: 0,
       admission_failure_count: 0,
+      admission_deferred_count: 0,
       expired_run_count: 0
     });
     expect(sweepExpiredIncoming).toHaveBeenCalledOnce();
@@ -85,6 +86,71 @@ describe("maintenance cron route", () => {
     });
     expect(schedule).toHaveBeenCalledExactlyOnceWith(stranded.record.id);
     expect((await store.get(stranded.record.id))?.workflowRunId).toBe("workflow-from-maintenance");
+  });
+
+  it("reschedules a stale queued run whose earlier workflow died before processing claim", async () => {
+    const store = new InMemoryRunStore();
+    const createdAt = new Date("2026-09-02T00:00:00Z");
+    const now = new Date("2026-09-02T00:05:00Z");
+    const stranded = await store.create({
+      ownerId: "guest:dead-workflow", quotaKey: "ip:dead-workflow",
+      input: { documents: [{
+        role: "base", source: { type: "url", url: "https://canadabuys.canada.ca/dead-workflow.pdf" }
+      }] },
+      idempotencyKey: "dead-workflow", reservedMicroUsd: 250_000, now: createdAt
+    });
+    await store.update(stranded.record.id, (record) => ({
+      ...record, workflowRunId: "workflow-that-died-before-claim", updatedAt: createdAt.toISOString()
+    }));
+    const schedule = vi.fn(async () => "replacement-workflow");
+    const response = await handleMaintenance(request(`Bearer ${secret}`), {
+      config,
+      store,
+      budget: new InMemoryBudgetGuard(config),
+      storage: { sweepExpiredIncoming: vi.fn(async () => []) } as unknown as UploadStorage,
+      schedule,
+      now
+    });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ recovered_run_count: 1, admission_failure_count: 0 });
+    expect(schedule).toHaveBeenCalledExactlyOnceWith(stranded.record.id);
+    expect((await store.get(stranded.record.id))?.workflowRunId).toBe("replacement-workflow");
+  });
+
+  it("keeps a delayed old workflow viable when replacement scheduling is uncertain", async () => {
+    const store = new InMemoryRunStore();
+    const createdAt = new Date("2026-09-02T00:00:00Z");
+    const now = new Date("2026-09-02T00:05:00Z");
+    const stranded = await store.create({
+      ownerId: "guest:delayed-workflow", quotaKey: "ip:delayed-workflow",
+      input: { documents: [{
+        role: "base", source: { type: "url", url: "https://canadabuys.canada.ca/delayed-workflow.pdf" }
+      }] },
+      idempotencyKey: "delayed-workflow", reservedMicroUsd: 250_000, now: createdAt
+    });
+    await store.update(stranded.record.id, (record) => ({
+      ...record, workflowRunId: "workflow-still-delayed", updatedAt: createdAt.toISOString()
+    }));
+    const schedule = vi.fn(async () => { throw new Error("enqueue acknowledgement lost"); });
+    const response = await handleMaintenance(request(`Bearer ${secret}`), {
+      config,
+      store,
+      budget: new InMemoryBudgetGuard(config),
+      storage: { sweepExpiredIncoming: vi.fn(async () => []) } as unknown as UploadStorage,
+      schedule,
+      now
+    });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      recovered_run_count: 0,
+      admission_failure_count: 0,
+      admission_deferred_count: 1
+    });
+    expect(await store.get(stranded.record.id)).toMatchObject({
+      status: "queued",
+      workflowRunId: "workflow-still-delayed",
+      cleanupConfirmed: false
+    });
   });
 
   it("is unavailable when CRON_SECRET is not configured", async () => {
