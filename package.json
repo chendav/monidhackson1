@@ -24,6 +24,7 @@
     "probe:database": "node scripts/database-schema-probe.mjs",
     "verify:live": "node scripts/live-verify.mjs",
     "verify:live:recovery": "node scripts/live-recovery-probe.mjs",
+    "verify:live:sigkill-log": "node scripts/vercel-sigkill-log-receipt.mjs",
     "attest:vercel-runtime": "node --env-file-if-exists=.env.local scripts/attest-vercel-runtime.mjs",
     "attest:provider-contracts": "node --env-file-if-exists=.env.local scripts/attest-provider-contracts.mjs",
     "check": "pnpm lint && pnpm typecheck && pnpm test",
