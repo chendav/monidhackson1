@@ -13,6 +13,10 @@ import {
   reconcileVersionedFacts
 } from "@/lib/analysis/reconciliation";
 import {
+  recoverMandatoryTableAnchors,
+  recoverSecurityChecklistConflictAnchors
+} from "@/lib/analysis/source-anchors";
+import {
   allCitationsVerified,
   assertionTokensSupportedByCitations,
   citationsMatchDocument,
@@ -875,6 +879,13 @@ function mandatoryCategorySupported(text: string, citations: Citation[]) {
       proseAssertionSupportedByCitations(text, [{ ...citation, evidence_quote: span }])));
 }
 
+function isMandatoryLocationReference(text: string) {
+  const normalized = normalizePolarityText(text);
+  const pointsToContainer = /\bmandatory\b.{0,80}\b(?:criteria|requirements?)\b.{0,80}\b(?:included|contained|located|set out|found|provided|listed|described)\b.{0,50}\b(?:annex|appendix|attachment|section)\b/.test(normalized);
+  const containsBidderObligation = /\b(?:bidder|offeror|proponent|tenderer)\b.{0,120}\b(?:must|shall|required to)\b/.test(normalized);
+  return pointsToContainer && !containsBidderObligation;
+}
+
 function sourceBackedSupportingDetail(value: string | null, citations: Citation[]) {
   if (!value) return null;
   return assertionTokensSupportedByCitations(value, citations) &&
@@ -889,11 +900,46 @@ export function materializeAnalysis(input: MaterializeInput): {
 } {
   const generatedAt = input.generatedAt ?? new Date();
   const receipts: QuoteVerificationReceipt[] = [];
+  const recoveredClaims = recoverSecurityChecklistConflictAnchors(input.draft, input.documents);
+  const recoveredRequirements = recoverMandatoryTableAnchors(input.draft, input.documents);
+  const recoveredClaimIds = new Set(recoveredClaims.map((claim) => claim.claim_id));
+  const recoveredRequirementIds = new Set(recoveredRequirements.map((requirement) => requirement.id));
+  const securityAnchorKey = (claim: DraftAnalysis["claims"][number]) => {
+    const sourceText = `${claim.topic} ${claim.citations.map((citation) => citation.evidence_quote).join(" ")}`;
+    return /^annex\s+[a-z]$/i.test(claim.claim_text.trim()) &&
+      /security requirements?\s+check\s*list/i.test(sourceText)
+      ? `${claim.document_sha256}:${normalizeEvidenceText(claim.claim_text)}`
+      : null;
+  };
+  const mandatoryAnchorKey = (requirement: DraftAnalysis["requirements"][number]) => {
+    if (requirement.category !== "mandatory") return null;
+    const labels = new Set(requirement.citations.flatMap((citation) => {
+      const normalized = normalizeEvidenceText(citation.section ?? "");
+      return /^m\d{1,3}$/.test(normalized) ? [normalized] : [];
+    }));
+    return labels.size === 1
+      ? `${requirement.document_sha256}:${[...labels][0]}`
+      : null;
+  };
+  const claimAnchorCollisions = input.draft.claims.filter((claim) =>
+    recoveredClaimIds.has(claim.claim_id)
+  ).length;
+  const requirementAnchorCollisions = input.draft.requirements.filter((requirement) =>
+    recoveredRequirementIds.has(requirement.id)
+  ).length;
   let rejectedCitationCandidates = 0;
-  let unsupportedItemsRemoved = 0;
-  let truthReviewItems = 0;
-  const duplicateClaimIds = duplicateIds(input.draft.claims, (claim) => claim.claim_id);
-  const duplicateRequirementIds = duplicateIds(input.draft.requirements, (requirement) => requirement.id);
+  let unsupportedItemsRemoved = claimAnchorCollisions + requirementAnchorCollisions;
+  let truthReviewItems = claimAnchorCollisions + requirementAnchorCollisions;
+  const draftClaims = [
+    ...input.draft.claims.filter((claim) => !recoveredClaimIds.has(claim.claim_id)),
+    ...recoveredClaims
+  ];
+  const draftRequirements = [
+    ...input.draft.requirements.filter((requirement) => !recoveredRequirementIds.has(requirement.id)),
+    ...recoveredRequirements
+  ];
+  const duplicateClaimIds = duplicateIds(draftClaims, (claim) => claim.claim_id);
+  const duplicateRequirementIds = duplicateIds(draftRequirements, (requirement) => requirement.id);
   const duplicateEvaluationIds = duplicateIds(input.draft.evaluation.rules, (rule) => rule.id);
   const duplicateRiskIds = duplicateIds(input.draft.risks, (risk) => risk.id);
   const duplicateIdentityCount = duplicateClaimIds.size + duplicateRequirementIds.size +
@@ -928,7 +974,7 @@ export function materializeAnalysis(input: MaterializeInput): {
   }> = [];
   const reviewClaims: AnalysisResult["claims"] = [];
   let unknownClaimCount = 0;
-  for (const draftClaim of input.draft.claims) {
+  for (const draftClaim of draftClaims) {
     const claim = canonicalizeTypedSourceClaim(draftClaim);
     if (duplicateClaimIds.has(claim.claim_id)) {
       unsupportedItemsRemoved += 1;
@@ -980,7 +1026,16 @@ export function materializeAnalysis(input: MaterializeInput): {
     validClaimDrafts.push({ claim, citations: matchingCitations, document: document! });
   }
 
-  const claimReconciliation = reconcileVersionedFacts(validClaimDrafts.map(({ claim, citations, document }) => ({
+  const verifiedRecoveredSecurityKeys = new Set(validClaimDrafts.flatMap(({ claim }) =>
+    recoveredClaimIds.has(claim.claim_id) ? securityAnchorKey(claim) ?? [] : []
+  ));
+  const reconciledClaimDrafts = validClaimDrafts.filter(({ claim }) =>
+    recoveredClaimIds.has(claim.claim_id) ||
+    !verifiedRecoveredSecurityKeys.has(securityAnchorKey(claim) ?? "")
+  );
+  unsupportedItemsRemoved += validClaimDrafts.length - reconciledClaimDrafts.length;
+
+  const claimReconciliation = reconcileVersionedFacts(reconciledClaimDrafts.map(({ claim, citations, document }) => ({
     id: claim.claim_id,
     topic: claim.topic,
     factKey: deriveDeadlineFactKey(claim.claim_text, citations) ?? deriveSourceFactKey({
@@ -1001,7 +1056,7 @@ export function materializeAnalysis(input: MaterializeInput): {
   truthReviewItems += unauthorizedClaimMutations.size;
   const claims: AnalysisResult["claims"] = [
     ...claimReconciliation.facts.flatMap((fact) => {
-      const draft = validClaimDrafts.find((item) => item.claim.claim_id === fact.id)?.claim;
+      const draft = reconciledClaimDrafts.find((item) => item.claim.claim_id === fact.id)?.claim;
       if (!draft || draft.effect === "delete") return [];
       return [{
         claim_id: fact.id,
@@ -1023,10 +1078,16 @@ export function materializeAnalysis(input: MaterializeInput): {
     category: DraftAnalysis["requirements"][number]["category"];
   }> = [];
   const reviewRequirements: AnalysisResult["requirements"] = [];
-  for (const requirement of input.draft.requirements) {
+  for (const requirement of draftRequirements) {
     if (duplicateRequirementIds.has(requirement.id)) {
       unsupportedItemsRemoved += 1;
       truthReviewItems += 1;
+      continue;
+    }
+    // A cross-reference such as "mandatory criteria are included in Annex D"
+    // locates the real criteria; it is not itself an individual obligation.
+    if (requirement.category === "mandatory" && isMandatoryLocationReference(requirement.text)) {
+      unsupportedItemsRemoved += 1;
       continue;
     }
     const checked = verify(requirement.citations);
@@ -1066,29 +1127,56 @@ export function materializeAnalysis(input: MaterializeInput): {
       category: sourceMarksMandatory ? "mandatory" : requirement.category
     });
   }
-  const requirementReconciliation = reconcileVersionedFacts(validRequirementDrafts.map(
-    ({ requirement, citations, document }) => ({
-      id: requirement.id,
-      topic: requirement.topic,
-      factKey: deriveDeadlineFactKey(requirement.text, citations) ?? deriveSourceFactKey({
-        topic: requirement.topic, value: requirement.text,
-        documentSha256: requirement.document_sha256, citations
-      }) ?? undefined,
-      factKeySource: "derived" as const,
-      value: requirement.text,
-      documentSha256: requirement.document_sha256,
-      documentRole: document.role,
-      amendmentNumber: document.amendmentNumber,
-      effect: requirement.effect,
-      citations
-    })
+  const verifiedRecoveredMandatoryKeys = new Set(validRequirementDrafts.flatMap(({ requirement }) =>
+    recoveredRequirementIds.has(requirement.id) ? mandatoryAnchorKey(requirement) ?? [] : []
+  ));
+  const reconciledRequirementDrafts = validRequirementDrafts.filter(({ requirement }) =>
+    recoveredRequirementIds.has(requirement.id) ||
+    !verifiedRecoveredMandatoryKeys.has(mandatoryAnchorKey(requirement) ?? "")
+  );
+  unsupportedItemsRemoved += validRequirementDrafts.length - reconciledRequirementDrafts.length;
+  const visibleReviewRequirements = reviewRequirements.filter((requirement) => {
+    if (requirement.category !== "mandatory") return true;
+    const labels = new Set(requirement.citations.flatMap((citation) => {
+      const normalized = normalizeEvidenceText(citation.section ?? "");
+      return /^m\d{1,3}$/.test(normalized) ? [normalized] : [];
+    }));
+    const documents = new Set(requirement.citations.map((citation) => citation.document_sha256));
+    const key = labels.size === 1 && documents.size === 1
+      ? `${[...documents][0]}:${[...labels][0]}`
+      : null;
+    return !key || !verifiedRecoveredMandatoryKeys.has(key);
+  });
+  const requirementReconciliation = reconcileVersionedFacts(reconciledRequirementDrafts.map(
+    ({ requirement, citations, document }) => {
+      const recoveredLabel = recoveredRequirementIds.has(requirement.id)
+        ? citations.map((citation) => citation.section).find((section) => /^M\d{1,3}$/i.test(section ?? ""))
+        : null;
+      return {
+        id: requirement.id,
+        topic: requirement.topic,
+        factKey: recoveredLabel
+          ? `document:${requirement.document_sha256}:mandatory:${recoveredLabel.toLowerCase()}`
+          : deriveDeadlineFactKey(requirement.text, citations) ?? deriveSourceFactKey({
+            topic: requirement.topic, value: requirement.text,
+            documentSha256: requirement.document_sha256, citations
+          }) ?? undefined,
+        factKeySource: recoveredLabel ? "validated" as const : "derived" as const,
+        value: requirement.text,
+        documentSha256: requirement.document_sha256,
+        documentRole: document.role,
+        amendmentNumber: document.amendmentNumber,
+        effect: requirement.effect,
+        citations
+      };
+    }
   ));
   const unauthorizedRequirementMutations = new Set(requirementReconciliation.unauthorizedMutationIds);
   unsupportedItemsRemoved += unauthorizedRequirementMutations.size;
   truthReviewItems += unauthorizedRequirementMutations.size;
   const requirements: AnalysisResult["requirements"] = [
     ...requirementReconciliation.facts.flatMap((fact) => {
-      const validated = validRequirementDrafts.find((item) => item.requirement.id === fact.id);
+      const validated = reconciledRequirementDrafts.find((item) => item.requirement.id === fact.id);
       const draft = validated?.requirement;
       if (!draft || !validated || draft.effect === "delete") return [];
       return [{
@@ -1101,7 +1189,7 @@ export function materializeAnalysis(input: MaterializeInput): {
         citations: fact.citations
       }];
     }),
-    ...reviewRequirements
+    ...visibleReviewRequirements
   ];
 
   // Claims and requirements are presentation categories, not independent
@@ -1134,7 +1222,7 @@ export function materializeAnalysis(input: MaterializeInput): {
     if (!effective) continue;
     const unauthorized = packageUnauthorized.has(`claim:${claim.claim_id}`);
     claim.status = unauthorized ? "needs_review" : effective.status;
-    const sourceDraft = validClaimDrafts.find((item) => item.claim.claim_id === claim.claim_id)?.claim;
+    const sourceDraft = reconciledClaimDrafts.find((item) => item.claim.claim_id === claim.claim_id)?.claim;
     if (sourceDraft) claim.claim_type = !unauthorized && effective.status === "conflicted"
       ? "conflict" : sourceDraft.claim_type;
   }
@@ -1374,9 +1462,21 @@ export function materializeAnalysis(input: MaterializeInput): {
 
   const activeClaimSources = effectiveClaimFacts.flatMap((fact) => {
     if (fact.status !== "active") return [];
-    const draft = validClaimDrafts.find((item) => item.claim.claim_id === fact.id)?.claim;
+    const draft = reconciledClaimDrafts.find((item) => item.claim.claim_id === fact.id)?.claim;
     return draft ? [{ topic: draft.topic, value: fact.value, citations: fact.citations }] : [];
   });
+  const uniqueSourceSummaryValue = (field: SummaryField) => {
+    const candidates = activeClaimSources.flatMap((source) =>
+      source.citations.some((citation) => citationSupportsSummaryValue(field, source.value, citation))
+        ? [source.value]
+        : []
+    );
+    const unique = new Map<string, string>();
+    for (const candidate of candidates) {
+      unique.set(normalizeEvidenceText(candidate), candidate);
+    }
+    return unique.size === 1 ? [...unique.values()][0] : null;
+  };
   const sourceSupportsSummary = (field: keyof typeof SUMMARY_TOPIC_PATTERNS, value: string | null) => {
     if (value === null) return false;
     const normalized = normalizeEvidenceText(value);
@@ -1394,24 +1494,31 @@ export function materializeAnalysis(input: MaterializeInput): {
       source.citations.some((citation) => citationSupportsSummaryValue(field, value, citation))
     );
   };
+  const supportedOrUniqueSource = (field: SummaryField, preferred: string | null) =>
+    sourceSupportsSummary(field, preferred) ? preferred : uniqueSourceSummaryValue(field);
   const safeSummary = {
-    title: sourceSupportsSummary("title", input.draft.summary.title)
-      ? input.draft.summary.title : "Document-only RFP analysis",
-    solicitation_number: sourceSupportsSummary("solicitation_number", input.draft.summary.solicitation_number)
-      ? input.draft.summary.solicitation_number : null,
-    issuer: sourceSupportsSummary("issuer", input.draft.summary.issuer) ? input.draft.summary.issuer : null,
-    closing_date: sourceSupportsSummary("closing_date", input.draft.summary.closing_date)
-      ? input.draft.summary.closing_date : null,
+    title: supportedOrUniqueSource("title", input.draft.summary.title)
+      ?? "Document-only RFP analysis",
+    solicitation_number: supportedOrUniqueSource(
+      "solicitation_number",
+      input.draft.summary.solicitation_number
+    ),
+    issuer: supportedOrUniqueSource("issuer", input.draft.summary.issuer),
+    closing_date: supportedOrUniqueSource("closing_date", input.draft.summary.closing_date),
     overview: sourceSupportsSummary("overview", input.draft.summary.overview)
       ? input.draft.summary.overview
       : "Only server-verified, cited facts from the supplied documents are included below.",
     scope: input.draft.summary.scope.filter((item) => sourceSupportsSummary("scope", item)),
-    submission_method: sourceSupportsSummary("submission_method", input.draft.summary.submission_method)
-      ? input.draft.summary.submission_method : null,
+    submission_method: supportedOrUniqueSource(
+      "submission_method",
+      input.draft.summary.submission_method
+    ),
     current_selection_method: sourceSupportsSummary(
       "current_selection_method",
       input.draft.summary.current_selection_method
-    ) ? input.draft.summary.current_selection_method : null
+    )
+      ? input.draft.summary.current_selection_method
+      : evaluationValues.selection_method
   };
 
   const activeRequirements = requirements.filter((requirement) => requirement.status === "active");
@@ -1445,7 +1552,7 @@ export function materializeAnalysis(input: MaterializeInput): {
   ));
   const draftEvaluationFields = new Set(input.draft.evaluation.rules
     .filter((rule) => rule.effect !== "delete").map((rule) => rule.field)).size;
-  const criticalClaims = input.draft.requirements.filter((item) => item.effect !== "delete").length +
+  const criticalClaims = draftRequirements.filter((item) => item.effect !== "delete").length +
     input.draft.risks.filter((risk) => risk.effect !== "delete" && risk.severity !== "low").length +
     draftEvaluationFields + conflicts.length;
   const criticalClaimsCited = activeRequirements.length +

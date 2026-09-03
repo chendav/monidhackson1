@@ -2775,6 +2775,218 @@ describe("server-owned materialization and reconciliation", () => {
     expect(result.summary.title).toBe("Document-only RFP analysis");
   });
 
+  it("recovers unique summary identity values from active verified source claims", () => {
+    const cover = "RFP title: Repair & Maintenance on various File Bays. " +
+      "Solicitation number: 100022184-A. Issuer: Employment and Social Development Canada. " +
+      "The bidder must submit a signed form. A bid that fails a mandatory requirement will be non-compliant.";
+    const value = addMinimumCoverage(draft([]));
+    value.summary = {
+      title: "", solicitation_number: null, issuer: null, closing_date: null,
+      overview: "", scope: [], submission_method: null, current_selection_method: null
+    };
+    value.claims = [
+      {
+        claim_id: "cover-title-fallback", topic: "package identity fact",
+        claim_text: "Repair & Maintenance on various File Bays", claim_type: "source",
+        confidence: 1, document_sha256: baseSha, amendment_number: null, effect: "add",
+        citations: [citation(baseSha, "RFP title: Repair & Maintenance on various File Bays")],
+        supersedes_claim_ids: []
+      },
+      {
+        claim_id: "cover-number-fallback", topic: "package identity fact",
+        claim_text: "100022184-A", claim_type: "source", confidence: 1,
+        document_sha256: baseSha, amendment_number: null, effect: "add",
+        citations: [citation(baseSha, "Solicitation number: 100022184-A")],
+        supersedes_claim_ids: []
+      },
+      {
+        claim_id: "cover-issuer-fallback", topic: "package identity fact",
+        claim_text: "Employment and Social Development Canada", claim_type: "source",
+        confidence: 1, document_sha256: baseSha, amendment_number: null, effect: "add",
+        citations: [citation(baseSha, "Issuer: Employment and Social Development Canada")],
+        supersedes_claim_ids: []
+      }
+    ];
+    const result = materializeAnalysis({
+      draft: value,
+      documents: [{ name: "base.pdf", sourceUrl: null, index: index(baseSha, [cover]),
+        role: "base", amendmentNumber: null }],
+      manifests: [manifests[0]], costs: [], expiresAt: new Date("2026-09-03T00:00:00Z")
+    }).result;
+
+    expect(result.summary).toMatchObject({
+      title: "Repair & Maintenance on various File Bays",
+      solicitation_number: "100022184-A",
+      issuer: "Employment and Social Development Canada"
+    });
+  });
+
+  it("does not publish a container pointer as an individual mandatory requirement", () => {
+    const pointer = "Mandatory technical evaluation criteria are included in Annex D.";
+    const value = addMinimumCoverage(draft([{
+      id: "mandatory-container-pointer", topic: "mandatory technical evaluation criteria",
+      document_sha256: baseSha, amendment_number: null, effect: "add", category: "mandatory",
+      text: pointer, evidence_needed: null, consequence: null,
+      citations: [citation(baseSha, pointer)]
+    }]));
+    const result = materializeAnalysis({
+      draft: value,
+      documents: [{ name: "base.pdf", sourceUrl: null,
+        index: index(baseSha, [pointer,
+          "The bidder must submit a signed form. A bid that fails a mandatory requirement will be non-compliant."]),
+        role: "base", amendmentNumber: null }],
+      manifests: [manifests[0]], costs: [], expiresAt: new Date("2026-09-03T00:00:00Z")
+    }).result;
+
+    expect(result.requirements.find((item) => item.id === "mandatory-container-pointer"))
+      .toBeUndefined();
+  });
+
+  it("keeps a clean M3 obligation active when PDF text splits one glyph from completing", () => {
+    const modelText = "The Bidder must propose up to three (3) resources and provide detailed resumes for each, " +
+      "which highlight each resource's experience completing preventive maintenance and repairs on file bay equipment.";
+    const sourceText = modelText.replace("completing", "completin g");
+    const value = draft([{
+      id: "m3-resources", topic: "M3 mandatory criterion", document_sha256: baseSha,
+      amendment_number: null, effect: "add", category: "mandatory", text: modelText,
+      evidence_needed: null, consequence: null,
+      citations: [{ ...citation(baseSha, modelText), section: "M3" }]
+    }]);
+    const result = materializeAnalysis({
+      draft: value,
+      documents: [{ name: "base.pdf", sourceUrl: null,
+        index: index(baseSha, [`Evaluation item M3 ${sourceText}`]),
+        role: "base", amendmentNumber: null }],
+      manifests: [manifests[0]], costs: [], expiresAt: new Date("2026-09-03T00:00:00Z")
+    }).result;
+
+    expect(result.requirements.find((item) => item.id === "m3-resources")).toMatchObject({
+      category: "mandatory",
+      status: "active",
+      text: modelText,
+      citations: [{ pdf_page_1based: 1, verification_method: "normalized" }]
+    });
+  });
+
+  it("keeps independently recovered M1-M4 active without merging them into a false conflict", () => {
+    const table = "Mandatory Criteria " +
+      "M1 The bidder must demonstrate relevant experience. " +
+      "M2 The bidder must provide a service plan. " +
+      "M3 The bidder must propose up to three (3) resources and provide detailed resumes for each. " +
+      "M4 The bidder must provide manufacturer validation. ANNEX E - OTHER";
+    const result = materializeAnalysis({
+      draft: draft([]),
+      documents: [{ name: "base.pdf", sourceUrl: null, index: index(baseSha, [table]),
+        role: "base", amendmentNumber: null }],
+      manifests: [manifests[0]], costs: [], expiresAt: new Date("2026-09-03T00:00:00Z")
+    }).result;
+    const mandatory = result.requirements.filter((item) =>
+      item.category === "mandatory" && item.status === "active"
+    );
+
+    expect(mandatory).toHaveLength(4);
+    expect(mandatory.map((item) => item.id)).toEqual([
+      `server-anchor-${baseSha.slice(0, 12)}-p1-M1`,
+      `server-anchor-${baseSha.slice(0, 12)}-p1-M2`,
+      `server-anchor-${baseSha.slice(0, 12)}-p1-M3`,
+      `server-anchor-${baseSha.slice(0, 12)}-p1-M4`
+    ]);
+    expect(result.conflicts).toEqual([]);
+  });
+
+  it("lets verified server M1-M4 survive a wrong-citation model primary and an ID collision", () => {
+    const table = "Mandatory Criteria " +
+      "M1 The bidder must demonstrate relevant experience. " +
+      "M2 The bidder must provide a service plan. " +
+      "M3 The bidder must propose up to three (3) resources and provide detailed resumes for each. " +
+      "M4 The bidder must provide manufacturer validation. ANNEX E - OTHER";
+    const value = draft([
+      {
+        id: "model-m3-wrong-citation", topic: "M3 mandatory criterion",
+        document_sha256: baseSha, amendment_number: null, effect: "add", category: "mandatory",
+        text: "The bidder must propose up to three (3) resources and provide detailed resumes for each.",
+        evidence_needed: null, consequence: null,
+        citations: [{ ...citation(baseSha, "This quote is not in the source."), section: "M3" }]
+      },
+      {
+        id: `server-anchor-${baseSha.slice(0, 12)}-p1-M3`, topic: "forged server identity",
+        document_sha256: baseSha, amendment_number: null, effect: "add", category: "mandatory",
+        text: "The bidder must propose exactly three resources.", evidence_needed: null,
+        consequence: null, citations: [{ ...citation(baseSha, table), section: "M3" }]
+      }
+    ]);
+    const result = materializeAnalysis({
+      draft: value,
+      documents: [{ name: "base.pdf", sourceUrl: null, index: index(baseSha, [table]),
+        role: "base", amendmentNumber: null }],
+      manifests: [manifests[0]], costs: [], expiresAt: new Date("2026-09-03T00:00:00Z")
+    }).result;
+    const mandatory = result.requirements.filter((item) =>
+      item.category === "mandatory" && item.status === "active"
+    );
+
+    expect(mandatory).toHaveLength(4);
+    expect(mandatory.find((item) => item.id.endsWith("-M3"))?.text)
+      .toContain("up to three (3)");
+    expect(JSON.stringify(result.requirements)).not.toContain("exactly three");
+    expect(result.blocking_unknowns)
+      .toContain("One or more extracted items failed source, scalar, or field-specific evidence validation.");
+  });
+
+  it("materializes a security-checklist conflict even when the model omits both anchors", () => {
+    const annexD = "The Contractor must comply with the provisions of the: Security Requirements Check List " +
+      "and security guide (if applicable), attached at Annex D;";
+    const annexE = "M4 The Bidder must provide manufacturer validation. " +
+      "ANNEX \u201cE\u201d - SECURITY REQUIREMENTS CHECK LIST";
+    const value = addMinimumCoverage(draft([]));
+    const result = materializeAnalysis({
+      draft: value,
+      documents: [{ name: "base.pdf", sourceUrl: null,
+        index: index(baseSha, [annexD, annexE,
+          "The bidder must submit a signed form. A bid that fails a mandatory requirement will be non-compliant."]),
+        role: "base", amendmentNumber: null }],
+      manifests: [manifests[0]], costs: [], expiresAt: new Date("2026-09-03T00:00:00Z")
+    }).result;
+
+    expect(result.conflicts).toHaveLength(1);
+    expect(new Set(result.conflicts[0]?.candidate_values)).toEqual(new Set(["Annex D", "Annex E"]));
+    expect(result.conflicts[0]?.citations.map((item) => item.pdf_page_1based).toSorted())
+      .toEqual([1, 2]);
+    expect(result.conflicts[0]?.safe_answer)
+      .toBe("The supplied document is internally inconsistent; clarification is required.");
+  });
+
+  it.each([
+    "ANNEX E - SECURITY REQUIREMENTS CHECKLIST",
+    "ANNEX \u201cE\u201d - SECURITY REQUIREMENTS CHECK LIST ............ 43"
+  ])("does not let a model E claim suppress the physical Annex E anchor: %s", (modelQuote) => {
+    const toc = "ANNEX \u201cE\u201d - SECURITY REQUIREMENTS CHECK LIST ............ 43";
+    const annexD = "The Contractor must comply with the provisions of the: Security Requirements Check List " +
+      "and security guide (if applicable), attached at Annex D;";
+    const annexE = "M4 The Bidder must provide manufacturer validation. " +
+      "ANNEX \u201cE\u201d - SECURITY REQUIREMENTS CHECK LIST";
+    const value = addMinimumCoverage(draft([]));
+    value.claims = [{
+      claim_id: "model-annex-e", topic: "security requirements checklist annex label",
+      claim_text: "Annex E", claim_type: "source", confidence: 1,
+      document_sha256: baseSha, amendment_number: null, effect: "add",
+      citations: [citation(baseSha, modelQuote)], supersedes_claim_ids: []
+    }];
+    const result = materializeAnalysis({
+      draft: value,
+      documents: [{ name: "base.pdf", sourceUrl: null,
+        index: index(baseSha, [toc, annexD, annexE,
+          "The bidder must submit a signed form. A bid that fails a mandatory requirement will be non-compliant."]),
+        role: "base", amendmentNumber: null }],
+      manifests: [manifests[0]], costs: [], expiresAt: new Date("2026-09-03T00:00:00Z")
+    }).result;
+
+    expect(result.conflicts).toHaveLength(1);
+    expect(new Set(result.conflicts[0]?.candidate_values)).toEqual(new Set(["Annex D", "Annex E"]));
+    expect(result.conflicts[0]?.citations.map((item) => item.pdf_page_1based).toSorted())
+      .toEqual([2, 3]);
+  });
+
   it.each([
     "If applicable, the Security Requirements Check List is attached at Annex D",
     "The Security Requirements Check List is not attached at Annex D",

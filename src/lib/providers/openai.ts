@@ -411,13 +411,27 @@ export function mergeDrafts(drafts: DraftAnalysis[]): DraftAnalysis {
   if (drafts.length === 0) {
     throw new AppError("ANALYSIS_INCOMPLETE", "The model returned no analysis batches.");
   }
-  const summaryScore = (summary: DraftAnalysis["summary"]) =>
-    [summary.title, summary.solicitation_number, summary.issuer, summary.closing_date,
-      summary.overview, summary.submission_method, summary.current_selection_method]
-      .filter((value) => value !== null && value.trim().length > 0).length + summary.scope.length;
-  const selectedSummary = drafts.reduce((selected, draft) =>
-    summaryScore(draft.summary) >= summaryScore(selected.summary) ? draft : selected
-  ).summary;
+  const firstPopulated = (values: Array<string | null>) =>
+    values.find((value): value is string => value !== null && value.trim().length > 0) ?? null;
+  const lastPopulated = (values: Array<string | null>) =>
+    [...values].reverse().find((value): value is string => value !== null && value.trim().length > 0) ?? null;
+  // A later body batch must not erase cover fields just because it contains a
+  // longer scope summary. Fields that amendments can legitimately replace use
+  // the last populated value; stable package identity comes from the first.
+  const selectedSummary: DraftAnalysis["summary"] = {
+    title: firstPopulated(drafts.map((draft) => draft.summary.title)) ?? "",
+    solicitation_number: firstPopulated(drafts.map((draft) => draft.summary.solicitation_number)),
+    issuer: firstPopulated(drafts.map((draft) => draft.summary.issuer)),
+    closing_date: lastPopulated(drafts.map((draft) => draft.summary.closing_date)),
+    overview: drafts.map((draft) => draft.summary.overview)
+      .filter((value) => value.trim().length > 0)
+      .sort((left, right) => right.length - left.length)[0] ?? "",
+    scope: uniqueBySerialization(drafts.flatMap((draft) => draft.summary.scope)),
+    submission_method: lastPopulated(drafts.map((draft) => draft.summary.submission_method)),
+    current_selection_method: lastPopulated(
+      drafts.map((draft) => draft.summary.current_selection_method)
+    )
+  };
   const claims = boundedMergedArray("claims", drafts.flatMap((draft) => draft.claims), 1_000);
   const requirements = boundedMergedArray(
     "requirements",

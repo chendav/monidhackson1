@@ -475,6 +475,42 @@ describe("OpenAI Responses structured output adapter", () => {
     ]);
   });
 
+  it("merges summary fields without letting a later body batch erase cover identity", () => {
+    const cover = emptyDraft();
+    cover.summary = {
+      title: "Repair & Maintenance on various File Bays",
+      solicitation_number: "100022184-A",
+      issuer: "Employment and Social Development Canada",
+      closing_date: "June 19, 2023",
+      overview: "Cover summary",
+      scope: [],
+      submission_method: "email",
+      current_selection_method: null
+    };
+    const body = emptyDraft();
+    body.summary = {
+      title: "",
+      solicitation_number: null,
+      issuer: null,
+      closing_date: null,
+      overview: "A longer body overview that previously won the whole-summary tie break.",
+      scope: ["Preventative maintenance"],
+      submission_method: null,
+      current_selection_method: "lowest evaluated price"
+    };
+
+    expect(mergeDrafts([cover, body]).summary).toEqual({
+      title: "Repair & Maintenance on various File Bays",
+      solicitation_number: "100022184-A",
+      issuer: "Employment and Social Development Canada",
+      closing_date: "June 19, 2023",
+      overview: "A longer body overview that previously won the whole-summary tie break.",
+      scope: ["Preventative maintenance"],
+      submission_method: "email",
+      current_selection_method: "lowest evaluated price"
+    });
+  });
+
   it("assigns content-bound identities when independent batches reuse a model ID", () => {
     const first = emptyDraft();
     first.risks = [{

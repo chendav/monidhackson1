@@ -18,6 +18,29 @@ const index: PdfPageIndex = {
 };
 const documents = [{ name: "source.pdf", sourceUrl: null, index }];
 
+const m3Quote = "The Bidder must propose up to three (3) resources and provide detailed resumes for each, " +
+  "which highlight each resource's experience completing preventive maintenance and repairs on file bay equipment.";
+const fragmentedM3Source = m3Quote.replace("completing", "completin g");
+
+function documentsWithPages(pages: Array<{ number: number; text: string }>) {
+  const fragmentedIndex: PdfPageIndex = {
+    documentSha256: documentSha,
+    representationSha256: sha256Hex(pages.map((page) => page.text).join("\n")),
+    pagesTotal: Math.max(...pages.map((page) => page.number)),
+    pages: pages.map((page) => ({
+      pdfPage1Based: page.number,
+      printedPageLabel: null,
+      text: page.text,
+      normalizedText: normalizeEvidenceText(page.text),
+      representationSha256: sha256Hex(normalizeEvidenceText(page.text))
+    })),
+    chunks: [],
+    embeddedJavaScriptDetected: false,
+    indexVersion: "pdfjs-1based-v1"
+  };
+  return [{ name: "source.pdf", sourceUrl: null, index: fragmentedIndex }];
+}
+
 describe("SHA-bound citation verification", () => {
   it("attaches the server-determined 1-based physical page and receipt hashes", () => {
     const verified = verifyCitation({
@@ -49,6 +72,71 @@ describe("SHA-bound citation verification", () => {
     }, documents).citation.verification_method).toBe("normalized");
     expect(verifyCitation({ documentSha256: "b".repeat(64), evidenceQuote: "Cover material." }, documents).citation.verified).toBe(false);
     expect(verifyCitation({ documentSha256: documentSha, evidenceQuote: "Invented fact" }, documents).citation).toMatchObject({
+      verified: false,
+      pdf_page_1based: null,
+      verification_method: "manual_required"
+    });
+  });
+
+  it("rejoins a single-letter PDF word fragment only when the complete quote uniquely matches", () => {
+    const verified = verifyCitation({
+      documentSha256: documentSha,
+      evidenceQuote: m3Quote,
+      section: "M3"
+    }, documentsWithPages([{ number: 43, text: fragmentedM3Source }]));
+
+    expect(verified.citation).toMatchObject({
+      pdf_page_1based: 43,
+      section: "M3",
+      verified: true,
+      verification_method: "normalized"
+    });
+    expect(verified.receipt).toMatchObject({ pdfPage1Based: 43, verified: true, method: "normalized" });
+  });
+
+  it("does not use PDF word-fragment repair for semantic substitutions", () => {
+    const fragmentedDocuments = documentsWithPages([{ number: 43, text: fragmentedM3Source }]);
+    for (const evidenceQuote of [
+      m3Quote.replace("up to three", "exactly three"),
+      m3Quote.replace("preventive maintenance", "corrective maintenance")
+    ]) {
+      expect(verifyCitation({ documentSha256: documentSha, evidenceQuote }, fragmentedDocuments).citation)
+        .toMatchObject({
+          verified: false,
+          pdf_page_1based: null,
+          verification_method: "manual_required"
+        });
+    }
+  });
+
+  it("rejects a repaired quote that occurs on more than one physical page", () => {
+    const duplicatedDocuments = documentsWithPages([
+      { number: 42, text: fragmentedM3Source },
+      { number: 43, text: fragmentedM3Source }
+    ]);
+
+    expect(verifyCitation({
+      documentSha256: documentSha,
+      evidenceQuote: m3Quote,
+      section: "M3"
+    }, duplicatedDocuments).citation).toMatchObject({
+      verified: false,
+      pdf_page_1based: null,
+      verification_method: "manual_required"
+    });
+  });
+
+  it("rejects a quote duplicated once exactly and once through a PDF word split", () => {
+    const duplicatedDocuments = documentsWithPages([
+      { number: 42, text: m3Quote },
+      { number: 43, text: fragmentedM3Source }
+    ]);
+
+    expect(verifyCitation({
+      documentSha256: documentSha,
+      evidenceQuote: m3Quote,
+      section: "M3"
+    }, duplicatedDocuments).citation).toMatchObject({
       verified: false,
       pdf_page_1based: null,
       verification_method: "manual_required"

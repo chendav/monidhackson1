@@ -202,6 +202,69 @@ export function assertionTokensSupportedByCitations(
   return [...asserted].every((token) => evidence.has(token));
 }
 
+const NORMALIZED_LEXEME = /[\p{L}\p{N}]+|[^\s\p{L}\p{N}]/gu;
+const ALPHABETIC_LEXEME = /^\p{L}+$/u;
+const MAX_PDF_WORD_FRAGMENTS = 3;
+const MIN_REPAIRED_QUOTE_LENGTH = 24;
+
+function normalizedLexemes(value: string): string[] {
+  return value.match(NORMALIZED_LEXEME) ?? [];
+}
+
+/**
+ * Match an otherwise exact normalized quote while tolerating only PDF text
+ * items that split a single source word. The candidate controls the word that
+ * may be reconstructed; source fragments may never be changed or skipped.
+ */
+function containsWithPdfWordFragmentRepair(pageText: string, quote: string): boolean {
+  if (quote.length < MIN_REPAIRED_QUOTE_LENGTH) return false;
+  const pageLexemes = normalizedLexemes(pageText);
+  const quoteLexemes = normalizedLexemes(quote);
+  if (quoteLexemes.length === 0 || quoteLexemes.length > pageLexemes.length) return false;
+
+  for (let start = 0; start < pageLexemes.length; start += 1) {
+    let pageIndex = start;
+    let usedRepair = false;
+    let matched = true;
+
+    for (const quoteLexeme of quoteLexemes) {
+      if (pageLexemes[pageIndex] === quoteLexeme) {
+        pageIndex += 1;
+        continue;
+      }
+      if (!ALPHABETIC_LEXEME.test(quoteLexeme) || quoteLexeme.length < 4) {
+        matched = false;
+        break;
+      }
+
+      let joined = "";
+      const fragmentLengths: number[] = [];
+      let repairedEnd: number | null = null;
+      for (let offset = 0; offset < MAX_PDF_WORD_FRAGMENTS; offset += 1) {
+        const fragment = pageLexemes[pageIndex + offset];
+        if (!fragment || !ALPHABETIC_LEXEME.test(fragment)) break;
+        joined += fragment;
+        fragmentLengths.push(fragment.length);
+        if (!quoteLexeme.startsWith(joined)) break;
+        if (offset > 0 && joined === quoteLexeme &&
+          fragmentLengths.includes(1) && fragmentLengths.some((length) => length >= 3)) {
+          repairedEnd = pageIndex + offset + 1;
+          break;
+        }
+      }
+      if (repairedEnd === null) {
+        matched = false;
+        break;
+      }
+      usedRepair = true;
+      pageIndex = repairedEnd;
+    }
+
+    if (matched && usedRepair) return true;
+  }
+  return false;
+}
+
 function findPage(
   candidate: CitationCandidate,
   index: PdfPageIndex
@@ -219,13 +282,29 @@ function findPage(
     if (matchingPages.length === 1) candidatePages = matchingPages;
   }
 
-  const exact = candidatePages.filter((page) => page.text.includes(quote));
-  if (exact.length === 1) return { page: exact[0], method: "exact" };
-
   const normalizedQuote = normalizeEvidenceText(quote);
+  const exact = candidatePages.filter((page) => page.text.includes(quote));
+  const repaired = candidatePages.filter((page) =>
+    containsWithPdfWordFragmentRepair(page.normalizedText, normalizedQuote)
+  );
+  if (exact.length === 1 && repaired.every((page) => page === exact[0])) {
+    return { page: exact[0], method: "exact" };
+  }
+
   if (normalizedQuote.length < 8) return { page: undefined, method: "manual_required" };
   const normalized = candidatePages.filter((page) => page.normalizedText.includes(normalizedQuote));
-  if (normalized.length === 1) return { page: normalized[0], method: "normalized" };
+  const normalizedOrRepaired = new Set([...normalized, ...repaired]);
+  if (normalizedOrRepaired.size === 1) {
+    return { page: [...normalizedOrRepaired][0], method: "normalized" };
+  }
+
+  // PDF.js can occasionally expose one glyph as a separate text item and our
+  // page index then contains an artificial intra-word space (for example,
+  // `completin g`). Permit only an exact token-sequence match where two or
+  // three adjacent alphabetic source fragments concatenate to one complete
+  // candidate word, with at least one single-letter fragment. No spelling,
+  // token, or semantic substitutions are allowed, and the complete quote must
+  // still identify exactly one physical page.
   return { page: undefined, method: "manual_required" };
 }
 
