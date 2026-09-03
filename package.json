@@ -2,6 +2,7 @@
   "name": "rfp-xray",
   "version": "0.1.0",
   "private": true,
+  "type": "module",
   "description": "Document-only, evidence-backed tender analysis powered by Monid.",
   "packageManager": "pnpm@10.14.0",
   "engines": {
