@@ -28,6 +28,7 @@ const runnerPromise = import(
   new URL("../../scripts/live-recovery-probe.mjs", import.meta.url).href
 ) as Promise<{
   REDELIVERY_PROBE_WORKFLOW_ID: string;
+  RECOVERY_LIST_PAGE_SIZE: number;
   RecoveryProbeError: new (code: string, stage: string) => Error & {
     code: string;
     stage: string;
@@ -121,6 +122,11 @@ function materializedStep(runId: string, stepId: string, overrides: Record<strin
 }
 
 describe("provider-free live Workflow recovery verifier", () => {
+  it("keeps remote list pages within the Vercel Workflow API cap", async () => {
+    const runner = await runnerPromise;
+    expect(runner.RECOVERY_LIST_PAGE_SIZE).toBe(100);
+  });
+
   it("requires explicit Preview opt-in and exact immutable bindings", async () => {
     const runner = await runnerPromise;
     const parsed = runner.parseRecoveryProbeOptions(environment());

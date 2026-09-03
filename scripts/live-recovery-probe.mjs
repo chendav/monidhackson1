@@ -32,6 +32,7 @@ const MAX_TOTAL_TIMEOUT_MS = 7 * 60_000;
 const DEFAULT_START_ACK_TIMEOUT_MS = 45_000;
 const DEFAULT_POLL_INTERVAL_MS = 2_000;
 const MAX_EVENT_PAGES = 10;
+export const RECOVERY_LIST_PAGE_SIZE = 100;
 const VERCEL_API_ORIGIN = "https://api.vercel.com";
 const PRICING_OBSERVED_AT = "2026-09-03T00:00:00.000Z";
 
@@ -514,7 +515,11 @@ async function listAllEvents(world, runId, deadline) {
     const response = await withDeadline(
       world.events.list({
         runId,
-        pagination: { limit: 1000, sortOrder: "asc", ...(cursor ? { cursor } : {}) },
+        pagination: {
+          limit: RECOVERY_LIST_PAGE_SIZE,
+          sortOrder: "asc",
+          ...(cursor ? { cursor } : {})
+        },
         resolveData: "none"
       }),
       deadline,
@@ -538,7 +543,11 @@ async function listAllSteps(world, runId, deadline) {
     const response = await withDeadline(
       world.steps.list({
         runId,
-        pagination: { limit: 1000, sortOrder: "asc", ...(cursor ? { cursor } : {}) },
+        pagination: {
+          limit: RECOVERY_LIST_PAGE_SIZE,
+          sortOrder: "asc",
+          ...(cursor ? { cursor } : {})
+        },
         resolveData: "none"
       }),
       deadline,
