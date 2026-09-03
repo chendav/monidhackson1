@@ -416,9 +416,13 @@ verdict.
   source evidence. Package completeness is conservatively `unverified` without an
   authoritative inventory and `incomplete` for missing/mixed solicitation metadata,
   amendment gaps, or duplicates.
-- A latest credentialed token-count probe verified the pinned `gpt-5.4-mini` and
-  `beta.responses.inputTokens.count` endpoint (`input_tokens=16`). Structured live
-  extraction, Monid, Neon, Blob, Turnstile, Workflow, and deployment remain unverified.
+- A credentialed token-count probe verified the pinned `gpt-5.4-mini` and
+  `beta.responses.inputTokens.count` endpoint (`input_tokens=16`). A second paid
+  probe used only synthetic tender text and the exact `DraftAnalysisSchema`; live
+  `responses.parse` returned schema-valid output with 1,063 input tokens, 1,168
+  output tokens, 4 claims, 2 requirements, and 2 independently structured
+  evaluation rules. This proves endpoint/schema compatibility, not RFP recall.
+  Monid, Neon, Blob, Turnstile, Workflow, and deployment remain unverified.
 
 ### Latest Integrated Verification
 
@@ -431,3 +435,76 @@ verdict.
 - `pnpm audit --audit-level=high`: PASS at the configured gate; zero high findings,
   one moderate advisory.
 - `git diff --check`: PASS; only Git's Windows LF-to-CRLF notices were emitted.
+
+---
+
+## Revision 3 — Release-Candidate Truth, Recovery, and Upload Admission
+
+This working-tree revision responds to the exact-commit review of `230e382` and
+the specialist adversarial/security audits. It is a candidate for independent
+re-review, not a self-certification, and it does not resolve the credentialed
+deployment gates listed below.
+
+### Implemented Corrections
+
+- Every copied `modelInput[].parsed_markdown` value is cleared in a `finally`
+  immediately after extraction. Cancellation after a paid call settles at least
+  the locally observed Monid/model cost even when the revoked processing fence
+  correctly blocks any later run-row write.
+- OpenAI token preflight and all sequential extraction batches now share one
+  aggregate 120-second monotonic deadline; each SDK call receives only the
+  remaining time and `maxRetries:0`. Q&A similarly shares one 20-second phase
+  deadline. A deterministic multi-batch test proves a second batch is not
+  started after the shared deadline is exhausted.
+- Run admission is resumable. An idempotent replay of `queued` plus null
+  `workflowRunId` repeats upload claim and budget reserve idempotently and starts
+  Workflow. The authenticated five-minute maintenance path also recovers a
+  bounded, indexed set of stranded admissions after a one-minute grace period.
+  Duplicate Workflow starts remain provider-safe because the run processing CAS
+  lease admits only one worker.
+- Neon budget reservation now treats an exact existing `run_id` reservation as
+  a successful idempotent replay rather than misclassifying it as exhausted.
+- Independent model batches that reuse IDs such as `risk-1` receive deterministic
+  content-bound IDs before materialization. Direct ambiguous duplicates are
+  withheld. A model-provided `supersedes_claim_ids` value is never mutation
+  authority, and replace/delete behavior requires verified amendment operation
+  language or a verified same-stage structural replacement directive.
+- Server-derived projection-horizon semantics catch the CER 2050/2055 conflict
+  even when model topics drift. Structural M3 rows remain row-scoped; the verified
+  blanket Appendix 1 replacement authorizes all 37 replacement rows. Risks whose
+  cited source clause is superseded are withheld even when the model omits a
+  corresponding risk tombstone.
+- Technical and financial percentages are bound to their labels; a swapped 30/70
+  pair is rejected. Rated thresholds bind minimum and scale separately, so 50/94
+  is accepted and 94-as-threshold is rejected. Summary fields require an anchor in
+  the verified quote, and timezone/currency/percentage/magnitude/bound modifiers
+  must agree with evidence.
+- Presign issuance has durable atomic quotas: five outstanding grants per owner,
+  guest/API daily document and byte limits, and a global daily byte limit. Neon
+  advisory locks serialize owner, quota-key, and global boundaries. Grant cleanup
+  releases the outstanding count while a separate quota event retains daily usage;
+  a rejected quota attempt creates neither a grant row nor a signed PUT URL.
+
+### Revision 3 Verification
+
+- `pnpm check`: PASS; 22 files passed, 1 optional file skipped; 104 tests passed,
+  3 skipped.
+- Official fixture audit with `RFP_XRAY_FIXTURE_DIR` set: PASS, 3/3. Edmonton and
+  all four CER package PDFs stayed outside Git.
+- `pnpm build`: PASS; 9 Workflow steps, 3 workflows, and all public/internal routes
+  compiled.
+- `CI=1 pnpm test:e2e`: PASS, 14/14 desktop/mobile tests.
+- `pnpm audit --audit-level=high`: PASS at the requested gate; zero high and one
+  moderate advisory.
+- Focused deadline, cancellation, admission recovery, evidence binding,
+  reconciliation, stale-risk, upload quota, and Blob recovery tests all pass.
+
+### Remaining External Gates
+
+- Monid inspect/parse/artifact/cost/retention behavior, Vercel Private Blob
+  replay-fence/CAS behavior, Neon migrations/concurrency, Workflow crash/cron
+  behavior, Turnstile, and deployed Vercel Pro/Fluid duration are not credentialed
+  live evidence yet. Production remains fail-closed until configured.
+- Ten live Edmonton timings, one live four-document CER run, deployed load and
+  accessibility evidence, and an independent Reviewer `APPROVE` are still required
+  before public release or competition-complete claims.

@@ -56,6 +56,9 @@ export const runs = pgTable(
     index("runs_expires_at_idx").on(table.expiresAt),
     index("runs_audit_expires_at_idx").on(table.auditExpiresAt),
     index("runs_processing_lease_expiry_idx").on(table.processingLeaseExpiresAt),
+    index("runs_queued_admission_idx")
+      .on(table.createdAt)
+      .where(sql`${table.status} = 'queued' AND ${table.workflowRunId} IS NULL`),
     index("runs_quota_created_idx").on(table.quotaKey, table.createdAt)
   ]
 );
@@ -88,6 +91,23 @@ export const incomingUploads = pgTable(
     index("incoming_uploads_expiry_idx").on(table.expiresAt),
     index("incoming_uploads_cleanup_due_idx").on(table.cleanupDueAt),
     index("incoming_uploads_owner_idx").on(table.ownerId)
+  ]
+);
+
+export const uploadQuotaEvents = pgTable(
+  "upload_quota_events",
+  {
+    id: uuid("id").primaryKey(),
+    ownerId: text("owner_id").notNull(),
+    quotaKey: text("quota_key").notNull(),
+    principalKind: text("principal_kind").notNull(),
+    sizeBytes: integer("size_bytes").notNull(),
+    day: text("day").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull()
+  },
+  (table) => [
+    index("upload_quota_events_quota_day_idx").on(table.quotaKey, table.day),
+    index("upload_quota_events_day_idx").on(table.day)
   ]
 );
 

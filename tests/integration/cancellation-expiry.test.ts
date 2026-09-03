@@ -4,10 +4,11 @@ import { LocalDeterministicModel } from "@/lib/analysis/local-model";
 import { getConfig } from "@/lib/config";
 import { sha256Hex } from "@/lib/crypto";
 import { processRun } from "@/lib/pipeline";
+import type { MonidAdapter } from "@/lib/providers/monid";
 import { cleanupRun, expireDueRuns, expireRun } from "@/lib/runs/expiry";
 import { transitionRun } from "@/lib/runs/state-machine";
 import { InMemoryRunStore } from "@/lib/runs/store";
-import { InMemoryBudgetGuard } from "@/lib/security/budget";
+import { InMemoryBudgetGuard, type BudgetGuard } from "@/lib/security/budget";
 import { stagingBlobPath, type UploadStorage } from "@/lib/storage/uploads";
 import { makeMinimalPdf } from "../unit/minimal-pdf";
 
@@ -33,7 +34,7 @@ class RevocationStorage implements UploadStorage {
   }
 
   async temporaryReadUrl(): Promise<string> {
-    throw new Error("not used by local extraction");
+    return "https://private-blob.example/staged.pdf";
   }
 
   async remove(path: string): Promise<void> {
@@ -58,6 +59,35 @@ const config = getConfig({
   MAX_RUN_COST_MICRO_USD: "2000000",
   DAILY_COST_CAP_MICRO_USD: "20000000"
 });
+
+const liveConfig = getConfig({
+  NODE_ENV: "test",
+  SESSION_SIGNING_SECRET: "test-session-signing-secret-that-is-long-enough",
+  IP_HASH_SECRET: "test-ip-hash-secret",
+  MONID_API_KEY: "test-monid-key",
+  MONID_PARSE_PROVIDER: "context.dev",
+  MONID_PARSE_ENDPOINT: "/parse",
+  MONID_RUN_ID_PATH: "run.id",
+  MONID_RUN_STATUS_PATH: "run.status",
+  MONID_PROVIDER_STATUS_PATH: "run.provider_status",
+  MONID_RESULT_URL_PATH: "run.result_url",
+  MONID_COST_VALUE_PATH: "run.cost.value",
+  MONID_COST_CURRENCY_PATH: "run.cost.currency",
+  MONID_ARTIFACT_HOST_ALLOWLIST: "private-blob.example",
+  OPENAI_API_KEY: "test-openai-key",
+  MAX_RUN_COST_MICRO_USD: "2000000",
+  DAILY_COST_CAP_MICRO_USD: "20000000"
+});
+
+class RecordingBudgetGuard implements BudgetGuard {
+  readonly settlements: Array<{ runId: string; actualMicroUsd: number }> = [];
+
+  async reserve(): Promise<void> {}
+
+  async settle(runId: string, actualMicroUsd: number): Promise<void> {
+    this.settlements.push({ runId, actualMicroUsd });
+  }
+}
 
 async function createUploadRun(
   store: InMemoryRunStore,
@@ -246,6 +276,75 @@ describe("active-worker cancellation and stale-lease cleanup", () => {
       new Date("2026-09-02T02:20:01.000Z")
     );
     expect(replacement.record.status).toBe("queued");
+  });
+
+  it("retains chargeable spend after cancellation and drops copied Markdown before returning", async () => {
+    const claimedAt = new Date("2026-09-02T01:00:00.000Z");
+    const bytes = makeMinimalPdf([
+      "Solicitation TEST-001. The bidder must submit a signed form. " +
+      "A bid that fails a mandatory requirement is non-compliant."
+    ]);
+    const store = new InMemoryRunStore();
+    const storage = new RevocationStorage(bytes);
+    const budget = new RecordingBudgetGuard();
+    const { record } = await createUploadRun(store, bytes, "guest:paid-cancel", claimedAt);
+    const local = new LocalDeterministicModel();
+    const received = { input: null as Parameters<typeof local.extract>[0] | null };
+    let signalStarted!: () => void;
+    let releaseModel!: () => void;
+    const modelStarted = new Promise<void>((resolve) => { signalStarted = resolve; });
+    const modelBlocked = new Promise<void>((resolve) => { releaseModel = resolve; });
+    const model = {
+      async extract(input: Parameters<typeof local.extract>[0]) {
+        received.input = input;
+        signalStarted();
+        await modelBlocked;
+        const extracted = await local.extract(input);
+        return { ...extracted, inputTokens: 1_000, outputTokens: 500 };
+      },
+      answer: local.answer.bind(local)
+    };
+    const monid = {
+      async parse() {
+        return {
+          markdown: "The bidder must submit a signed form.",
+          runId: "paid-monid-run",
+          // The adapter preserves the provider's USD-denominated value here;
+          // providerCost converts it to integer micro-USD.
+          costMicroUsd: 0.0045,
+          costCurrency: "USD",
+          providerArtifactUrl: "https://private-blob.example/result.md",
+          providerRetention: "unknown" as const,
+          terminalPayload: {}
+        };
+      }
+    } as unknown as MonidAdapter;
+
+    const worker = processRun(record.id, {
+      store,
+      uploadStorage: storage,
+      budget,
+      config: liveConfig,
+      model,
+      monid,
+      now: () => claimedAt
+    });
+    await modelStarted;
+    expect(received.input?.[0].parsed_markdown).toContain("signed form");
+
+    const active = await store.get(record.id);
+    await expireRun(active!, store, storage, new Date("2026-09-02T01:01:00.000Z"));
+    releaseModel();
+    const cancelled = await worker;
+
+    expect(cancelled.status).toBe("cleanup_pending");
+    expect(cancelled.result).toBeNull();
+    expect(received.input?.[0].parsed_markdown).toBe("");
+    expect(budget.settlements).toEqual([{
+      runId: record.id,
+      // Monid actual 4,500 + model estimate (1,000 * .75 + 500 * 4.5).
+      actualMicroUsd: 7_500
+    }]);
   });
 
   it("selects a bounded set of due or stale records without returning future audit rows", async () => {

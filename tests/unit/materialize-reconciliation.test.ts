@@ -30,11 +30,12 @@ const baseIndex = index(baseSha, [
   "Contract end date 2045.",
   "The bidder must submit a signed form. A bid that fails a mandatory requirement will be non-compliant.",
   "The ratio is 70% for technical merit and 30% for price. Selection uses the highest combined rating.",
+  "Bidders must obtain a minimum score of fifty (50) points on a scale of ninety-four (94) points.",
   "Issuer: Canada. Solicitation number: CER-1. Closing date: September 15, 2026."
 ]);
 const amendmentIndex = index(amendmentSha, [
-  "cover", "Contract end date 2050.", "three", "four",
-  "Contract end date 2055.", "The amendment repeats the 2055 end date.",
+  "cover", "Amendment replaces the contract end date with 2050.", "three", "four",
+  "Amendment replaces the contract end date with 2055.", "The amendment repeats the replacement 2055 end date.",
   "The amended ratio is 60% for technical merit and 40% for price.",
   "The old contract term is deleted."
 ]);
@@ -115,15 +116,15 @@ describe("server-owned materialization and reconciliation", () => {
           id: "term-2050", topic: "contract end date", document_sha256: amendmentSha,
           amendment_number: "999", effect: "replace", category: "contractual",
           text: "Contract end date 2050.", evidence_needed: null, consequence: null,
-          citations: [citation(amendmentSha, "Contract end date 2050.")]
+          citations: [citation(amendmentSha, "Amendment replaces the contract end date with 2050.")]
         },
         {
           id: "term-2055", topic: "contract end date", document_sha256: amendmentSha,
           amendment_number: "001", effect: "replace", category: "contractual",
           text: "Contract end date 2055.", evidence_needed: null, consequence: null,
           citations: [
-            citation(amendmentSha, "Contract end date 2055."),
-            citation(amendmentSha, "The amendment repeats the 2055 end date.")
+            citation(amendmentSha, "Amendment replaces the contract end date with 2055."),
+            citation(amendmentSha, "The amendment repeats the replacement 2055 end date.")
           ]
         }
       ]),
@@ -260,11 +261,18 @@ describe("server-owned materialization and reconciliation", () => {
     const value = addMinimumCoverage(draft([]));
     value.summary.title = "Canada";
     value.summary.issuer = "Canada";
-    value.claims = [{
-      claim_id: "issuer", topic: "contracting authority issuer", claim_text: "Canada",
-      claim_type: "source", confidence: 1, document_sha256: baseSha, amendment_number: null,
-      effect: "add", citations: [citation(baseSha, "Issuer: Canada.")], supersedes_claim_ids: []
-    }];
+    value.claims = [
+      {
+        claim_id: "false-title", topic: "RFP title", claim_text: "Canada",
+        claim_type: "source", confidence: 1, document_sha256: baseSha, amendment_number: null,
+        effect: "add", citations: [citation(baseSha, "Issuer: Canada.")], supersedes_claim_ids: []
+      },
+      {
+        claim_id: "issuer", topic: "contracting authority issuer", claim_text: "Canada",
+        claim_type: "source", confidence: 1, document_sha256: baseSha, amendment_number: null,
+        effect: "add", citations: [citation(baseSha, "Issuer: Canada.")], supersedes_claim_ids: []
+      }
+    ];
     const result = materializeAnalysis({
       draft: value,
       documents: [{ name: "base.pdf", sourceUrl: null, index: baseIndex, role: "base", amendmentNumber: null }],
@@ -272,6 +280,57 @@ describe("server-owned materialization and reconciliation", () => {
     }).result;
     expect(result.summary.title).toBe("Document-only RFP analysis");
     expect(result.summary.issuer).toBe("Canada");
+  });
+
+  it("binds each evaluation weight to its own label instead of accepting swapped 30/70 values", () => {
+    const weightQuote = "The ratio is 70% for technical merit and 30% for price.";
+    const analyze = (technical: string, financial: string) => {
+      const value = addMinimumCoverage(draft([]));
+      value.evaluation.rules.push(
+        {
+          id: `technical-${technical}`, field: "technical_weight", topic: "technical weight",
+          document_sha256: baseSha, amendment_number: null, effect: "add", value: technical,
+          citations: [citation(baseSha, weightQuote)]
+        },
+        {
+          id: `financial-${financial}`, field: "financial_weight", topic: "financial weight",
+          document_sha256: baseSha, amendment_number: null, effect: "add", value: financial,
+          citations: [citation(baseSha, weightQuote)]
+        }
+      );
+      return materializeAnalysis({
+        draft: value,
+        documents: [{ name: "base.pdf", sourceUrl: null, index: baseIndex, role: "base", amendmentNumber: null }],
+        manifests: [manifests[0]], costs: [], expiresAt: new Date("2026-09-03T00:00:00Z")
+      }).result;
+    };
+    const swapped = analyze("30", "70");
+    expect(swapped.evaluation.technical_weight).toBeNull();
+    expect(swapped.evaluation.financial_weight).toBeNull();
+    expect(swapped.quality.unsupported_items_removed).toBeGreaterThanOrEqual(2);
+    const canonical = analyze("70", "30");
+    expect(canonical.evaluation.technical_weight).toBe(70);
+    expect(canonical.evaluation.financial_weight).toBe(30);
+  });
+
+  it("binds a rated threshold to the minimum numerator and preserves its 50/94 scale", () => {
+    const thresholdQuote =
+      "Bidders must obtain a minimum score of fifty (50) points on a scale of ninety-four (94) points.";
+    const analyze = (threshold: string) => {
+      const value = addMinimumCoverage(draft([]));
+      value.evaluation.rules.push({
+        id: `threshold-${threshold}`, field: "rated_threshold", topic: "rated threshold",
+        document_sha256: baseSha, amendment_number: null, effect: "add", value: threshold,
+        citations: [citation(baseSha, thresholdQuote)]
+      });
+      return materializeAnalysis({
+        draft: value,
+        documents: [{ name: "base.pdf", sourceUrl: null, index: baseIndex, role: "base", amendmentNumber: null }],
+        manifests: [manifests[0]], costs: [], expiresAt: new Date("2026-09-03T00:00:00Z")
+      }).result;
+    };
+    expect(analyze("94").evaluation.rated_threshold).toBeNull();
+    expect(analyze("50/94").evaluation.rated_threshold).toBe("50/94");
   });
 
   it("validates every evaluation field independently and reconciles by server document order", () => {
@@ -314,12 +373,12 @@ describe("server-owned materialization and reconciliation", () => {
   it("detects same-amendment scalar conflicts across topic wording even when effect is add", () => {
     const result = reconcileVersionedFacts([
       {
-        id: "horizon-a", topic: "projection end year", value: "2050", documentSha256: amendmentSha,
+        id: "horizon-a", topic: "Appendix 1 projection end year", value: "2050", documentSha256: amendmentSha,
         documentRole: "amendment", amendmentNumber: "003", effect: "add",
         citations: [verifiedCitation(amendmentSha, "Projections extend to 2050.", 2)]
       },
       {
-        id: "horizon-b", topic: "annual projection horizon requirement", value: "2055",
+        id: "horizon-b", topic: "Statement of Work annual forecast endpoint", value: "2055",
         documentSha256: amendmentSha, documentRole: "amendment", amendmentNumber: "003", effect: "add",
         citations: [verifiedCitation(amendmentSha, "Projections extend to 2055.", 5)]
       }
@@ -327,6 +386,93 @@ describe("server-owned materialization and reconciliation", () => {
     expect(result.conflicts).toHaveLength(1);
     expect(result.conflicts[0].candidate_values.toSorted()).toEqual(["2050", "2055"]);
     expect(result.facts.every((fact) => fact.status === "conflicted")).toBe(true);
+  });
+
+  it("does not let a model supersedes ID mutate an unrelated verified fact", () => {
+    const result = reconcileVersionedFacts([
+      {
+        id: "closing", topic: "solicitation closing date", value: "September 1, 2026",
+        documentSha256: baseSha, documentRole: "base", amendmentNumber: null, effect: "add",
+        citations: [verifiedCitation(baseSha, "Closing date: September 1, 2026.", 1)]
+      },
+      {
+        id: "questions", topic: "questions deadline", value: "September 15, 2026",
+        documentSha256: amendmentSha, documentRole: "amendment", amendmentNumber: "003",
+        effect: "add", supersedesIds: ["closing"],
+        citations: [verifiedCitation(amendmentSha, "Questions due September 15, 2026.", 2)]
+      }
+    ]);
+    expect(result.facts.find((fact) => fact.id === "closing")?.status).toBe("active");
+    expect(result.facts.find((fact) => fact.id === "questions")?.status).toBe("active");
+  });
+
+  it("withholds duplicate direct model IDs instead of mixing prose and citations", () => {
+    const value = addMinimumCoverage(draft([]));
+    value.risks = [
+      {
+        id: "risk-1", topic: "late bid", document_sha256: baseSha, amendment_number: null,
+        effect: "add", severity: "high", category: "submission",
+        finding: "Late bids are rejected.", impact: "Submission can fail.",
+        recommended_action: "Submit early.",
+        citations: [citation(baseSha, "The bidder must submit a signed form.")]
+      },
+      {
+        id: "risk-1", topic: "insurance", document_sha256: amendmentSha, amendment_number: "003",
+        effect: "add", severity: "medium", category: "financial",
+        finding: "Insurance costs may rise.", impact: "Pricing may change.",
+        recommended_action: "Review insurance pricing.",
+        citations: [citation(amendmentSha, "The old contract term is deleted.")]
+      }
+    ];
+    const result = materializeAnalysis({
+      draft: value,
+      documents: [
+        { name: "base.pdf", sourceUrl: null, index: baseIndex, role: "base", amendmentNumber: null },
+        { name: "a003.pdf", sourceUrl: null, index: amendmentIndex, role: "amendment", amendmentNumber: "003" }
+      ],
+      manifests, costs: [], expiresAt: new Date("2026-09-03T00:00:00Z")
+    }).result;
+    expect(result.risks).toEqual([]);
+    expect(result.blocking_unknowns).toContain(
+      "One or more model records reused an ambiguous identity and were withheld."
+    );
+  });
+
+  it("removes a risk whose source clause was superseded even without a risk tombstone", () => {
+    const value = addMinimumCoverage(draft([
+      {
+        id: "term-base", topic: "contract end date", document_sha256: baseSha,
+        amendment_number: null, effect: "add", category: "contractual",
+        text: "Contract end date 2045.", evidence_needed: null, consequence: null,
+        citations: [citation(baseSha, "Contract end date 2045.")]
+      },
+      {
+        id: "term-new", topic: "contract end date", document_sha256: amendmentSha,
+        amendment_number: "003", effect: "replace", category: "contractual",
+        text: "Contract end date 2050.", evidence_needed: null, consequence: null,
+        citations: [citation(amendmentSha, "Amendment replaces the contract end date with 2050.")]
+      }
+    ]));
+    value.risks = [{
+      id: "old-term-risk", topic: "contract term risk", document_sha256: baseSha,
+      amendment_number: null, effect: "add", severity: "high", category: "schedule",
+      finding: "Contract end date 2045.", impact: "Delivery planning may be constrained.",
+      recommended_action: "Confirm the delivery plan.",
+      citations: [citation(baseSha, "Contract end date 2045.")]
+    }];
+    const result = materializeAnalysis({
+      draft: value,
+      documents: [
+        { name: "base.pdf", sourceUrl: null, index: baseIndex, role: "base", amendmentNumber: null },
+        { name: "a003.pdf", sourceUrl: null, index: amendmentIndex, role: "amendment", amendmentNumber: "003" }
+      ],
+      manifests, costs: [], expiresAt: new Date("2026-09-03T00:00:00Z")
+    }).result;
+    expect(result.requirements.find((requirement) => requirement.id === "term-base")?.status)
+      .toBe("superseded");
+    expect(result.requirements.find((requirement) => requirement.id === "term-new")?.status)
+      .toBe("active");
+    expect(result.risks).toEqual([]);
   });
 
   it("removes risks tied to a clause deleted by a later amendment", () => {

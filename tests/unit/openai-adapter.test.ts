@@ -25,11 +25,11 @@ function emptyDraft(): DraftAnalysis {
 }
 
 function fakeClient(options: {
-  count?: (request: Record<string, unknown>) => Promise<{
+  count?: (request: Record<string, unknown>, options?: Record<string, unknown>) => Promise<{
     input_tokens: number;
     object: "response.input_tokens";
   }>;
-  parse: (request: Record<string, unknown>) => Promise<unknown>;
+  parse: (request: Record<string, unknown>, options?: Record<string, unknown>) => Promise<unknown>;
 }) {
   return {
     beta: {
@@ -227,6 +227,38 @@ describe("OpenAI Responses structured output adapter", () => {
       .toBeGreaterThan(900 * 0.75 + 75 * 4.5);
   });
 
+  it("enforces one aggregate extraction deadline across preflight and sequential batches", async () => {
+    let clockMs = 0;
+    let parseCalls = 0;
+    const parseOptions: Record<string, unknown>[] = [];
+    const client = fakeClient({
+      count: async (_request, options) => {
+        expect(options).toMatchObject({ timeout: 120_000, maxRetries: 0 });
+        return { input_tokens: 1_000, object: "response.input_tokens" };
+      },
+      parse: async (_request, options) => {
+        parseCalls += 1;
+        parseOptions.push(options ?? {});
+        clockMs = 120_000;
+        return {
+          id: "response-before-deadline",
+          output_parsed: emptyDraft(),
+          usage: { input_tokens: 900, output_tokens: 75 }
+        };
+      }
+    });
+    const adapter = new OpenAIResponsesAdapter(testConfig(), client, () => clockMs);
+    const failure = await adapter.extract([{
+      ...sourceDocument,
+      parsed_markdown: "multi batch deadline text ".repeat(11_000)
+    }]).catch((error: unknown) => error);
+
+    expect(parseCalls).toBe(1);
+    expect(parseOptions).toEqual([{ timeout: 120_000, maxRetries: 0 }]);
+    expect(failure).toBeInstanceOf(ModelBatchError);
+    expect(failure).toMatchObject({ attemptedBatches: 1, completedResponseIds: ["response-before-deadline"] });
+  });
+
   it("merges independently sourced evaluation rules across batches", () => {
     const first = emptyDraft();
     first.evaluation = {
@@ -250,6 +282,33 @@ describe("OpenAI Responses structured output adapter", () => {
     expect(merged.evaluation.rules).toEqual([
       first.evaluation.rules[0],
       second.evaluation.rules[0]
+    ]);
+  });
+
+  it("assigns content-bound identities when independent batches reuse a model ID", () => {
+    const first = emptyDraft();
+    first.risks = [{
+      id: "risk-1", topic: "late bid", document_sha256: "a".repeat(64), amendment_number: null,
+      effect: "add", severity: "high", category: "submission", finding: "Late bids are rejected.",
+      impact: "Submission can fail.", recommended_action: "Submit early.", citations: [{
+        document_sha256: "a".repeat(64), chunk_id: null, evidence_quote: "Late bids are rejected.", section: null
+      }]
+    }];
+    const second = emptyDraft();
+    second.risks = [{
+      id: "risk-1", topic: "insurance", document_sha256: "b".repeat(64), amendment_number: "001",
+      effect: "add", severity: "medium", category: "financial", finding: "Insurance costs may rise.",
+      impact: "Pricing may change.", recommended_action: "Review pricing.", citations: [{
+        document_sha256: "b".repeat(64), chunk_id: null, evidence_quote: "Insurance costs may rise.", section: null
+      }]
+    }];
+
+    const merged = mergeDrafts([first, second]);
+    expect(new Set(merged.risks.map((risk) => risk.id)).size).toBe(2);
+    expect(merged.risks.every((risk) => risk.id.startsWith("risk-1~"))).toBe(true);
+    expect(merged.risks.map((risk) => [risk.finding, risk.citations[0].document_sha256])).toEqual([
+      ["Late bids are rejected.", "a".repeat(64)],
+      ["Insurance costs may rise.", "b".repeat(64)]
     ]);
   });
 });

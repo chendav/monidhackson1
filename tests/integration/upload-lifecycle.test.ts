@@ -22,6 +22,8 @@ async function uploaded(storage: LocalUploadStorage, bytes: Uint8Array) {
   const sha256 = sha256Hex(bytes);
   const presigned = await storage.presign({ filename: "source.pdf", size_bytes: bytes.byteLength, sha256 }, {
     ownerId: principal.id,
+    quotaKey: principal.quotaKey,
+    principalKind: principal.kind,
     origin: "http://localhost:3000"
   });
   const token = new URL(presigned.upload_url).pathname.split("/").at(-1)!;
@@ -32,13 +34,58 @@ async function uploaded(storage: LocalUploadStorage, bytes: Uint8Array) {
 }
 
 describe("incoming upload lifecycle", () => {
+  it("atomically limits outstanding grants while expired grants still count toward daily issuance", async () => {
+    let clock = Date.parse("2026-09-02T00:00:00Z");
+    const quotaConfig = getConfig({
+      NODE_ENV: "test",
+      SESSION_SIGNING_SECRET: "test-session-signing-secret-that-is-long-enough",
+      GUEST_UPLOAD_DOCUMENTS_PER_DAY: "6"
+    });
+    const storage = new LocalUploadStorage(quotaConfig.SESSION_SIGNING_SECRET, () => clock, quotaConfig);
+    const request = { filename: "quota.pdf", size_bytes: 1_000, sha256: "a".repeat(64) };
+    const context = {
+      ownerId: principal.id, quotaKey: principal.quotaKey, principalKind: principal.kind,
+      origin: "http://localhost:3000"
+    };
+    for (let index = 0; index < 5; index += 1) await storage.presign(request, context);
+    await expect(storage.presign(request, context)).rejects.toMatchObject({
+      code: "RATE_LIMITED", httpStatus: 429
+    });
+
+    clock += 11 * 60_000;
+    expect(await storage.sweepExpiredIncoming(new Date(clock), 10)).toHaveLength(5);
+    await expect(storage.presign(request, context)).resolves.toMatchObject({ method: "PUT" });
+    clock += 11 * 60_000;
+    await storage.sweepExpiredIncoming(new Date(clock), 10);
+    await expect(storage.presign(request, context)).rejects.toMatchObject({ code: "RATE_LIMITED" });
+  });
+
+  it("enforces a global daily upload-byte cap across owners and quota keys", async () => {
+    const quotaConfig = getConfig({
+      NODE_ENV: "test",
+      SESSION_SIGNING_SECRET: "test-session-signing-secret-that-is-long-enough",
+      GLOBAL_UPLOAD_BYTES_PER_DAY: "1500"
+    });
+    const storage = new LocalUploadStorage(quotaConfig.SESSION_SIGNING_SECRET, () =>
+      Date.parse("2026-09-02T00:00:00Z"), quotaConfig);
+    await storage.presign({ filename: "first.pdf", size_bytes: 1_000, sha256: "a".repeat(64) }, {
+      ownerId: "guest:first", quotaKey: "ip:first", principalKind: "guest", origin: "http://localhost:3000"
+    });
+    await expect(storage.presign({
+      filename: "second.pdf", size_bytes: 501, sha256: "b".repeat(64)
+    }, {
+      ownerId: "guest:second", quotaKey: "ip:second", principalKind: "guest", origin: "http://localhost:3000"
+    })).rejects.toMatchObject({ code: "RATE_LIMITED", httpStatus: 429 });
+  });
+
   it("sweeps presign-only grants and rejects upload after expiry", async () => {
     let clock = Date.parse("2026-09-02T00:00:00Z");
     const storage = new LocalUploadStorage(config.SESSION_SIGNING_SECRET, () => clock);
     const bytes = makeMinimalPdf(["abandoned"]);
     const sha256 = sha256Hex(bytes);
     const presigned = await storage.presign({ filename: "abandoned.pdf", size_bytes: bytes.byteLength, sha256 }, {
-      ownerId: principal.id, origin: "http://localhost:3000"
+      ownerId: principal.id, quotaKey: principal.quotaKey, principalKind: principal.kind,
+      origin: "http://localhost:3000"
     });
     const token = new URL(presigned.upload_url).pathname.split("/").at(-1)!;
     clock = Date.parse(presigned.expires_at) + 5 * 60_000 + 1;

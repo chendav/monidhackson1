@@ -1,6 +1,7 @@
 import OpenAI from "openai";
 import { zodTextFormat } from "openai/helpers/zod";
 import { getConfig, type AppConfig } from "@/lib/config";
+import { sha256Hex, stableJson } from "@/lib/crypto";
 import { AppError } from "@/lib/errors";
 import {
   DraftAnalysisSchema,
@@ -16,6 +17,8 @@ const GPT_5_4_MINI_CONTEXT_TOKENS = 400_000;
 const MODEL_FRAGMENT_CHARACTERS = 12_000;
 const OPENAI_INPUT_MICRO_USD_PER_TOKEN = 0.75;
 const OPENAI_OUTPUT_MICRO_USD_PER_TOKEN = 4.5;
+const OPENAI_EXTRACTION_PHASE_TIMEOUT_MS = 120_000;
+const OPENAI_QA_PHASE_TIMEOUT_MS = 20_000;
 
 export interface ModelDocumentInput {
   document_sha256: string;
@@ -227,6 +230,34 @@ function boundedMergedArray<T>(label: string, values: T[], maximum: number): T[]
   return unique;
 }
 
+function disambiguateModelIds<T>(
+  values: T[],
+  getId: (value: T) => string,
+  withId: (value: T, id: string) => T
+): T[] {
+  const counts = new Map<string, number>();
+  for (const value of values) counts.set(getId(value), (counts.get(getId(value)) ?? 0) + 1);
+  return values.map((value) => {
+    const id = getId(value);
+    if ((counts.get(id) ?? 0) === 1) return value;
+    // IDs originate in independent model batches and commonly restart at
+    // values such as risk-1. Bind the public identity to record content so a
+    // later lookup can never combine one record's prose with another's quote.
+    return withId(value, `${id.slice(0, 180)}~${sha256Hex(stableJson(value)).slice(0, 16)}`);
+  });
+}
+
+function remainingRequestTimeout(deadlineMs: number, now: () => number): number {
+  const remaining = Math.floor(deadlineMs - now());
+  if (remaining <= 0) {
+    throw new AppError("MODEL_UNAVAILABLE", "The aggregate OpenAI phase deadline was exhausted.", {
+      httpStatus: 503,
+      retryable: true
+    });
+  }
+  return remaining;
+}
+
 export function mergeDrafts(drafts: DraftAnalysis[]): DraftAnalysis {
   if (drafts.length === 0) {
     throw new AppError("ANALYSIS_INCOMPLETE", "The model returned no analysis batches.");
@@ -238,18 +269,30 @@ export function mergeDrafts(drafts: DraftAnalysis[]): DraftAnalysis {
   const selectedSummary = drafts.reduce((selected, draft) =>
     summaryScore(draft.summary) >= summaryScore(selected.summary) ? draft : selected
   ).summary;
+  const claims = boundedMergedArray("claims", drafts.flatMap((draft) => draft.claims), 1_000);
+  const requirements = boundedMergedArray(
+    "requirements",
+    drafts.flatMap((draft) => draft.requirements),
+    1_000
+  );
+  const evaluationRules = boundedMergedArray(
+    "evaluation rules",
+    drafts.flatMap((draft) => draft.evaluation.rules),
+    100
+  );
+  const risks = boundedMergedArray("risks", drafts.flatMap((draft) => draft.risks), 500);
   return DraftAnalysisSchema.parse({
     summary: selectedSummary,
-    claims: boundedMergedArray("claims", drafts.flatMap((draft) => draft.claims), 1_000),
-    requirements: boundedMergedArray("requirements", drafts.flatMap((draft) => draft.requirements), 1_000),
+    claims: disambiguateModelIds(claims, (claim) => claim.claim_id,
+      (claim, claim_id) => ({ ...claim, claim_id })),
+    requirements: disambiguateModelIds(requirements, (requirement) => requirement.id,
+      (requirement, id) => ({ ...requirement, id })),
     evaluation: {
-      rules: boundedMergedArray(
-        "evaluation rules",
-        drafts.flatMap((draft) => draft.evaluation.rules),
-        100
-      )
+      rules: disambiguateModelIds(evaluationRules, (rule) => rule.id,
+        (rule, id) => ({ ...rule, id }))
     },
-    risks: boundedMergedArray("risks", drafts.flatMap((draft) => draft.risks), 500),
+    risks: disambiguateModelIds(risks, (risk) => risk.id,
+      (risk, id) => ({ ...risk, id })),
     clarification_questions: boundedMergedArray(
       "clarification questions",
       drafts.flatMap((draft) => draft.clarification_questions),
@@ -267,7 +310,8 @@ export class OpenAIResponsesAdapter implements AnalysisModel {
   private readonly client: OpenAI;
   constructor(
     private readonly config: AppConfig = getConfig(),
-    client?: OpenAI
+    client?: OpenAI,
+    private readonly now: () => number = () => performance.now()
   ) {
     if (!config.OPENAI_API_KEY && !client) {
       throw new AppError("MODEL_UNAVAILABLE", "OpenAI is not configured.", { httpStatus: 503 });
@@ -278,7 +322,8 @@ export class OpenAIResponsesAdapter implements AnalysisModel {
   }
 
   async extract(documents: ModelDocumentInput[]): Promise<ExtractionCallResult> {
-    const started = performance.now();
+    const started = this.now();
+    const deadline = started + OPENAI_EXTRACTION_PHASE_TIMEOUT_MS;
     try {
       const inputs = prepareExtractionInputs(documents, this.config);
       const perBatchOutputTokens = Math.floor(this.config.OPENAI_MAX_OUTPUT_TOKENS / inputs.length);
@@ -292,6 +337,9 @@ export class OpenAIResponsesAdapter implements AnalysisModel {
             input,
             tools: [],
             text: { format }
+          }, {
+            timeout: remainingRequestTimeout(deadline, this.now),
+            maxRetries: 0
           })
         ));
         tokenCounts = counted.map((item) => item.input_tokens);
@@ -333,7 +381,10 @@ export class OpenAIResponsesAdapter implements AnalysisModel {
       let outputTokens: number | null = 0;
       for (const [index, input] of inputs.entries()) {
         let responseReturned = false;
+        let requestAttempted = false;
         try {
+          const timeout = remainingRequestTimeout(deadline, this.now);
+          requestAttempted = true;
           const response = await this.client.responses.parse({
             model: this.config.OPENAI_EXTRACTION_MODEL,
             store: false,
@@ -342,6 +393,9 @@ export class OpenAIResponsesAdapter implements AnalysisModel {
             input,
             max_output_tokens: perBatchOutputTokens,
             text: { format }
+          }, {
+            timeout,
+            maxRetries: 0
           });
           responseReturned = true;
           responseIds.push(response.id);
@@ -362,18 +416,18 @@ export class OpenAIResponsesAdapter implements AnalysisModel {
             completedResponseIds: responseIds,
             completedInputTokens: responseIds.length > 0 ? inputTokens : null,
             completedOutputTokens: responseIds.length > 0 ? outputTokens : null,
-            attemptedBatches: index + 1,
+            attemptedBatches: index + (requestAttempted ? 1 : 0),
             preflightInputTokens: tokenCounts,
             estimatedAttemptedOutputTokens:
               outputTokens === null
-                ? (index + 1) * perBatchOutputTokens
-                : outputTokens + (responseReturned ? 0 : perBatchOutputTokens)
+                ? (index + (requestAttempted ? 1 : 0)) * perBatchOutputTokens
+                : outputTokens + (requestAttempted && !responseReturned ? perBatchOutputTokens : 0)
           });
         }
       }
       return {
         analysis: mergeDrafts(analyses),
-        latencyMs: Math.round(performance.now() - started),
+        latencyMs: Math.round(this.now() - started),
         responseId: responseIds.join(","),
         inputTokens,
         outputTokens
@@ -388,7 +442,8 @@ export class OpenAIResponsesAdapter implements AnalysisModel {
   }
 
   async answer(question: string, documents: ModelDocumentInput[]): Promise<QuestionCallResult> {
-    const started = performance.now();
+    const started = this.now();
+    const deadline = started + OPENAI_QA_PHASE_TIMEOUT_MS;
     try {
       const questionDocuments = evidenceDocuments(documents).map((document) => ({
         document_sha256: document.document_sha256,
@@ -411,6 +466,9 @@ export class OpenAIResponsesAdapter implements AnalysisModel {
           input,
           tools: [],
           text: { format }
+        }, {
+          timeout: remainingRequestTimeout(deadline, this.now),
+          maxRetries: 0
         });
         inputTokens = counted.input_tokens;
       } catch (error) {
@@ -438,13 +496,16 @@ export class OpenAIResponsesAdapter implements AnalysisModel {
         input,
         max_output_tokens: maximumOutputTokens,
         text: { format }
+      }, {
+        timeout: remainingRequestTimeout(deadline, this.now),
+        maxRetries: 0
       });
       if (!response.output_parsed) {
         throw new AppError("ANALYSIS_INCOMPLETE", "The model did not return a structured answer.");
       }
       return {
         answer: response.output_parsed,
-        latencyMs: Math.round(performance.now() - started),
+        latencyMs: Math.round(this.now() - started),
         responseId: response.id
       };
     } catch (error) {

@@ -127,6 +127,19 @@ export class NeonBudgetGuard implements BudgetGuard {
     const results = await this.sql.transaction(queries);
     const rows = results[1] as unknown as Array<{ run_id: string }>;
     if (!rows[0]) {
+      const existing = await this.sql`
+        SELECT quota_key, reserved_micro_usd
+        FROM budget_reservations
+        WHERE run_id = ${input.runId}::uuid
+      ` as unknown as Array<{ quota_key: string; reserved_micro_usd: number }>;
+      if (
+        existing[0]?.quota_key === input.quotaKey &&
+        Number(existing[0].reserved_micro_usd) === input.amountMicroUsd
+      ) {
+        // Admission may be replayed after a process crash. A reservation is
+        // keyed by run_id, so the exact same reservation is already durable.
+        return;
+      }
       const recent = await this.sql`
         SELECT COUNT(*)::int AS count FROM runs
         WHERE quota_key = ${input.quotaKey}

@@ -27,7 +27,7 @@ exclude_paths: [src/app/page.tsx, src/components/**, src/app/globals.css, tests/
 edits_allowed: true
 acceptance: [AC-1, AC-2, AC-3, AC-4, AC-5, AC-6, AC-7, AC-9]
 handoff: handoff-backend.md
-status: revision-round-1
+status: revision-3-candidate
 ```
 
 ## T3 Frontend working surface
@@ -42,7 +42,7 @@ exclude_paths: [src/app/api/**, src/lib/**, src/db/**, drizzle/**]
 edits_allowed: true
 acceptance: [AC-8, AC-10]
 handoff: handoff-frontend.md
-status: revision-round-1
+status: revision-3-candidate
 ```
 
 ## QA1 Independent review
@@ -57,7 +57,7 @@ exclude_paths: []
 edits_allowed: false
 acceptance: [AC-1, AC-2, AC-3, AC-4, AC-5, AC-6, AC-7, AC-8, AC-9, AC-10, AC-11]
 handoff: qa_report.md
-status: request-changes-round-1
+status: awaiting-re-review
 ```
 
 ## REV-1 Release blockers
@@ -77,5 +77,5 @@ backend_scope:
   - complete Edmonton/CER frozen golden assertions
   - patched high-severity transitive dependencies
 review: independent re-review required
-status: active
+status: candidate-complete-awaiting-review
 ```

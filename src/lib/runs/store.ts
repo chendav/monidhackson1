@@ -57,6 +57,7 @@ export interface RunStore {
   ): Promise<{ record: RunRecord; leaseId: string; fence: number } | null>;
   remove(id: string): Promise<void>;
   listExpired(now?: Date): Promise<RunRecord[]>;
+  listUnscheduledQueued(before: Date, limit?: number): Promise<RunRecord[]>;
   listCleanupCandidates(now?: Date, limit?: number): Promise<RunRecord[]>;
 }
 
@@ -221,6 +222,21 @@ export class InMemoryRunStore implements RunStore {
   async listExpired(now = new Date()): Promise<RunRecord[]> {
     return [...this.records.values()]
       .filter((record) => new Date(record.expiresAt) <= now)
+      .map(clone);
+  }
+
+  async listUnscheduledQueued(before: Date, limit = 20): Promise<RunRecord[]> {
+    const boundedLimit = Math.min(Math.max(Math.trunc(limit), 1), 100);
+    return [...this.records.values()]
+      .filter((record) =>
+        record.status === "queued" && record.workflowRunId === null &&
+        new Date(record.createdAt) <= before
+      )
+      .sort((left, right) =>
+        new Date(left.createdAt).getTime() - new Date(right.createdAt).getTime() ||
+        left.id.localeCompare(right.id)
+      )
+      .slice(0, boundedLimit)
       .map(clone);
   }
 

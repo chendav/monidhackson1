@@ -34,7 +34,9 @@ adds these narrower controls:
 
 - Vercel Pro/Fluid step ceiling: 800 seconds.
 - Aggregate source download + Monid phase: 600 seconds.
-- OpenAI client: one 120-second attempt with SDK retries disabled.
+- OpenAI extraction phase: one aggregate 120-second deadline shared by token
+  preflight and every sequential batch, with per-call remaining-time overrides
+  and SDK retries disabled. Q&A uses the same pattern with 20 seconds.
 - Whole-pipeline Workflow retry: disabled to prevent duplicate paid calls after
   a late cleanup or persistence failure.
 - Remaining headroom is reserved for PDF indexing, reconciliation, persistence,

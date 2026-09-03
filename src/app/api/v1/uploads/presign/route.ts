@@ -32,6 +32,8 @@ export async function POST(request: Request) {
     }
     const response = await getUploadStorage(config).presign(parsed.data, {
       ownerId: principal.id,
+      quotaKey: principal.quotaKey,
+      principalKind: principal.kind,
       origin: new URL(request.url).origin
     });
     await scheduleIncomingUploadSweep(response.expires_at);

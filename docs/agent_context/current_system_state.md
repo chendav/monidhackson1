@@ -1,11 +1,12 @@
 # Current System State
 
-Updated: 2026-09-02
+Updated: 2026-09-03
 
 ## Confirmed
 
-- The repository is initialized on `main`, is connected to origin, and the
-  implemented MVP through commit `96641c6` is pushed.
+- The repository is initialized on `main`, is connected to origin, and Revision
+  2 through commit `230e382` is pushed. Revision 3 is an uncommitted review
+  candidate.
 - Next.js Web/API, local deterministic pipeline, Neon/Blob/Workflow adapters,
   Monid/OpenAI adapters, golden fixtures, and automated tests are implemented.
 - There is no `.codegraph/` directory and no existing application scaffold.
@@ -24,14 +25,15 @@ Updated: 2026-09-02
   download link, and a longer provider-side artifact lifetime.
 - Ontology's reusable strengths are fail-closed SHA/page/quote verification,
   append-only receipts, conflict preservation, and bounded grounded queries.
-- Independent review found one P0 and six P1 defects despite every declared QA
-  command passing. The current commit must not be deployed.
-- Current production blockers include cleanup-result leakage, no browser
-  Turnstile token lifecycle, summary fields bypassing citation checks,
-  requirements not receiving amendment status, fail-open infrastructure
-  fallbacks, unbounded model input/output spend, and Monid artifact SSRF.
-- The CER golden suite currently covers only a subset of the frozen acceptance
-  facts; amendment 003's current internal-conflict evidence is p2, p5, and p6.
+- Exact-commit review of `230e382` found P0=0/P1=4: copied Markdown lifetime,
+  aggregate OpenAI deadline, cancellation spend settlement, and stranded run
+  admission. The Revision 3 candidate fixes all four with regressions.
+- Specialist findings for duplicate model IDs, model-authorized supersession,
+  evaluation/summary semantic laundering, topic-drift conflict loss, stale
+  risks, and unbounded presign issuance are fixed in the candidate.
+- Current local evidence: `pnpm check` 104/104 tests with 3 optional skips;
+  official fixture audit 3/3; build pass with 9 steps/3 workflows; Playwright
+  14/14; zero high dependency advisories.
 
 ## Inferred
 
@@ -43,8 +45,9 @@ Updated: 2026-09-02
 - Exact account-visible context.dev inspect schema, ZDR propagation, signed-URL
   compatibility, and provider deletion semantics require a credentialed spike.
 - Vercel, Neon, Blob, Turnstile, and deployment credentials are not yet verified.
-- Availability and measured extraction quality of the configured OpenAI model
-  are not yet verified.
+- Full-document extraction quality of the configured OpenAI model is not yet
+  verified. A live count probe and exact-schema synthetic Structured Output
+  probe succeeded.
 
 ## Active Constraints
 

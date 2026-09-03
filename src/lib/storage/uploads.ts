@@ -18,6 +18,8 @@ const CLEANUP_LEASE_MS = 60_000;
 
 interface PresignContext {
   ownerId: string;
+  quotaKey: string;
+  principalKind: "guest" | "api";
   origin: string;
 }
 
@@ -52,6 +54,12 @@ interface LocalGrant {
   claimedRunId: string | null;
 }
 
+interface LocalQuotaEvent {
+  quotaKey: string;
+  sizeBytes: number;
+  day: string;
+}
+
 export function stagingBlobPath(runId: string, documentIndex: number) {
   return `staging/${runId}/${documentIndex}/source.pdf`;
 }
@@ -60,17 +68,48 @@ export class LocalUploadStorage implements UploadStorage {
   private readonly grantsByToken = new Map<string, LocalGrant>();
   private readonly grantsByPath = new Map<string, LocalGrant>();
   private readonly objects = new Map<string, Uint8Array>();
+  private readonly quotaEvents: LocalQuotaEvent[] = [];
 
   constructor(
     private readonly namespaceSecret = "rfp-xray-local-session-secret-do-not-use-in-production",
-    private readonly now: () => number = () => Date.now()
+    private readonly now: () => number = () => Date.now(),
+    private readonly config: AppConfig = getConfig()
   ) {}
 
   async presign(input: PresignUploadRequest, context: PresignContext): Promise<PresignUploadResponse> {
     normalizeFilename(input.filename);
+    const now = this.now();
+    const day = new Date(now).toISOString().slice(0, 10);
+    const outstanding = [...this.grantsByPath.values()].filter((grant) =>
+      grant.ownerId === context.ownerId && grant.expiresAt > now &&
+      (grant.status === "issued" || grant.status === "uploaded")
+    ).length;
+    const quotaEvents = this.quotaEvents.filter((event) =>
+      event.quotaKey === context.quotaKey && event.day === day
+    );
+    const documentLimit = context.principalKind === "api"
+      ? this.config.API_UPLOAD_DOCUMENTS_PER_DAY
+      : this.config.GUEST_UPLOAD_DOCUMENTS_PER_DAY;
+    const byteLimit = context.principalKind === "api"
+      ? this.config.API_UPLOAD_BYTES_PER_DAY
+      : this.config.GUEST_UPLOAD_BYTES_PER_DAY;
+    const quotaBytes = quotaEvents.reduce((total, event) => total + event.sizeBytes, 0);
+    const globalBytes = this.quotaEvents
+      .filter((event) => event.day === day)
+      .reduce((total, event) => total + event.sizeBytes, 0);
+    if (
+      outstanding >= this.config.MAX_OUTSTANDING_UPLOAD_GRANTS ||
+      quotaEvents.length >= documentLimit || quotaBytes + input.size_bytes > byteLimit ||
+      globalBytes + input.size_bytes > this.config.GLOBAL_UPLOAD_BYTES_PER_DAY
+    ) {
+      throw new AppError("RATE_LIMITED", "The upload issuance quota has been reached.", {
+        httpStatus: 429,
+        retryable: true
+      });
+    }
     const token = crypto.randomUUID();
     const blobPath = `incoming/${ownerUploadNamespace(context.ownerId, this.namespaceSecret)}/${crypto.randomUUID()}/${input.sha256}.pdf`;
-    const expiresAt = this.now() + GRANT_LIFETIME_MS;
+    const expiresAt = now + GRANT_LIFETIME_MS;
     const grant: LocalGrant = {
       token,
       blobPath,
@@ -83,6 +122,7 @@ export class LocalUploadStorage implements UploadStorage {
     };
     this.grantsByToken.set(token, grant);
     this.grantsByPath.set(blobPath, grant);
+    this.quotaEvents.push({ quotaKey: context.quotaKey, sizeBytes: input.size_bytes, day });
     return {
       blob_path: blobPath,
       upload_url: new URL(`/api/v1/uploads/local/${token}`, context.origin).toString(),
@@ -197,6 +237,7 @@ export class LocalUploadStorage implements UploadStorage {
     this.grantsByToken.clear();
     this.grantsByPath.clear();
     this.objects.clear();
+    this.quotaEvents.length = 0;
   }
 }
 
@@ -228,6 +269,7 @@ async function readBoundedStream(stream: ReadableStream<Uint8Array>, maximum: nu
 
 export class VercelBlobUploadStorage implements UploadStorage {
   private readonly db;
+  private readonly sqlClient: ReturnType<typeof neon>;
   private readonly sourceEtags = new Map<string, string>();
 
   constructor(private readonly config: AppConfig = getConfig()) {
@@ -236,7 +278,8 @@ export class VercelBlobUploadStorage implements UploadStorage {
         httpStatus: 503
       });
     }
-    this.db = drizzle(neon(config.DATABASE_URL), { schema: { incomingUploads } });
+    this.sqlClient = neon(config.DATABASE_URL);
+    this.db = drizzle(this.sqlClient, { schema: { incomingUploads } });
   }
 
   private get token(): string | undefined {
@@ -250,16 +293,74 @@ export class VercelBlobUploadStorage implements UploadStorage {
   async presign(input: PresignUploadRequest, context: PresignContext): Promise<PresignUploadResponse> {
     normalizeFilename(input.filename);
     const now = new Date();
+    const day = now.toISOString().slice(0, 10);
     const expiresAt = new Date(now.getTime() + GRANT_LIFETIME_MS);
     const cleanupDueAt = new Date(expiresAt.getTime() + GRANT_EXPIRY_GRACE_MS);
     const hardDeleteBy = new Date(now.getTime() + GRANT_HARD_DELETE_MS);
     const blobPath = `incoming/${ownerUploadNamespace(context.ownerId, this.namespaceSecret())}/${crypto.randomUUID()}/${input.sha256}.pdf`;
-    await this.db.insert(incomingUploads).values({
-      blobPath, ownerId: context.ownerId, expectedSha256: input.sha256,
-      expectedSize: input.size_bytes, status: "issued", claimedRunId: null,
-      sourceEtag: null, stagePath: null, stageEtag: null, fenceEtag: null,
-      expiresAt, cleanupDueAt, hardDeleteBy, createdAt: now, updatedAt: now
-    });
+    const quotaEventId = crypto.randomUUID();
+    const documentLimit = context.principalKind === "api"
+      ? this.config.API_UPLOAD_DOCUMENTS_PER_DAY
+      : this.config.GUEST_UPLOAD_DOCUMENTS_PER_DAY;
+    const byteLimit = context.principalKind === "api"
+      ? this.config.API_UPLOAD_BYTES_PER_DAY
+      : this.config.GUEST_UPLOAD_BYTES_PER_DAY;
+    const quotaTransaction = await this.sqlClient.transaction([
+      this.sqlClient`SELECT pg_advisory_xact_lock(hashtext(${`rfp-xray-upload-global:${day}`}))`,
+      this.sqlClient`SELECT pg_advisory_xact_lock(hashtext(${`rfp-xray-upload-quota:${context.quotaKey}:${day}`}))`,
+      this.sqlClient`SELECT pg_advisory_xact_lock(hashtext(${`rfp-xray-upload-owner:${context.ownerId}`}))`,
+      this.sqlClient`
+        WITH permitted AS (
+          SELECT 1
+          WHERE (
+            SELECT COUNT(*) FROM incoming_uploads
+            WHERE owner_id = ${context.ownerId}
+              AND status IN ('issued', 'uploaded')
+              AND expires_at > ${now.toISOString()}::timestamptz
+          ) < ${this.config.MAX_OUTSTANDING_UPLOAD_GRANTS}
+          AND (
+            SELECT COUNT(*) FROM upload_quota_events
+            WHERE quota_key = ${context.quotaKey} AND day = ${day}
+          ) < ${documentLimit}
+          AND COALESCE((
+            SELECT SUM(size_bytes) FROM upload_quota_events
+            WHERE quota_key = ${context.quotaKey} AND day = ${day}
+          ), 0) + ${input.size_bytes} <= ${byteLimit}
+          AND COALESCE((
+            SELECT SUM(size_bytes) FROM upload_quota_events WHERE day = ${day}
+          ), 0) + ${input.size_bytes} <= ${this.config.GLOBAL_UPLOAD_BYTES_PER_DAY}
+        ), issued AS (
+          INSERT INTO incoming_uploads
+            (blob_path, owner_id, expected_sha256, expected_size, status,
+             claimed_run_id, source_etag, stage_path, stage_etag, fence_etag,
+             expires_at, cleanup_due_at, hard_delete_by, created_at, updated_at)
+          SELECT
+            ${blobPath}, ${context.ownerId}, ${input.sha256}, ${input.size_bytes}, 'issued',
+            NULL, NULL, NULL, NULL, NULL,
+            ${expiresAt.toISOString()}::timestamptz,
+            ${cleanupDueAt.toISOString()}::timestamptz,
+            ${hardDeleteBy.toISOString()}::timestamptz,
+            ${now.toISOString()}::timestamptz, ${now.toISOString()}::timestamptz
+          FROM permitted
+          RETURNING blob_path
+        )
+        INSERT INTO upload_quota_events
+          (id, owner_id, quota_key, principal_kind, size_bytes, day, created_at)
+        SELECT
+          ${quotaEventId}::uuid, ${context.ownerId}, ${context.quotaKey},
+          ${context.principalKind}, ${input.size_bytes}, ${day},
+          ${now.toISOString()}::timestamptz
+        FROM issued
+        RETURNING id
+      `
+    ]);
+    const issued = quotaTransaction[3] as unknown as Array<{ id: string }>;
+    if (!issued[0]) {
+      throw new AppError("RATE_LIMITED", "The upload issuance quota has been reached.", {
+        httpStatus: 429,
+        retryable: true
+      });
+    }
     let presignedUrl: string;
     try {
       const signed = await issueSignedToken({
@@ -274,7 +375,10 @@ export class VercelBlobUploadStorage implements UploadStorage {
         addRandomSuffix: false, cacheControlMaxAge: 60
       }));
     } catch (error) {
-      await this.db.delete(incomingUploads).where(eq(incomingUploads.blobPath, blobPath));
+      await this.sqlClient.transaction([
+        this.sqlClient`DELETE FROM incoming_uploads WHERE blob_path = ${blobPath}`,
+        this.sqlClient`DELETE FROM upload_quota_events WHERE id = ${quotaEventId}::uuid`
+      ]);
       throw error;
     }
     return {
@@ -547,7 +651,9 @@ export function getUploadStorage(config = getConfig()): UploadStorage {
     });
   }
   localStorage ??= new LocalUploadStorage(
-    config.SESSION_SIGNING_SECRET ?? "rfp-xray-local-session-secret-do-not-use-in-production"
+    config.SESSION_SIGNING_SECRET ?? "rfp-xray-local-session-secret-do-not-use-in-production",
+    () => Date.now(),
+    config
   );
   return localStorage;
 }

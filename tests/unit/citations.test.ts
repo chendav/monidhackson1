@@ -74,5 +74,27 @@ describe("SHA-bound citation verification", () => {
     expect(assertionTokensSupportedByCitations("Closes 2026-09-03 with 70% technical weight.", [citation]))
       .toBe(false);
     expect(assertionTokensSupportedByCitations("The technical weight is 99%.", [citation])).toBe(false);
+    expect(assertionTokensSupportedByCitations("Closes September 15, 2026 at 2:00 PM MDT.", [citation]))
+      .toBe(true);
+    expect(assertionTokensSupportedByCitations("Closes September 15, 2026 at 2:00 PM EST.", [citation]))
+      .toBe(false);
+  });
+
+  it("compares objective units, currencies, magnitudes, and quantity bounds", () => {
+    const citation = {
+      document_sha256: documentSha,
+      document_name: "source.pdf",
+      source_url: null,
+      pdf_page_1based: 2,
+      printed_page_label: null,
+      section: null,
+      evidence_quote: "The maximum budget is CAD 5 million and the technical weighting is 70%.",
+      verified: true,
+      verification_method: "exact" as const
+    };
+    expect(assertionTokensSupportedByCitations("Maximum budget: CAD 5 million; technical weighting: 70%.", [citation]))
+      .toBe(true);
+    expect(assertionTokensSupportedByCitations("Minimum budget: USD 5 billion; technical weighting: 70.", [citation]))
+      .toBe(false);
   });
 });

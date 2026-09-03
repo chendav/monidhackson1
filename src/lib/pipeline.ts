@@ -475,6 +475,11 @@ export async function processRun(runId: string, dependencies: PipelineDependenci
         retry_of: null
       });
       throw error;
+    } finally {
+      // `parsedTargets` releases the parser-owned strings, but modelInput holds
+      // independent string references. Drop those references before any raw
+      // cleanup receipt can unlock a public result.
+      for (const document of modelInput) document.parsed_markdown = "";
     }
 
     await stage(store, runId, "reconciling", claim);
@@ -601,7 +606,15 @@ export async function processRun(runId: string, dependencies: PipelineDependenci
       if (!current) throw storeError;
       failed = current;
     }
-    await budget.settle(runId, failed.costMicroUsd, now());
+    const incurredCostMicroUsd = costs.reduce(
+      (total, event) => total + (event.actual_micro_usd ?? event.estimated_micro_usd ?? 0),
+      0
+    );
+    // A DELETE/expiry may revoke the run claim while a paid provider call is
+    // in flight. The guarded run write must remain fenced, but its separate
+    // budget reservation still has to retain at least the observed/estimated
+    // spend so cancel-and-repeat cannot bypass the daily cap.
+    await budget.settle(runId, Math.max(failed.costMicroUsd, incurredCostMicroUsd), now());
     return failed;
   }
 }

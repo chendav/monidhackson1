@@ -23,6 +23,8 @@ const state = vi.hoisted(() => ({
   rows: [] as FakeGrantRow[],
   stageLedgerCrash: false,
   deleteFailures: 0,
+  quotaRemaining: 1,
+  quotaTransactions: [] as unknown[][],
   putOptions: [] as Array<Record<string, unknown>>,
   getOptions: [] as Array<Record<string, unknown>>
 }));
@@ -33,7 +35,24 @@ function promiseWithReturning<T>(value: T, returned: unknown[]) {
   return promise;
 }
 
-vi.mock("@neondatabase/serverless", () => ({ neon: vi.fn(() => ({})) }));
+vi.mock("@neondatabase/serverless", () => ({
+  neon: vi.fn(() => {
+    const tagged = ((strings: TemplateStringsArray, ...values: unknown[]) => ({ strings, values })) as {
+      (strings: TemplateStringsArray, ...values: unknown[]): unknown;
+      transaction: (queries: unknown[]) => Promise<unknown[][]>;
+    };
+    tagged.transaction = async (queries: unknown[]) => {
+      state.quotaTransactions.push(queries);
+      if (queries.length === 4) {
+        const issued = state.quotaRemaining > 0 ? [{ id: crypto.randomUUID() }] : [];
+        if (issued.length > 0) state.quotaRemaining -= 1;
+        return [[], [], [], issued];
+      }
+      return queries.map(() => []);
+    };
+    return tagged;
+  })
+}));
 vi.mock("drizzle-orm/neon-http", () => ({
   drizzle: vi.fn(() => ({
     query: { incomingUploads: { findFirst: vi.fn(async () => state.rows[0]) } },
@@ -73,8 +92,8 @@ vi.mock("drizzle-orm/neon-http", () => ({
 }));
 
 vi.mock("@vercel/blob", () => ({
-  issueSignedToken: vi.fn(),
-  presignUrl: vi.fn(),
+  issueSignedToken: vi.fn(async () => "signed-token"),
+  presignUrl: vi.fn(async () => ({ presignedUrl: "https://blob.example/upload" })),
   put: vi.fn(async (path: string, body: Uint8Array, options: Record<string, unknown>) => {
     state.putOptions.push(options);
     const existing = state.objects.get(path);
@@ -103,6 +122,7 @@ vi.mock("@vercel/blob", () => ({
   })
 }));
 
+import { issueSignedToken, presignUrl } from "@vercel/blob";
 import { VercelBlobUploadStorage } from "@/lib/storage/uploads";
 
 const config = getConfig({
@@ -144,9 +164,31 @@ describe("Vercel Blob upload recovery", () => {
     state.rows.length = 0;
     state.stageLedgerCrash = false;
     state.deleteFailures = 0;
+    state.quotaRemaining = 1;
+    state.quotaTransactions.length = 0;
     state.putOptions.length = 0;
     state.getOptions.length = 0;
     vi.restoreAllMocks();
+  });
+
+  it("admits only one concurrent presign at the durable quota boundary", async () => {
+    const storage = new VercelBlobUploadStorage(config);
+    const input = { filename: "source.pdf", size_bytes: 1_000, sha256: "a".repeat(64) };
+    const context = {
+      ownerId: "guest:quota", quotaKey: "ip:quota", principalKind: "guest" as const,
+      origin: "https://rfp.example"
+    };
+    const results = await Promise.allSettled([
+      storage.presign(input, context),
+      storage.presign(input, context)
+    ]);
+    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    const rejected = results.find((result) => result.status === "rejected") as PromiseRejectedResult;
+    expect(rejected.reason).toMatchObject({ code: "RATE_LIMITED", httpStatus: 429 });
+    expect(issueSignedToken).toHaveBeenCalledTimes(1);
+    expect(presignUrl).toHaveBeenCalledTimes(1);
+    expect(state.quotaTransactions).toHaveLength(2);
+    expect(state.quotaTransactions.every((queries) => queries.length === 4)).toBe(true);
   });
 
   it("writes verified bytes immutably and accepts an identical stage after a ledger crash", async () => {

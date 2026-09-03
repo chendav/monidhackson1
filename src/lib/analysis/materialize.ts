@@ -38,6 +38,22 @@ function deduplicateCitations(citations: Citation[]) {
   });
 }
 
+function duplicateIds<T>(values: T[], getId: (value: T) => string): Set<string> {
+  const counts = new Map<string, number>();
+  for (const value of values) counts.set(getId(value), (counts.get(getId(value)) ?? 0) + 1);
+  return new Set([...counts].flatMap(([id, count]) => count > 1 ? [id] : []));
+}
+
+function citationsDescribeSameSourceFact(left: Citation, right: Citation) {
+  if (
+    left.document_sha256 !== right.document_sha256 ||
+    left.pdf_page_1based === null || left.pdf_page_1based !== right.pdf_page_1based
+  ) return false;
+  const leftQuote = normalizeEvidenceText(left.evidence_quote);
+  const rightQuote = normalizeEvidenceText(right.evidence_quote);
+  return leftQuote === rightQuote || leftQuote.includes(rightQuote) || rightQuote.includes(leftQuote);
+}
+
 function significantWords(value: string) {
   const ignored = new Set(["a", "an", "and", "for", "in", "of", "on", "the", "to", "with"]);
   return [...new Set(normalizeEvidenceText(value).match(/[a-z]{3,}/g)?.filter((word) => !ignored.has(word)) ?? [])];
@@ -59,6 +75,97 @@ function evaluationCitationIsRelevant(field: EvaluationField, citation: Citation
   }
 }
 
+type WeightField = "technical_weight" | "financial_weight";
+
+function weightLabelsIn(value: string): Set<"technical" | "financial"> {
+  const labels = new Set<"technical" | "financial">();
+  if (/\btechnical\b/.test(value)) labels.add("technical");
+  if (/\b(?:financial|price)\b/.test(value)) labels.add("financial");
+  return labels;
+}
+
+function explicitPercentages(value: string): number[] {
+  return [...value.matchAll(/(?<![\d.])(\d+(?:\.\d+)?)\s*(?:%|per\s*cent|percent(?:age)?)(?![a-z])/g)]
+    .map((match) => Number(match[1]))
+    .filter((number) => Number.isFinite(number) && number >= 0 && number <= 100);
+}
+
+/**
+ * Extracts percentages only when the surrounding clause identifies which
+ * evaluation component they belong to. Merely finding both 70 and 30 in a
+ * quote is deliberately insufficient: that would allow the two weights to be
+ * swapped by the model while still passing scalar-token validation.
+ */
+function boundWeightValues(field: WeightField, citation: Citation): Set<number> {
+  const target = field === "technical_weight" ? "technical" : "financial";
+  const quote = normalizeEvidenceText(citation.evidence_quote);
+  const values = new Set<number>();
+  const clauses = quote.split(/(?:[,;+]|\b(?:and|while|whereas|versus|vs\.?)\b)/);
+
+  for (const clause of clauses) {
+    const labels = weightLabelsIn(clause);
+    const percentages = explicitPercentages(clause);
+    if (labels.size === 1 && labels.has(target) && percentages.length === 1) {
+      values.add(percentages[0]);
+    }
+  }
+
+  // PDF table extraction often removes punctuation. Support the two common
+  // interleaved layouts while refusing to infer a value across another label.
+  const targetPattern = target === "technical" ? "technical" : "(?:financial|price)";
+  const otherPattern = target === "technical" ? "(?:financial|price)" : "technical";
+  const numberPattern = "(\\d+(?:\\.\\d+)?)\\s*(?:%|per\\s*cent|percent(?:age)?)";
+  const clauseBoundary = "[,;+]|\\b(?:and|while|whereas|versus|vs\\.?)\\b";
+  const labelThenNumber = new RegExp(
+    `\\b${targetPattern}\\b(?:(?!\\b${otherPattern}\\b|${clauseBoundary}|\\d).){0,80}?${numberPattern}`,
+    "g"
+  );
+  const numberThenLabel = new RegExp(
+    `${numberPattern}(?:(?!\\b${otherPattern}\\b|${clauseBoundary}|\\d).){0,80}?\\b${targetPattern}\\b`,
+    "g"
+  );
+  for (const match of quote.matchAll(labelThenNumber)) values.add(Number(match[1]));
+  for (const match of quote.matchAll(numberThenLabel)) values.add(Number(match[1]));
+  return values;
+}
+
+function parseThresholdValue(value: string): { minimum: number; scale: number | null } | null {
+  const normalized = normalizeEvidenceText(value);
+  const fraction = normalized.match(/(?<![\d.])(\d+(?:\.\d+)?)\s*(?:\/|out of)\s*(\d+(?:\.\d+)?)(?![\d.])/);
+  if (fraction) return { minimum: Number(fraction[1]), scale: Number(fraction[2]) };
+  const numbers = [...normalized.matchAll(/(?<![\d.])(\d+(?:\.\d+)?)(?![\d.])/g)].map((match) => Number(match[1]));
+  return numbers.length === 1 && Number.isFinite(numbers[0])
+    ? { minimum: numbers[0], scale: null }
+    : null;
+}
+
+function citationThresholdBinding(citation: Citation): { minimums: Set<number>; scales: Set<number> } {
+  const quote = normalizeEvidenceText(citation.evidence_quote);
+  const minimums = new Set<number>();
+  const scales = new Set<number>();
+  const numberPattern = "(\\d+(?:\\.\\d+)?)";
+  const minimumBefore = new RegExp(`\\b(?:minimum(?: score)?(?: of)?|threshold(?: of)?|at least|no less than)\\b[^\\d]{0,60}${numberPattern}`, "g");
+  const minimumAfter = new RegExp(`${numberPattern}\\s*(?:points?)?[^\\d]{0,30}\\b(?:is|as)?\\s*(?:the\\s+)?(?:minimum|threshold)\\b`, "g");
+  const requiredScore = new RegExp(`\\b(?:must|required to)\\s+(?:obtain|achieve|score|receive|attain)\\b[^\\d]{0,60}${numberPattern}`, "g");
+  const fraction = /(?<![\d.])(\d+(?:\.\d+)?)\s*\/\s*(\d+(?:\.\d+)?)(?![\d.])/g;
+  const outOf = /(?<![\d.])(\d+(?:\.\d+)?)\s*(?:points?)?\s*(?:out of|on (?:a )?scale of)\s*(?:a\s+possible\s+)?(\d+(?:\.\d+)?)(?![\d.])/g;
+  const scaleOnly = /\b(?:out of|scale of|possible(?: score)?(?: of)?|maximum(?: score)?(?: of)?)\b[^\d]{0,30}(\d+(?:\.\d+)?)/g;
+
+  for (const match of quote.matchAll(minimumBefore)) minimums.add(Number(match[1]));
+  for (const match of quote.matchAll(minimumAfter)) minimums.add(Number(match[1]));
+  for (const match of quote.matchAll(requiredScore)) minimums.add(Number(match[1]));
+  for (const match of quote.matchAll(fraction)) {
+    minimums.add(Number(match[1]));
+    scales.add(Number(match[2]));
+  }
+  for (const match of quote.matchAll(outOf)) {
+    minimums.add(Number(match[1]));
+    scales.add(Number(match[2]));
+  }
+  for (const match of quote.matchAll(scaleOnly)) scales.add(Number(match[1]));
+  return { minimums, scales };
+}
+
 function validatedEvaluationRule(
   field: EvaluationField,
   value: string,
@@ -77,10 +184,28 @@ function validatedEvaluationRule(
   }
   if (field === "technical_weight" || field === "financial_weight") {
     const parsed = Number(value.replace(/%/g, "").trim());
-    return Number.isFinite(parsed) && parsed >= 0 && parsed <= 100 ? relevant : null;
+    if (!Number.isFinite(parsed) || parsed < 0 || parsed > 100) return null;
+    const bindings = relevant.map((citation) => ({ citation, values: boundWeightValues(field, citation) }));
+    const allBoundValues = new Set(bindings.flatMap((binding) => [...binding.values]));
+    if (allBoundValues.size !== 1 || !allBoundValues.has(parsed)) return null;
+    const boundCitations = bindings.filter((binding) => binding.values.has(parsed)).map((binding) => binding.citation);
+    return allCitationsVerified(boundCitations) ? boundCitations : null;
   }
   if (field === "rated_threshold") {
-    return /\b(minimum|threshold|points?|rating|score|rated)\b/.test(combinedEvidence) ? relevant : null;
+    const expected = parseThresholdValue(value);
+    if (!expected) return null;
+    const bindings = relevant.map((citation) => ({ citation, ...citationThresholdBinding(citation) }));
+    const minimums = new Set(bindings.flatMap((binding) => [...binding.minimums]));
+    if (minimums.size !== 1 || !minimums.has(expected.minimum)) return null;
+    if (expected.scale !== null) {
+      const scales = new Set(bindings.flatMap((binding) => [...binding.scales]));
+      if (scales.size !== 1 || !scales.has(expected.scale)) return null;
+    }
+    const boundCitations = bindings.filter((binding) =>
+      binding.minimums.has(expected.minimum) &&
+      (expected.scale === null || binding.scales.has(expected.scale))
+    ).map((binding) => binding.citation);
+    return allCitationsVerified(boundCitations) ? boundCitations : null;
   }
   const words = significantWords(value);
   const supportedWords = words.filter((word) => combinedEvidence.includes(word)).length;
@@ -118,6 +243,12 @@ export function materializeAnalysis(input: MaterializeInput): {
   const receipts: QuoteVerificationReceipt[] = [];
   let unsupportedItemsRemoved = 0;
   let truthReviewItems = 0;
+  const duplicateClaimIds = duplicateIds(input.draft.claims, (claim) => claim.claim_id);
+  const duplicateRequirementIds = duplicateIds(input.draft.requirements, (requirement) => requirement.id);
+  const duplicateEvaluationIds = duplicateIds(input.draft.evaluation.rules, (rule) => rule.id);
+  const duplicateRiskIds = duplicateIds(input.draft.risks, (risk) => risk.id);
+  const duplicateIdentityCount = duplicateClaimIds.size + duplicateRequirementIds.size +
+    duplicateEvaluationIds.size + duplicateRiskIds.size;
 
   const verify = (
     draftCitations: DraftAnalysis["claims"][number]["citations"]
@@ -148,6 +279,11 @@ export function materializeAnalysis(input: MaterializeInput): {
   const reviewClaims: AnalysisResult["claims"] = [];
   let unknownClaimCount = 0;
   for (const claim of input.draft.claims) {
+    if (duplicateClaimIds.has(claim.claim_id)) {
+      unsupportedItemsRemoved += 1;
+      truthReviewItems += 1;
+      continue;
+    }
     const checked = verify(claim.citations);
     const matchingCitations = checked.citations.filter(
       (citation) => citation.document_sha256 === claim.document_sha256
@@ -223,6 +359,11 @@ export function materializeAnalysis(input: MaterializeInput): {
   }> = [];
   const reviewRequirements: AnalysisResult["requirements"] = [];
   for (const requirement of input.draft.requirements) {
+    if (duplicateRequirementIds.has(requirement.id)) {
+      unsupportedItemsRemoved += 1;
+      truthReviewItems += 1;
+      continue;
+    }
     const checked = verify(requirement.citations);
     const matchingCitations = checked.citations.filter(
       (citation) => citation.document_sha256 === requirement.document_sha256
@@ -287,6 +428,11 @@ export function materializeAnalysis(input: MaterializeInput): {
     document: MaterializeInput["documents"][number];
   }> = [];
   for (const rule of input.draft.evaluation.rules) {
+    if (duplicateEvaluationIds.has(rule.id)) {
+      unsupportedItemsRemoved += 1;
+      truthReviewItems += 1;
+      continue;
+    }
     const checked = verify(rule.citations);
     const document = input.documents.find((item) => item.index.documentSha256 === rule.document_sha256);
     const sourceConsistent = Boolean(document && checked.everyCandidateVerified &&
@@ -350,6 +496,11 @@ export function materializeAnalysis(input: MaterializeInput): {
     document: MaterializeInput["documents"][number];
   }> = [];
   for (const risk of input.draft.risks) {
+    if (duplicateRiskIds.has(risk.id)) {
+      unsupportedItemsRemoved += 1;
+      truthReviewItems += 1;
+      continue;
+    }
     const checked = verify(risk.citations);
     const document = input.documents.find((item) => item.index.documentSha256 === risk.document_sha256);
     const supported = Boolean(document && checked.everyCandidateVerified &&
@@ -375,9 +526,24 @@ export function materializeAnalysis(input: MaterializeInput): {
     effect: risk.effect,
     citations
   })));
+  const supersededSourceCitations = [
+    ...claimReconciliation.facts,
+    ...requirementReconciliation.facts,
+    ...evaluationReconciliation.facts
+  ].filter((fact) => fact.status === "superseded").flatMap((fact) => fact.citations);
   const risks: AnalysisResult["risks"] = riskReconciliation.facts.flatMap((fact) => {
     const draft = validRiskDrafts.find((item) => item.risk.id === fact.id)?.risk;
     if (!draft || draft.effect === "delete" || fact.status !== "active") return [];
+    const dependsOnSupersededFact = fact.citations.some((riskCitation) =>
+      supersededSourceCitations.some((sourceCitation) =>
+        citationsDescribeSameSourceFact(riskCitation, sourceCitation)
+      )
+    );
+    if (dependsOnSupersededFact) {
+      unsupportedItemsRemoved += 1;
+      truthReviewItems += 1;
+      return [];
+    }
     return [{
       id: draft.id,
       severity: draft.severity,
@@ -408,6 +574,9 @@ export function materializeAnalysis(input: MaterializeInput): {
   }
   if (truthReviewItems > 0) {
     blockingUnknowns.push("One or more extracted items failed source, scalar, or field-specific evidence validation.");
+  }
+  if (duplicateIdentityCount > 0) {
+    blockingUnknowns.push("One or more model records reused an ambiguous identity and were withheld.");
   }
   if (conflicts.length > 0) {
     blockingUnknowns.push("The package contains unresolved amendment conflicts.");
@@ -440,18 +609,23 @@ export function materializeAnalysis(input: MaterializeInput): {
   const activeClaimSources = claimReconciliation.facts.flatMap((fact) => {
     if (fact.status !== "active") return [];
     const draft = validClaimDrafts.find((item) => item.claim.claim_id === fact.id)?.claim;
-    return draft ? [{ topic: draft.topic, value: fact.value }] : [];
+    return draft ? [{ topic: draft.topic, value: fact.value, citations: fact.citations }] : [];
   });
+  const citationHasSummaryAnchor = (field: keyof typeof SUMMARY_TOPIC_PATTERNS, citation: Citation) =>
+    citation.verified && SUMMARY_TOPIC_PATTERNS[field].test(citation.evidence_quote);
   const sourceSupportsSummary = (field: keyof typeof SUMMARY_TOPIC_PATTERNS, value: string | null) => {
     if (value === null) return false;
     const normalized = normalizeEvidenceText(value);
     if (field === "current_selection_method" && evaluationValues.selection_method &&
-      normalizeEvidenceText(evaluationValues.selection_method) === normalized) return true;
+      normalizeEvidenceText(evaluationValues.selection_method) === normalized &&
+      uniqueEvaluationCitations.some((citation) => citationHasSummaryAnchor(field, citation))) return true;
     if (field === "scope" && requirements.some((requirement) =>
-      requirement.status === "active" && normalizeEvidenceText(requirement.text) === normalized
+      requirement.status === "active" && normalizeEvidenceText(requirement.text) === normalized &&
+      requirement.citations.some((citation) => citationHasSummaryAnchor(field, citation))
     )) return true;
     return activeClaimSources.some((source) =>
-      SUMMARY_TOPIC_PATTERNS[field].test(source.topic) && normalizeEvidenceText(source.value) === normalized
+      SUMMARY_TOPIC_PATTERNS[field].test(source.topic) && normalizeEvidenceText(source.value) === normalized &&
+      source.citations.some((citation) => citationHasSummaryAnchor(field, citation))
     );
   };
   const safeSummary = {

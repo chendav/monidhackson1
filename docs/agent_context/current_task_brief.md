@@ -2,9 +2,9 @@
 
 - Task ID: MH-001
 - Title: RFP X-Ray contest MVP
-- Status: revision round 1 after independent REQUEST_CHANGES
+- Status: Revision 3 release candidate awaiting independent re-review
 - Chief owner: chief
-- Updated: 2026-09-02
+- Updated: 2026-09-03
 
 ## Outcome
 
@@ -53,15 +53,16 @@ reconciliation, grounded Q&A, citations, cleanup proof, and per-run cost.
 
 ## Current Phase
 
-Independent review completed against commit `96641c6` with one P0 and six P1
-findings. Static checks, official-fixture checks, build, and local browser E2E
-passed, but the product is not releasable until the cleanup, production guest,
-summary-evidence, amendment, spend-bound, runtime-config, and SSRF findings are
-fixed and independently re-reviewed.
+The latest independent exact-commit review of `230e382` found four P1 lifecycle
+issues and no P0. Specialist audits found semantic reconciliation and upload
+issuance weaknesses. The Revision 3 working tree fixes those findings and passes
+104 local tests, the five-official-PDF audit, production build, and 14 browser
+tests. Credentialed Monid/Blob/Neon/Workflow/Turnstile deployment gates remain;
+this is not yet a release approval.
 
 ## Immediate Next Action
 
-Run revision round 1 with bounded frontend and backend assignments, rerun the
-entire QA gate plus adversarial regressions, then return the resulting commit to
-the independent Reviewer. Do not deploy or run paid providers before P0/P1 is
-zero and the required credentials are configured.
+Commit the Revision 3 candidate, rerun the exact-commit QA gate, and return it to
+the same independent Reviewer. Require `APPROVE`, P0=0, and P1=0 before any
+release claim; keep production fail-closed until platform credentials and live
+provider evidence are configured.

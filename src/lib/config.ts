@@ -43,7 +43,13 @@ const EnvironmentSchema = z.object({
   MONID_PARSE_RESERVE_MICRO_USD: z.coerce.number().int().nonnegative().default(4_500),
   RUN_TTL_HOURS: z.coerce.number().int().positive().max(168).default(24),
   GUEST_RUNS_PER_HOUR: z.coerce.number().int().positive().default(3),
-  API_RUNS_PER_HOUR: z.coerce.number().int().positive().default(30)
+  API_RUNS_PER_HOUR: z.coerce.number().int().positive().default(30),
+  MAX_OUTSTANDING_UPLOAD_GRANTS: z.coerce.number().int().positive().max(20).default(5),
+  GUEST_UPLOAD_DOCUMENTS_PER_DAY: z.coerce.number().int().positive().default(15),
+  API_UPLOAD_DOCUMENTS_PER_DAY: z.coerce.number().int().positive().default(150),
+  GUEST_UPLOAD_BYTES_PER_DAY: z.coerce.number().int().positive().default(375 * 1024 * 1024),
+  API_UPLOAD_BYTES_PER_DAY: z.coerce.number().int().positive().default(3_750 * 1024 * 1024),
+  GLOBAL_UPLOAD_BYTES_PER_DAY: z.coerce.number().int().positive().default(5 * 1024 * 1024 * 1024)
 });
 
 export type AppConfig = z.infer<typeof EnvironmentSchema>;

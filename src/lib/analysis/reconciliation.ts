@@ -42,6 +42,17 @@ function topicTokens(topic: string) {
 
 function canonicalTopicKey(fact: VersionedFact) {
   if (fact.factKey) return `owned:${normalizeEvidenceText(fact.factKey)}`;
+  const semanticText = normalizeEvidenceText([
+    fact.topic,
+    ...fact.citations.map((citation) => citation.evidence_quote)
+  ].join(" "));
+  if (
+    !/\b(?:row|table)\b/.test(normalizeEvidenceText(fact.topic)) &&
+    /\b(projection|projections|forecast|forecasts)\b/.test(semanticText) &&
+    /\b(horizon|end year|endpoint|extend|extends|through|until|out from|to 20\d{2})\b/.test(semanticText)
+  ) {
+    return "derived:projection-horizon";
+  }
   return topicTokens(fact.topic).toSorted().join(":");
 }
 
@@ -49,6 +60,37 @@ function hasVerifiedCitations(fact: VersionedFact) {
   return fact.citations.length > 0 && fact.citations.every(
     (citation) => citation.verified && citation.pdf_page_1based !== null &&
       citation.document_sha256 === fact.documentSha256.toLowerCase()
+  );
+}
+
+function hasMutationLanguage(fact: VersionedFact) {
+  const evidence = normalizeEvidenceText(fact.citations.map((citation) => citation.evidence_quote).join(" "));
+  if (fact.effect === "delete") {
+    return /\b(delete(?:d)?|remove(?:d)?|strike|stricken|cancel(?:led|ed)?|no longer applies)\b/.test(evidence);
+  }
+  return /\b(amend(?:ed|s|ment)?|replace(?:s|d)?|substitut(?:e|ed)|revis(?:e|ed)|chang(?:e|ed)|extend(?:s|ed)?|updat(?:e|ed)|supersed(?:e|ed))\b/.test(evidence);
+}
+
+function mutationScopeTokens(fact: VersionedFact) {
+  return topicTokens(fact.topic).filter((token) =>
+    !["row", "table", "controlling"].includes(token) && !/^\d+$/.test(token)
+  );
+}
+
+function sharesMutationScope(left: VersionedFact, right: VersionedFact) {
+  const rightTokens = new Set(mutationScopeTokens(right));
+  return mutationScopeTokens(left).filter((token) => rightTokens.has(token)).length >= 2;
+}
+
+function mutationIsSourceAuthorized(fact: VersionedFact, allFacts: VersionedFact[]) {
+  if (fact.effect === "add") return true;
+  if (fact.documentRole !== "amendment" || !hasVerifiedCitations(fact)) return false;
+  if (hasMutationLanguage(fact)) return true;
+  return allFacts.some((directive) =>
+    directive !== fact && directive.documentSha256 === fact.documentSha256 &&
+    sameStage(directive, fact) && hasVerifiedCitations(directive) &&
+    directive.effect !== "add" && hasMutationLanguage(directive) &&
+    sharesMutationScope(directive, fact)
   );
 }
 
@@ -131,25 +173,27 @@ function groupedFacts(input: VersionedFact[]) {
   };
 
   const firstByKey = new Map<string, number>();
-  const indexById = new Map(input.map((fact, index) => [fact.id, index]));
   for (const [index, fact] of input.entries()) {
     const key = canonicalTopicKey(fact);
     const first = firstByKey.get(key);
     if (first === undefined) firstByKey.set(key, index);
     else join(first, index);
-    if (hasVerifiedCitations(fact)) {
-      for (const supersededId of fact.supersedesIds ?? []) {
-        const target = indexById.get(supersededId);
-        if (target !== undefined) join(index, target);
-      }
-    }
+    // Model-provided IDs are labels, not mutation capabilities. In
+    // particular, supersedesIds never joins otherwise unrelated topics.
   }
   for (let left = 0; left < input.length; left += 1) {
     for (let right = left + 1; right < input.length; right += 1) {
       if (root(left) !== root(right) && topicsLikelyAlias(input[left], input[right])) join(left, right);
     }
   }
-  return Map.groupBy(input, (fact) => root(indexById.get(fact.id) ?? 0));
+  const groups = new Map<number, VersionedFact[]>();
+  for (const [index, fact] of input.entries()) {
+    const key = root(index);
+    const group = groups.get(key) ?? [];
+    group.push(fact);
+    groups.set(key, group);
+  }
+  return groups;
 }
 
 function scalarValuesConflict(candidates: VersionedFact[]) {
@@ -178,18 +222,22 @@ export function reconcileVersionedFacts(input: VersionedFact[]): {
       }
 
       const authoritative = stage.filter(hasVerifiedCitations);
-      const explicitIds = new Set(authoritative.flatMap((fact) => fact.supersedesIds ?? []));
       const replacesCurrent = authoritative.some(
-        (fact) => fact.effect === "replace" || fact.effect === "delete"
+        (fact) => mutationIsSourceAuthorized(fact, input) &&
+          (fact.effect === "replace" || fact.effect === "delete")
       );
       active = active.filter((fact) => {
-        const superseded = replacesCurrent || explicitIds.has(fact.id);
+        const superseded = replacesCurrent;
         if (superseded) result.set(fact.id, { ...fact, status: "superseded" });
         return !superseded;
       });
       if (replacesCurrent) currentConflict = null;
 
-      const candidates = authoritative.filter((fact) => fact.effect !== "delete");
+      const candidates = authoritative
+        .filter((fact) => fact.effect !== "delete")
+        .map((fact): VersionedFact => mutationIsSourceAuthorized(fact, input)
+          ? fact
+          : { ...fact, effect: "add" });
       const distinctValues = new Map<string, string>();
       for (const fact of candidates) {
         const key = normalizeEvidenceText(fact.value);
@@ -223,6 +271,24 @@ export function reconcileVersionedFacts(input: VersionedFact[]): {
         // history. Neither can become a current assertion.
         result.set(fact.id, { ...fact, status: "superseded" });
       }
+    }
+    if (!currentConflict && scalarValuesConflict(active)) {
+      const distinctValues = new Map<string, string>();
+      for (const fact of active) {
+        const key = normalizeEvidenceText(fact.value);
+        if (!distinctValues.has(key)) distinctValues.set(key, fact.value);
+        const conflicted: ReconciledFact = { ...fact, status: "conflicted" };
+        result.set(fact.id, conflicted);
+      }
+      currentConflict = {
+        id: `conflict-${canonicalTopicKey(active[0]).replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 48) || "topic"}`,
+        topic: active[0].topic,
+        status: "conflicted",
+        candidate_values: [...distinctValues.values()],
+        safe_answer: "The supplied amendment is internally inconsistent; clarification is required.",
+        citations: deduplicateCitations(active.flatMap((fact) => fact.citations))
+      };
+      active = active.map((fact) => ({ ...fact, status: "conflicted" }));
     }
     if (currentConflict && active.some((fact) => fact.status === "conflicted")) {
       conflicts.push(currentConflict);

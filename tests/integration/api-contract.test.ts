@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import {
   AnalysisResultSchema,
@@ -325,18 +325,50 @@ describe("versioned public API contract", () => {
     const input = {
       documents: [{ role: "base", source: { type: "url", url: "https://canadabuys.canada.ca/tender.pdf" } }]
     };
+    const schedule = vi.fn(async () => null);
     const first = await createRun(input, principal, "contract-request-1", {
-      config, store, budget, schedule: async () => null
+      config, store, budget, schedule
     });
     const replay = await createRun(input, principal, "contract-request-1", {
-      config, store, budget, schedule: async () => null
+      config, store, budget, schedule
     });
     expect(CreateRunResponseSchema.parse(first.response).run_id).toBe(first.record.id);
     expect(replay.created).toBe(false);
     expect(replay.record.id).toBe(first.record.id);
+    expect(schedule).toHaveBeenCalledTimes(2);
     expect(RunStatusResponseSchema.parse(toRunStatusResponse(first.record)).cleanup_confirmed).toBe(false);
     await expect(createRun(input, principal, "contract-request-2", {
       config, store, budget, schedule: async () => null
     })).rejects.toMatchObject({ code: "RATE_LIMITED", httpStatus: 429 });
+  });
+
+  it("resumes admission when a crash left an idempotent run queued before scheduling", async () => {
+    const store = new InMemoryRunStore();
+    const budget = new InMemoryBudgetGuard(config);
+    const principal = { id: "guest:crash", quotaKey: "ip:crash", kind: "guest" as const };
+    const input = {
+      documents: [{ role: "base" as const, source: {
+        type: "url" as const,
+        url: "https://canadabuys.canada.ca/crash.pdf"
+      } }]
+    };
+    const stranded = await store.create({
+      ownerId: principal.id,
+      quotaKey: principal.quotaKey,
+      input,
+      idempotencyKey: "crashed-admission",
+      reservedMicroUsd: 250_000
+    });
+    const schedule = vi.fn(async () => "workflow-recovered");
+
+    const replay = await createRun(input, principal, "crashed-admission", {
+      config, store, budget, schedule
+    });
+
+    expect(replay.created).toBe(false);
+    expect(replay.record.id).toBe(stranded.record.id);
+    expect(replay.record.workflowRunId).toBe("workflow-recovered");
+    expect(schedule).toHaveBeenCalledExactlyOnceWith(stranded.record.id);
+    expect((await store.get(stranded.record.id))?.workflowRunId).toBe("workflow-recovered");
   });
 });

@@ -1,5 +1,5 @@
 import { neon } from "@neondatabase/serverless";
-import { and, asc, eq, inArray, isNotNull, lte, ne, or, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNotNull, isNull, lte, ne, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/neon-http";
 import { runs } from "@/db/schema";
 import { AppError } from "@/lib/errors";
@@ -222,6 +222,21 @@ export class NeonRunStore implements RunStore {
 
   async listExpired(now = new Date()): Promise<RunRecord[]> {
     const rows = await this.db.select().from(runs).where(lte(runs.expiresAt, now));
+    return rows.map(fromRow);
+  }
+
+  async listUnscheduledQueued(before: Date, limit = 20): Promise<RunRecord[]> {
+    const boundedLimit = Math.min(Math.max(Math.trunc(limit), 1), 100);
+    const rows = await this.db
+      .select()
+      .from(runs)
+      .where(and(
+        eq(runs.status, "queued"),
+        isNull(runs.workflowRunId),
+        lte(runs.createdAt, before)
+      ))
+      .orderBy(asc(runs.createdAt), asc(runs.id))
+      .limit(boundedLimit);
     return rows.map(fromRow);
   }
 

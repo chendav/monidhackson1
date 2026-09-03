@@ -54,6 +54,46 @@ function blankRange(value: string, start: number, end: number) {
   return `${value.slice(0, start)}${" ".repeat(end - start)}${value.slice(end)}`;
 }
 
+const TIME_ZONE_ALIASES: ReadonlyArray<readonly [RegExp, string]> = [
+  [/\b(?:coordinated universal time|universal time coordinated|utc)\b/g, "utc"],
+  [/\b(?:greenwich mean time|gmt)\b/g, "gmt"],
+  [/\b(?:mountain standard time|mst)\b/g, "mst"],
+  [/\b(?:mountain daylight time|mdt)\b/g, "mdt"],
+  [/\b(?:central standard time|cst)\b/g, "cst"],
+  [/\b(?:central daylight time|cdt)\b/g, "cdt"],
+  [/\b(?:eastern standard time|est)\b/g, "est"],
+  [/\b(?:eastern daylight time|edt)\b/g, "edt"],
+  [/\b(?:pacific standard time|pst)\b/g, "pst"],
+  [/\b(?:pacific daylight time|pdt)\b/g, "pdt"],
+  [/\b(?:atlantic standard time|ast)\b/g, "ast"],
+  [/\b(?:atlantic daylight time|adt)\b/g, "adt"],
+  [/\b(?:newfoundland standard time|nst)\b/g, "nst"],
+  [/\b(?:newfoundland daylight time|ndt)\b/g, "ndt"]
+];
+
+function recordObjectiveModifiers(value: string, tokens: Set<string>) {
+  for (const [pattern, canonical] of TIME_ZONE_ALIASES) {
+    if (pattern.test(value)) tokens.add(`timezone:${canonical}`);
+    pattern.lastIndex = 0;
+  }
+
+  for (const match of value.matchAll(/(?<![\p{L}\p{N}])(\d+(?:\.\d+)?)\s*(?:%|per\s*cent|percent(?:age)?)(?![\p{L}])/gu)) {
+    tokens.add(`percent:${canonicalNumber(match[1])}`);
+  }
+  for (const match of value.matchAll(/\b(cad|usd|gbp|eur|aud|nzd|jpy|chf)\b/g)) {
+    tokens.add(`currency:${match[1]}`);
+  }
+  for (const match of value.matchAll(/\b(thousand|million|billion|trillion)\b/g)) {
+    tokens.add(`magnitude:${match[1]}`);
+  }
+
+  if (/\b(?:at least|minimum(?: of)?|no less than)\b/.test(value)) tokens.add("bound:minimum");
+  if (/\b(?:at most|maximum(?: of)?|up to|no more than|not exceed(?:ing)?)\b/.test(value)) {
+    tokens.add("bound:maximum");
+  }
+  if (/\b(?:exactly|equal to)\b/.test(value)) tokens.add("bound:exact");
+}
+
 /**
  * Extracts only objectively comparable scalar tokens. Dates and times are
  * canonicalized before ordinary numbers so equivalent renderings such as
@@ -63,6 +103,11 @@ export function extractAssertionTokens(value: string): Set<string> {
   let remainder = value.normalize("NFKC").toLocaleLowerCase("en-CA");
   const tokens = new Set<string>();
   const ranges: Array<{ start: number; end: number }> = [];
+
+  // These modifiers are independently objective. Capturing them prevents a
+  // numerically identical assertion from silently changing MDT to EST, CAD to
+  // USD, a percentage to an unrelated count, or a maximum into a minimum.
+  recordObjectiveModifiers(remainder, tokens);
 
   const recordDate = (start: number, end: number, year: number, month: number, day: number) => {
     if (month < 1 || month > 12 || day < 1 || day > 31) return;
