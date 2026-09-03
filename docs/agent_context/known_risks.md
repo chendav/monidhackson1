@@ -4,7 +4,7 @@ Updated: 2026-09-02
 
 | ID | Trigger | Impact | Mitigation | Owner | Status |
 |---|---|---|---|---|---|
-| R-1 | Monid parse schema or retention differs from assumptions | Live pipeline or privacy claim becomes invalid | Run discover/inspect/paid spike first; gate adapter and disclosure on verified facts | backend | open |
+| R-1 | Monid parse schema or retention differs from assumptions | Live pipeline or privacy claim becomes invalid | Adapter uses current nested run contract; run credentialed inspect/probe; disclose provider retention as unknown | backend | open |
 | R-2 | Blob/source deletion fails | Private source remains available and READY claim is false | Cleanup receipt gate, retries, sweeper, fail closed | backend | open |
 | R-3 | Model fabricates page numbers or merges unrelated clauses | Material procurement error | Model emits quote/chunk only; server attaches and verifies physical pages | backend | open |
 | R-4 | Amendment ordering or replacement is wrong | Superseded requirements appear active | Deterministic manifest/reconciliation rules and CER golden suite | backend | open |
@@ -13,3 +13,4 @@ Updated: 2026-09-02
 | R-7 | Missing external deployment credentials | Public demo cannot be published | Deliver verified local app/config first; report exact credential blocker | chief | open |
 | R-8 | Copyrighted tender files enter Git | Unauthorized redistribution and repository bloat | Commit only URLs, hashes, facts, and synthetic fixtures | chief | open |
 | R-9 | Deadline-driven scope expansion | Core auditability remains unfinished | Preserve must-have gates; omit search, billing, accounts, collaboration | chief | open |
+| R-10 | Direct copying from ontology lacks an explicit repository license | Legal and dependency risk | Port independently verified invariants and tests, not Python/Marker source or runtime | chief | mitigated |

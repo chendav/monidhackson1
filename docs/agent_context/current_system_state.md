@@ -14,6 +14,14 @@ Updated: 2026-09-02
   therefore require signed direct Blob upload rather than multipart API proxy.
 - Official OpenAI documentation currently supports Responses API Structured
   Outputs with the JavaScript SDK and Zod helpers.
+- Monid CLI 0.1.7 is installed from the official scoped package
+  `@monid-ai/cli`; the local Monid keystore currently has no configured key.
+- Current Monid run input is nested under `input.body`, `input.queryParams`, and
+  `input.pathParams`; adapter code must not rely on older flat examples.
+- Context.dev parse currently advertises a 25MB limit, a short-lived Markdown
+  download link, and a longer provider-side artifact lifetime.
+- Ontology's reusable strengths are fail-closed SHA/page/quote verification,
+  append-only receipts, conflict preservation, and bounded grounded queries.
 
 ## Inferred
 
@@ -22,8 +30,8 @@ Updated: 2026-09-02
 
 ## Unknown
 
-- Exact current Monid discover/inspect/run schemas, unit price, result-link TTL,
-  provider retention, and deletion semantics require a credentialed spike.
+- Exact account-visible context.dev inspect schema, ZDR propagation, signed-URL
+  compatibility, and provider deletion semantics require a credentialed spike.
 - Vercel, Neon, Blob, Turnstile, and deployment credentials are not yet verified.
 - Availability and measured extraction quality of the configured OpenAI model
   are not yet verified.
@@ -33,3 +41,4 @@ Updated: 2026-09-02
 - Follow applicable repository governance and the MH-001 task packet.
 - Do not store secrets, raw PDFs, raw parsed Markdown, or signed source URLs.
 - Preserve user-authored untracked governance files and unrelated work.
+- Node must be at least 22.13 because of the installed PDF.js runtime.
