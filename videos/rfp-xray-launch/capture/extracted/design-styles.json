@@ -1,0 +1,231 @@
+{
+  "typography": [
+    {
+      "role": "display",
+      "fontFamily": "Arial",
+      "fontSize": "61.6px",
+      "fontWeight": "760",
+      "lineHeight": "60.368px",
+      "letterSpacing": "-3.08px",
+      "color": "#17212B",
+      "sampleText": "Analyze a tender pack"
+    },
+    {
+      "role": "heading",
+      "fontFamily": "Arial",
+      "fontSize": "28.8px",
+      "fontWeight": "700",
+      "lineHeight": "31.104px",
+      "letterSpacing": "-1.008px",
+      "color": "#F4F8FA",
+      "sampleText": "Repair & Maintenance on various File Bays"
+    },
+    {
+      "role": "body",
+      "fontFamily": "Arial",
+      "fontSize": "16px",
+      "fontWeight": "400",
+      "lineHeight": "24px",
+      "letterSpacing": "normal",
+      "color": "#5B6976",
+      "sampleText": "Upstream retention: Context.dev zero-data retention is not e"
+    },
+    {
+      "role": "link",
+      "fontFamily": "Arial",
+      "fontSize": "16px",
+      "fontWeight": "700",
+      "lineHeight": "24px",
+      "letterSpacing": "normal",
+      "color": "#F8FBFC",
+      "sampleText": "Skip to workspace"
+    },
+    {
+      "role": "heading-3",
+      "fontFamily": "Arial",
+      "fontSize": "15.68px",
+      "fontWeight": "700",
+      "lineHeight": "23.52px",
+      "letterSpacing": "normal",
+      "color": "#3D3020",
+      "sampleText": "Security annex conflict"
+    },
+    {
+      "role": "label",
+      "fontFamily": "Arial",
+      "fontSize": "11.84px",
+      "fontWeight": "800",
+      "lineHeight": "17.76px",
+      "letterSpacing": "normal",
+      "color": "#2D3A46",
+      "sampleText": "CanadaBuys PDF URL"
+    }
+  ],
+  "spacing": {
+    "observed": [
+      4,
+      6,
+      8,
+      9,
+      10,
+      12,
+      13,
+      14,
+      15,
+      17,
+      18,
+      20,
+      36,
+      44
+    ],
+    "baseUnit": 4
+  },
+  "radius": [
+    "7px"
+  ],
+  "shadows": [
+    {
+      "value": "rgba(33, 62, 80, 0.15) 0px 1px 4px 0px",
+      "count": 1
+    },
+    {
+      "value": "rgba(22, 55, 72, 0.16) 0px 18px 46px 0px",
+      "count": 1
+    }
+  ],
+  "buttons": [
+    {
+      "label": "CanadaBuys URL",
+      "background": "#FFFFFF",
+      "backgroundImage": "",
+      "backdropFilter": "",
+      "color": "#17425F",
+      "padding": "8px 15px",
+      "borderRadius": "7px",
+      "border": "0px none rgb(23, 66, 95)",
+      "boxShadow": "rgba(33, 62, 80, 0.15) 0px 1px 4px 0px",
+      "fontSize": "13.28px",
+      "fontWeight": "800",
+      "height": "42px"
+    },
+    {
+      "label": "PDF pack",
+      "background": "transparent",
+      "backgroundImage": "",
+      "backdropFilter": "",
+      "color": "#44525F",
+      "padding": "8px 15px",
+      "borderRadius": "7px",
+      "border": "0px none rgb(68, 82, 95)",
+      "boxShadow": "none",
+      "fontSize": "13.28px",
+      "fontWeight": "800",
+      "height": "42px"
+    },
+    {
+      "label": "Add amendment URL 2 / 5",
+      "background": "transparent",
+      "backgroundImage": "",
+      "backdropFilter": "",
+      "color": "#17425F",
+      "padding": "1px 6px",
+      "borderRadius": "10px",
+      "border": "1px dashed rgb(170, 184, 195)",
+      "boxShadow": "none",
+      "fontSize": "12.8px",
+      "fontWeight": "800",
+      "height": "42px"
+    },
+    {
+      "label": "Analyze pack",
+      "background": "#17425F",
+      "backgroundImage": "",
+      "backdropFilter": "",
+      "color": "#F8FBFC",
+      "padding": "9px 14px",
+      "borderRadius": "7px",
+      "border": "1px solid rgb(23, 66, 95)",
+      "boxShadow": "none",
+      "fontSize": "12.64px",
+      "fontWeight": "850",
+      "height": "42px"
+    },
+    {
+      "label": "Open Edmonton sample",
+      "background": "#EEF6F8",
+      "backgroundImage": "",
+      "backdropFilter": "",
+      "color": "#173748",
+      "padding": "9px 14px",
+      "borderRadius": "7px",
+      "border": "1px solid rgb(215, 231, 237)",
+      "boxShadow": "none",
+      "fontSize": "12.64px",
+      "fontWeight": "850",
+      "height": "42px"
+    }
+  ],
+  "cards": [
+    {
+      "label": "card",
+      "background": "#FBFCFD",
+      "backgroundImage": "",
+      "backdropFilter": "",
+      "color": "#17212B",
+      "padding": "15px",
+      "borderRadius": "10px",
+      "border": "1px solid rgb(203, 213, 221)",
+      "boxShadow": "none",
+      "fontSize": "16px",
+      "fontWeight": "400",
+      "height": "130.484px"
+    },
+    {
+      "label": "card",
+      "background": "#173748",
+      "backgroundImage": "",
+      "backdropFilter": "",
+      "color": "#F4F8FA",
+      "padding": "36px",
+      "borderRadius": "10px",
+      "border": "0px none rgb(244, 248, 250)",
+      "boxShadow": "rgba(22, 55, 72, 0.16) 0px 18px 46px 0px",
+      "fontSize": "16px",
+      "fontWeight": "400",
+      "height": "584.641px"
+    },
+    {
+      "label": "card",
+      "background": "#FFFFFF",
+      "backgroundImage": "",
+      "backdropFilter": "",
+      "color": "#17212B",
+      "padding": "15px",
+      "borderRadius": "10px",
+      "border": "1px solid rgb(184, 208, 223)",
+      "boxShadow": "rgba(18, 42, 56, 0.18) 0px 20px 55px 0px",
+      "fontSize": "16px",
+      "fontWeight": "400",
+      "height": "80.9531px"
+    }
+  ],
+  "nav": {
+    "label": "navigation",
+    "background": "#FAFCFD",
+    "backgroundImage": "",
+    "backdropFilter": "",
+    "color": "#17212B",
+    "padding": "0px 220px",
+    "borderRadius": "0px",
+    "border": "",
+    "boxShadow": "none",
+    "fontSize": "16px",
+    "fontWeight": "400",
+    "height": "66px"
+  },
+  "chips": [],
+  "statCells": [],
+  "tabs": [],
+  "backgrounds": [],
+  "glass": []
+}

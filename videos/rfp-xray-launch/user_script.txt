@@ -1,0 +1,11 @@
+0–6s: Show the official bidworx Starter £190/month price.
+6–12s: State that RFP X-Ray replaces analysis of one supplied RFP, not tender search or a complete bid platform.
+12–22s: Supply the CER main RFP and three amendments.
+22–35s: Show real Monid parsing, app-controlled source deletion, and live cost.
+35–52s: Show mandatory gates, 50/94, 70% technical plus 30% price, and the current deadline.
+52–68s: Show Amendment 003 replacing M3 Appendix 1 and the internal 2050/2055 conflict with three citations.
+68–78s: Ask one grounded question and show the cited answer.
+78–87s: Show Audit & Cost, including any failed calls.
+87–90s: “bidworx Starter: £190/month. RFP X-Ray: $X per audited run. We replaced tender analysis—not the rest.”
+
+Never fabricate progress, deletion, cost, latency, failed attempts, or citations. If waiting is edited out, disclose the true end-to-end duration.

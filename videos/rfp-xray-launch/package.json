@@ -1,0 +1,14 @@
+{
+  "name": "rfp-xray-launch",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "npx --yes hyperframes@0.8.27 preview",
+    "evidence:check": "node scripts/verify-evidence-gates.mjs",
+    "test:evidence": "node --test scripts/verify-evidence-gates.test.mjs",
+    "build": "node scripts/verify-evidence-gates.mjs && npx --yes hyperframes@0.8.27 check",
+    "check": "node scripts/verify-evidence-gates.mjs && npx --yes hyperframes@0.8.27 check",
+    "render": "node scripts/verify-evidence-gates.mjs && npx --yes hyperframes@0.8.27 render",
+    "publish": "node scripts/verify-evidence-gates.mjs && npx --yes hyperframes@0.8.27 publish"
+  }
+}

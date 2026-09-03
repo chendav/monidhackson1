@@ -1,0 +1,38 @@
+[a] Skip to workspace
+[span] RFP X-Ray
+[span] Document-only. No search.
+[a] API
+[p] Procurement analysis workspace
+[h1] Analyze a tender pack
+[strong] Upstream retention:
+[p] Context.dev zero-data retention is not enabled. A verified parse reported a seven-day artifact expiry; do not submit confidential material unless that is acceptable.
+[legend] Choose a source method
+[button] CanadaBuys URL
+[button] PDF pack
+[strong] Base document
+[label] CanadaBuys PDF URL
+[label] Document role
+[option] Base RFP
+[option] Amendment
+[button] Add amendment URL
+[p] HTTPS links on canadabuys.canada.ca only. Links found inside a PDF are never followed.
+[span] Private transfer. App-controlled source files are deleted before results are released.
+[button] Analyze
+[button] pack
+[p] Edmonton verified sample
+[h2] Repair & Maintenance on various File Bays
+[span] Golden fixture
+[p] See the full workspace with a real 55-page procurement package before uploading your own.
+[dt] Physical pages
+[dt] Award method
+[dd] Lowest evaluated price
+[dt] Search events
+[span] High risk
+[h3] Security annex conflict
+[p] One clause calls the checklist Annex D while the package identifies it as Annex E.
+[span] Verified evidence on PDF page 17
+[span] Source cleanup confirmed
+[span] Document-only
+[button] Open Edmonton sample
+[strong] Security verification unavailable
+[span] Guest changes are disabled because verification is not configured.
