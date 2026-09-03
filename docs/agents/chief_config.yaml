@@ -1,0 +1,12 @@
+version: 1
+chief_entrypoint: docs/agents/chief_agent.md
+role_catalog: docs/agents/role_catalog.yaml
+profile_context_bundles: docs/agent_context/profile_context_bundles.yaml
+task_registry: docs/agent_tasks/registry.yaml
+spec_template: docs/specs/template
+knowledge_root: docs/agent_knowledge
+default_max_implementers: 2
+independent_review_required: true
+max_revision_rounds: 3
+full_history_by_default: false
+knowledge_promotion_requires_review: true

@@ -1,0 +1,44 @@
+version: 1
+mandatory_common:
+  - AGENTS.md
+  - docs/agents/chief_config.yaml
+  - docs/agent_context/current_task_brief.md
+  - docs/agent_context/current_system_state.md
+  - docs/agent_context/known_risks.md
+  - docs/agent_context/qa_regressions.md
+  - "{spec_dir}/spec.md"
+  - "{spec_dir}/tasks.md"
+  - "{spec_dir}/agent_routing.yaml"
+  - "{spec_dir}/qa_gate.yaml"
+forbidden_common:
+  - unrelated historical task packets
+  - full conversation history without a recorded reason
+  - credentials, secrets, and unrelated private data
+profiles:
+  chief:
+    role: docs/agents/chief_agent.md
+    required_output: [routing_decision, evidence, risks, memory_disposition]
+  implementer:
+    role: docs/agents/roles/implementer.md
+    required_output: [changed_files, checks, assumptions, risks, handoff]
+  backend:
+    role: docs/agents/roles/backend.md
+    required_output: [changed_files, checks, api_storage_impact, risks, handoff]
+  frontend:
+    role: docs/agents/roles/frontend.md
+    required_output: [changed_files, checks, user_visible_states, risks, handoff]
+  operations:
+    role: docs/agents/roles/operations.md
+    required_output: [changed_files, checks, environment_boundaries, risks, handoff]
+  analyst:
+    role: docs/agents/roles/analyst.md
+    required_output: [data_sources, metrics, proof_boundary, risks, handoff]
+  researcher:
+    role: docs/agents/roles/researcher.md
+    required_output: [sources_checked, currency_date, findings, risks, handoff]
+  reviewer:
+    role: docs/agents/roles/reviewer.md
+    required_output: [verdict, evidence, must_fix_items, residual_risks]
+  writer:
+    role: docs/agents/roles/writer.md
+    required_output: [docs_changed, sources_verified, proof_boundaries, handoff]

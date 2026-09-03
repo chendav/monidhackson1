@@ -1,0 +1,7 @@
+max_revision_rounds: 3
+on_pass: close_check
+on_request_changes: delta_revision
+on_blocked: request_unblock
+on_exhausted: redesign_or_human
+scope_may_expand_automatically: false
+governance_may_change_automatically: false

@@ -1,0 +1,30 @@
+version: 1
+profiles:
+  chief:
+    role_file: docs/agents/chief_agent.md
+    edits: task packets, current context, registry, reviewed knowledge
+  implementer:
+    role_file: docs/agents/roles/implementer.md
+    edits: assigned include paths only
+  backend:
+    role_file: docs/agents/roles/backend.md
+    edits: assigned server, API, storage, or migration paths only
+  frontend:
+    role_file: docs/agents/roles/frontend.md
+    edits: assigned user-interface paths only
+  operations:
+    role_file: docs/agents/roles/operations.md
+    edits: assigned CI, deployment, environment, or runbook paths only
+  analyst:
+    role_file: docs/agents/roles/analyst.md
+    edits: assigned analysis, evaluation, or data-tooling paths only
+  researcher:
+    role_file: docs/agents/roles/researcher.md
+    edits: assigned research-note paths only
+  reviewer:
+    role_file: docs/agents/roles/reviewer.md
+    edits: none by default
+    independent: true
+  writer:
+    role_file: docs/agents/roles/writer.md
+    edits: assigned documentation paths only

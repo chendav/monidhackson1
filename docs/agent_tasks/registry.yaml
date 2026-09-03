@@ -1,0 +1,8 @@
+version: 1
+tasks:
+  - id: MH-001
+    title: RFP X-Ray contest MVP
+    status: active
+    spec_dir: docs/specs/MH-001-rfp-xray
+    chief: chief
+    opened: 2026-09-02

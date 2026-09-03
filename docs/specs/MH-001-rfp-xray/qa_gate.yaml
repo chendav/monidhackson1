@@ -1,0 +1,40 @@
+task_id: MH-001
+acceptance_checks:
+  - id: AC-1
+    command_or_method: pnpm test -- tests/unit/source-validation.test.ts
+    required: true
+  - id: AC-2
+    command_or_method: pnpm test -- tests/unit/closed-world.test.ts
+    required: true
+  - id: AC-3
+    command_or_method: pnpm test -- tests/integration/cleanup-gate.test.ts
+    required: true
+  - id: AC-4
+    command_or_method: pnpm test -- tests/unit/citations.test.ts
+    required: true
+  - id: AC-5
+    command_or_method: pnpm test -- tests/golden/edmonton.test.ts
+    required: true
+  - id: AC-6
+    command_or_method: pnpm test -- tests/golden/cer.test.ts
+    required: true
+  - id: AC-7
+    command_or_method: pnpm test -- tests/integration/api-contract.test.ts
+    required: true
+  - id: AC-8
+    command_or_method: pnpm exec playwright test
+    required: true
+  - id: AC-9
+    command_or_method: pnpm test -- tests/unit/security-budget.test.ts
+    required: true
+  - id: AC-10
+    command_or_method: pnpm check && pnpm build
+    required: true
+regression_checks:
+  - Edmonton and CER golden suites
+  - source cleanup failure state transition
+  - unsupported claim and prompt-injection fixtures
+review:
+  required: true
+  verdict: pending
+max_revision_rounds: 3

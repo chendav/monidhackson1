@@ -1,0 +1,10 @@
+task_id: "{{TASK_ID}}"
+acceptance_checks:
+  - id: AC-1
+    command_or_method: TODO
+    required: true
+regression_checks: []
+review:
+  required: true
+  verdict: pending
+max_revision_rounds: 3

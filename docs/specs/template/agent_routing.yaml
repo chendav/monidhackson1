@@ -1,0 +1,10 @@
+task_id: "{{TASK_ID}}"
+chief_profile: chief
+implementers:
+  - profile: implementer
+    tasks: [T1]
+reviewer:
+  profile: reviewer
+  independent_from: [implementer]
+parallel_groups:
+  - [T1]
