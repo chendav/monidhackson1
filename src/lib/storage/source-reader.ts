@@ -7,6 +7,9 @@ import { stagingBlobPath, type UploadStorage } from "@/lib/storage/uploads";
 
 type RunDocumentInput = CreateRunRequest["documents"][number];
 
+export const CANADABUYS_FETCH_USER_AGENT =
+  "RFP-X-Ray/1.0 (+https://rfp-xray.vercel.app)";
+
 export interface LoadedSource {
   documentId: string;
   role: RunDocumentInput["role"];
@@ -72,7 +75,10 @@ async function fetchCanadaBuysPdf(rawUrl: string, fetcher: typeof fetch): Promis
       redirect: "manual",
       credentials: "omit",
       referrerPolicy: "no-referrer",
-      headers: { accept: "application/pdf,application/octet-stream;q=0.8" },
+      headers: {
+        accept: "application/pdf,application/octet-stream;q=0.8",
+        "user-agent": CANADABUYS_FETCH_USER_AGENT
+      },
       signal: AbortSignal.timeout(20_000)
     });
     if (response.status >= 300 && response.status < 400) {
