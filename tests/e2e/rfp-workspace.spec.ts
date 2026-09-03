@@ -1,0 +1,376 @@
+import { expect, test } from "@playwright/test";
+
+const RUN_ID = "11111111-1111-4111-8111-111111111111";
+const REQUEST_ID = "22222222-2222-4222-8222-222222222222";
+const SHA_BASE = "a".repeat(64);
+const SHA_AMENDMENT = "b".repeat(64);
+
+function citation(overrides: Record<string, unknown> = {}) {
+  return {
+    document_sha256: SHA_BASE,
+    document_name: "100022184-A Request for Tender.pdf",
+    source_url: "https://canadabuys.canada.ca/en/tender-opportunities/opportunity-listing/example",
+    pdf_page_1based: 17,
+    printed_page_label: "12",
+    section: "Special Conditions",
+    evidence_quote: "The Bidder shall submit the completed Security Requirements Check List identified as Annex E.",
+    verified: true,
+    verification_method: "exact",
+    ...overrides,
+  };
+}
+
+const sampleResult = {
+  schema_version: "1.0",
+  source_scope: "document_only",
+  package_completeness: "verified",
+  document_manifest: [
+    {
+      document_id: "33333333-3333-4333-8333-333333333333",
+      role: "base",
+      source_type: "url",
+      source_name: "100022184-A Request for Tender.pdf",
+      source_url: "https://canadabuys.canada.ca/en/tender-opportunities/opportunity-listing/example",
+      sha256: SHA_BASE,
+      pages: 55,
+      language: "en",
+      solicitation_number: "100022184-A",
+      amendment_number: null,
+      status: "active",
+      cleanup_status: "deleted",
+    },
+    {
+      document_id: "44444444-4444-4444-8444-444444444444",
+      role: "amendment",
+      source_type: "upload",
+      source_name: "Amendment 001.pdf",
+      source_url: null,
+      sha256: SHA_AMENDMENT,
+      pages: 2,
+      language: "en",
+      solicitation_number: "100022184-A",
+      amendment_number: "001",
+      status: "superseded",
+      cleanup_status: "deleted",
+    },
+  ],
+  summary: {
+    title: "File Bay Repair & Maintenance",
+    solicitation_number: "100022184-A",
+    issuer: "City of Edmonton",
+    closing_date: "2024-05-16T20:00:00.000Z",
+    overview: "The City seeks repair and preventive maintenance services for file storage bay equipment.",
+    scope: ["Inspect storage bay equipment", "Provide repairs and preventive maintenance"],
+    submission_method: "Electronic submission through SAP Ariba",
+    current_selection_method: "Lowest total tendered price",
+  },
+  claims: [
+    {
+      claim_id: "claim-active",
+      claim_text: "Award is based on the lowest total tendered price from a compliant bidder.",
+      claim_type: "source",
+      status: "active",
+      confidence: 0.99,
+      citations: [citation({ pdf_page_1based: 9, section: "Evaluation" })],
+      formula_and_inputs: null,
+    },
+    {
+      claim_id: "claim-superseded",
+      claim_text: "The original closing date was replaced by an amendment.",
+      claim_type: "source",
+      status: "superseded",
+      confidence: 0.98,
+      citations: [citation({ document_sha256: SHA_AMENDMENT, document_name: "Amendment 001.pdf", pdf_page_1based: 1 })],
+      formula_and_inputs: null,
+    },
+    {
+      claim_id: "claim-conflicted",
+      claim_text: "The security checklist is identified as both Annex D and Annex E.",
+      claim_type: "conflict",
+      status: "conflicted",
+      confidence: 1,
+      citations: [citation()],
+      formula_and_inputs: null,
+    },
+    {
+      claim_id: "claim-review",
+      claim_text: "The timing for the insurance certificate needs human review.",
+      claim_type: "unknown",
+      status: "needs_review",
+      confidence: 0.61,
+      citations: [citation({ pdf_page_1based: null, printed_page_label: null, verified: false, verification_method: "manual_required" })],
+      formula_and_inputs: null,
+    },
+  ],
+  requirements: [
+    {
+      id: "m3",
+      category: "mandatory",
+      status: "active",
+      text: "Provide up to three project resources with the required experience.",
+      evidence_needed: "Resource experience records",
+      consequence: "Bid may be rejected",
+      citations: [citation({ pdf_page_1based: 31, section: "M3" })],
+    },
+    {
+      id: "price",
+      category: "financial",
+      status: "active",
+      text: "Complete the blank pricing schedule. No source price is prefilled.",
+      evidence_needed: "Completed pricing form",
+      consequence: "Financial evaluation cannot be completed",
+      citations: [citation({ pdf_page_1based: 46, section: "Pricing Schedule" })],
+    },
+    {
+      id: "old-date",
+      category: "submission",
+      status: "superseded",
+      text: "Submit by the original closing date.",
+      evidence_needed: null,
+      consequence: "Replaced by amendment",
+      citations: [citation({ document_sha256: SHA_AMENDMENT, document_name: "Amendment 001.pdf", pdf_page_1based: 1 })],
+    },
+    {
+      id: "security",
+      category: "security",
+      status: "conflicted",
+      text: "Submit the required security checklist.",
+      evidence_needed: "Issuer clarification on annex label",
+      consequence: "Wrong form may be submitted",
+      citations: [citation()],
+    },
+    {
+      id: "insurance",
+      category: "contractual",
+      status: "needs_review",
+      text: "Confirm when insurance evidence is due.",
+      evidence_needed: "Human review",
+      consequence: null,
+      citations: [citation({ pdf_page_1based: null, printed_page_label: null, verified: false, verification_method: "manual_required" })],
+    },
+  ],
+  evaluation: {
+    mandatory_gate: true,
+    rated_threshold: null,
+    technical_weight: 0,
+    financial_weight: 100,
+    selection_method: "Lowest total tendered price",
+    citations: [citation({ pdf_page_1based: 9, section: "Evaluation" })],
+  },
+  risks: [
+    {
+      id: "risk-annex",
+      severity: "high",
+      category: "Document consistency",
+      finding: "The security checklist cross-reference is inconsistent.",
+      impact: "A bidder could submit the wrong annex.",
+      recommended_action: "Ask the City to confirm the required annex before close.",
+      citations: [citation()],
+    },
+  ],
+  conflicts: [
+    {
+      id: "conflict-annex",
+      topic: "Security checklist annex",
+      status: "conflicted",
+      candidate_values: ["Annex D", "Annex E"],
+      safe_answer: "The source package conflicts. Request issuer clarification.",
+      citations: [citation(), citation({ pdf_page_1based: 49, section: "Annex E" })],
+    },
+  ],
+  clarification_questions: ["Please confirm whether Annex D or Annex E is the required security checklist."],
+  decision_readiness: "needs_clarification",
+  blocking_unknowns: ["Pricing fields are blank in the issued schedule."],
+  quality: {
+    pages_total: 57,
+    pages_covered: 57,
+    critical_claims: 12,
+    critical_claims_cited: 12,
+    citations_verified: 18,
+    unsupported_items_removed: 2,
+    search_events: 0,
+    follow_embedded_link_events: 0,
+    warnings: ["One citation requires human review."],
+  },
+  costs: {
+    currency: "USD",
+    events: [
+      {
+        provider: "monid",
+        operation: "context.dev parse",
+        status: "succeeded",
+        actual_micro_usd: 4210,
+        estimated_micro_usd: null,
+        latency_ms: 1842,
+        retry_of: null,
+      },
+      {
+        provider: "openai",
+        operation: "structured extraction",
+        status: "succeeded",
+        actual_micro_usd: null,
+        estimated_micro_usd: 9300,
+        latency_ms: 2380,
+        retry_of: null,
+      },
+    ],
+    actual_micro_usd: 4210,
+    estimated_micro_usd: 9300,
+    total_micro_usd: 13510,
+    includes_failed_attempts: true,
+  },
+  generated_at: "2026-09-02T18:00:00.000Z",
+  expires_at: "2026-09-03T18:00:00.000Z",
+};
+
+function status(statusValue: string, progress: number, cleanupConfirmed: boolean) {
+  return {
+    run_id: RUN_ID,
+    status: statusValue,
+    stage: statusValue === "cleanup_pending" ? "purging_source" : statusValue,
+    progress,
+    created_at: "2026-09-02T18:00:00.000Z",
+    updated_at: "2026-09-02T18:00:01.000Z",
+    expires_at: "2026-09-03T18:00:00.000Z",
+    cleanup_confirmed: cleanupConfirmed,
+    cost_micro_usd: 4210,
+    error: null,
+  };
+}
+
+test("keeps source input and the verified sample useful in the first desktop viewport", async ({ page, isMobile }) => {
+  await page.goto("/");
+
+  await expect(page.getByRole("heading", { name: "Analyze a tender pack", level: 1 })).toBeVisible();
+  await expect(page.getByRole("button", { name: "CanadaBuys URL" })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("heading", { name: "Repair & Maintenance on various File Bays", level: 2 })).toBeVisible();
+  await expect(page.getByText("Document-only. No search.")).toBeVisible();
+
+  if (!isMobile) {
+    await expect(page.getByRole("button", { name: "Analyze pack" })).toBeInViewport();
+    await expect(page.getByRole("button", { name: "Open Edmonton sample" })).toBeInViewport();
+  } else {
+    await expect(page.getByRole("button", { name: "Preview Edmonton sample" })).toBeInViewport();
+  }
+
+  await page.getByRole("button", { name: "PDF pack" }).click();
+  await expect(page.getByText("The server verifies the aggregate page limit.")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Choose PDFs" })).toBeVisible();
+});
+
+test("loads the Edmonton result across desktop and mobile with trust labels intact", async ({ page }) => {
+  await page.route("**/api/v1/samples/edmonton", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(sampleResult) }));
+  await page.goto("/");
+  await page.getByRole("button", { name: "Open Edmonton sample" }).click();
+
+  await expect(page.getByRole("heading", { name: "File Bay Repair & Maintenance", level: 1 })).toBeVisible();
+  await expect(page.getByRole("tab", { name: "Executive Brief" })).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByText("Superseded", { exact: true }).first()).toBeVisible();
+  await expect(page.getByText("Conflicted", { exact: true }).first()).toBeVisible();
+  await expect(page.getByText("Needs review", { exact: true }).first()).toBeVisible();
+
+  const evidence = page.locator("summary").filter({ hasText: "PDF page 17" }).first();
+  await evidence.click();
+  await expect(evidence.locator("..").getByText("The Bidder shall submit the completed Security Requirements Check List identified as Annex E.")).toBeVisible();
+
+  await page.getByRole("tab", { name: "Evaluation & Pricing" }).click();
+  await expect(page.getByText("Blank pricing fields remain unknown, never zero.")).toBeVisible();
+
+  await page.getByRole("tab", { name: "Audit & Cost" }).click();
+  await expect(page.getByRole("heading", { name: "Provider retention disclosure" })).toBeVisible();
+  await expect(page.getByText("App-controlled cleanup confirmed")).toBeVisible();
+  await expect(page.getByText("No search", { exact: true })).toBeVisible();
+  await expect(page.getByText("Actual", { exact: true }).first()).toBeVisible();
+  await expect(page.getByText("Estimated", { exact: true }).first()).toBeVisible();
+  await expect(page.getByText("Not reported", { exact: true })).toBeVisible();
+});
+
+test("shows loading and API error states without presenting success", async ({ page }) => {
+  let releaseSample: (() => void) | undefined;
+  const gate = new Promise<void>((resolve) => { releaseSample = resolve; });
+  await page.route("**/api/v1/samples/edmonton", async (route) => {
+    await gate;
+    await route.fulfill({
+      status: 503,
+      contentType: "application/json",
+      body: JSON.stringify({ error: { code: "MODEL_UNAVAILABLE", message: "The verified sample service is temporarily unavailable.", retryable: true, request_id: REQUEST_ID } }),
+    });
+  });
+  await page.goto("/");
+  await page.getByRole("button", { name: "Open Edmonton sample" }).click();
+  await expect(page.getByRole("heading", { name: "Loading the verified Edmonton sample" })).toBeVisible();
+  await expect(page.getByText("Analysis ready")).toHaveCount(0);
+
+  releaseSample?.();
+  await expect(page.getByRole("heading", { name: "The pack could not be analyzed" })).toBeVisible();
+  await expect(page.getByText("The verified sample service is temporarily unavailable.")).toBeVisible();
+  await expect(page.getByText(`Request ID: ${REQUEST_ID}`)).toBeVisible();
+  await expect(page.getByRole("button", { name: "Try again" })).toBeVisible();
+  await page.getByRole("button", { name: "Review sources" }).click();
+  await expect(page.getByRole("heading", { name: "Analyze a tender pack" })).toBeVisible();
+});
+
+test("holds a live result behind the cleanup confirmation gate", async ({ page }) => {
+  let allowReady = false;
+  await page.route("**/api/v1/runs", async (route) => {
+    const request = route.request();
+    expect(request.method()).toBe("POST");
+    expect(request.headers()["idempotency-key"]).toBeTruthy();
+    expect(request.postDataJSON()).toEqual({ documents: [{ role: "base", source: { type: "url", url: "https://canadabuys.canada.ca/tender.pdf" } }] });
+    await route.fulfill({ status: 201, contentType: "application/json", body: JSON.stringify({ run_id: RUN_ID, status: "queued", status_url: `/api/v1/runs/${RUN_ID}` }) });
+  });
+  await page.route(`**/api/v1/runs/${RUN_ID}`, (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(allowReady ? status("ready", 100, true) : status("cleanup_pending", 62, false)) }));
+  await page.route(`**/api/v1/runs/${RUN_ID}/analysis`, (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(sampleResult) }));
+
+  await page.goto("/");
+  await page.getByLabel("CanadaBuys PDF URL").fill("https://canadabuys.canada.ca/tender.pdf");
+  await page.getByRole("button", { name: "Analyze pack" }).click();
+  await expect(page.getByRole("heading", { name: "Cleanup pending" })).toBeVisible();
+  await expect(page.getByText("No result is shown until every app-controlled source deletion has a confirmation receipt.")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "File Bay Repair & Maintenance", level: 1 })).toHaveCount(0);
+
+  allowReady = true;
+  await expect(page.getByRole("heading", { name: "File Bay Repair & Maintenance", level: 1 })).toBeVisible({ timeout: 5_000 });
+});
+
+test("registers and cleans up progressive WebMCP tools when the browser exposes the API", async ({ page }) => {
+  await page.addInitScript(() => {
+    const tools: Array<{ tool: Record<string, unknown>; aborted: boolean }> = [];
+    Object.defineProperty(window, "__webMcpTools", { value: tools, writable: false });
+    Object.defineProperty(document, "modelContext", {
+      configurable: true,
+      value: {
+        registerTool(tool: Record<string, unknown>, options?: { signal?: AbortSignal }) {
+          const entry = { tool, aborted: false };
+          tools.push(entry);
+          options?.signal?.addEventListener("abort", () => { entry.aborted = true; }, { once: true });
+          return Promise.resolve();
+        },
+      },
+    });
+  });
+  await page.goto("/");
+  await expect.poll(() => page.evaluate(() => {
+    const entries = (window as typeof window & { __webMcpTools: Array<{ aborted: boolean }> }).__webMcpTools;
+    return entries.filter((entry) => !entry.aborted).length;
+  })).toBe(2);
+
+  const registrations = await page.evaluate(() => {
+    const entries = (window as typeof window & { __webMcpTools: Array<{ aborted: boolean; tool: { name: string; annotations: Record<string, boolean>; execute: (input: Record<string, unknown>) => string } }> }).__webMcpTools;
+    return {
+      active: entries.filter((entry) => !entry.aborted).map((entry) => ({ name: entry.tool.name, annotations: entry.tool.annotations })),
+      cleanedUp: entries.filter((entry) => entry.aborted).length,
+    };
+  });
+  expect(registrations.active).toEqual([
+    { name: "load_edmonton_sample", annotations: { readOnlyHint: false, untrustedContentHint: false } },
+    { name: "stage_canadabuys_url", annotations: { readOnlyHint: false, untrustedContentHint: false } },
+  ]);
+  expect(registrations.cleanedUp).toBeGreaterThanOrEqual(2);
+
+  await page.evaluate(() => {
+    const entries = (window as typeof window & { __webMcpTools: Array<{ aborted: boolean; tool: { name: string; execute: (input: Record<string, unknown>) => string } }> }).__webMcpTools;
+    entries.find((entry) => !entry.aborted && entry.tool.name === "stage_canadabuys_url")?.tool.execute({ url: "https://canadabuys.canada.ca/staged.pdf" });
+  });
+  await expect(page.getByLabel("CanadaBuys PDF URL")).toHaveValue("https://canadabuys.canada.ca/staged.pdf");
+});
