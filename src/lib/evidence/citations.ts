@@ -36,6 +36,102 @@ export interface CitationVerification {
   receipt: QuoteVerificationReceipt;
 }
 
+const MONTH_NUMBER = new Map([
+  ["january", 1], ["jan", 1], ["february", 2], ["feb", 2],
+  ["march", 3], ["mar", 3], ["april", 4], ["apr", 4],
+  ["may", 5], ["june", 6], ["jun", 6], ["july", 7], ["jul", 7],
+  ["august", 8], ["aug", 8], ["september", 9], ["sept", 9], ["sep", 9],
+  ["october", 10], ["oct", 10], ["november", 11], ["nov", 11],
+  ["december", 12], ["dec", 12]
+]);
+
+function canonicalNumber(value: string) {
+  const number = Number(value.replace(/[\s,]/g, ""));
+  return Number.isFinite(number) ? number.toString() : value;
+}
+
+function blankRange(value: string, start: number, end: number) {
+  return `${value.slice(0, start)}${" ".repeat(end - start)}${value.slice(end)}`;
+}
+
+/**
+ * Extracts only objectively comparable scalar tokens. Dates and times are
+ * canonicalized before ordinary numbers so equivalent renderings such as
+ * `2026-09-15` / `September 15, 2026` and `14:00` / `2:00 PM` compare cleanly.
+ */
+export function extractAssertionTokens(value: string): Set<string> {
+  let remainder = value.normalize("NFKC").toLocaleLowerCase("en-CA");
+  const tokens = new Set<string>();
+  const ranges: Array<{ start: number; end: number }> = [];
+
+  const recordDate = (start: number, end: number, year: number, month: number, day: number) => {
+    if (month < 1 || month > 12 || day < 1 || day > 31) return;
+    tokens.add(`date:${year.toString().padStart(4, "0")}-${month.toString().padStart(2, "0")}-${day.toString().padStart(2, "0")}`);
+    ranges.push({ start, end });
+  };
+
+  for (const match of remainder.matchAll(/(?<!\d)(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})(?!\d)/g)) {
+    recordDate(match.index, match.index + match[0].length, Number(match[1]), Number(match[2]), Number(match[3]));
+  }
+  const monthPattern = "january|jan|february|feb|march|mar|april|apr|may|june|jun|july|jul|august|aug|september|sept|sep|october|oct|november|nov|december|dec";
+  for (const match of remainder.matchAll(new RegExp(`\\b(${monthPattern})\\.?\\s+(\\d{1,2})(?:st|nd|rd|th)?[,]?\\s+(\\d{4})\\b`, "g"))) {
+    recordDate(match.index, match.index + match[0].length, Number(match[3]), MONTH_NUMBER.get(match[1]) ?? 0, Number(match[2]));
+  }
+  for (const match of remainder.matchAll(new RegExp(`\\b(\\d{1,2})(?:st|nd|rd|th)?\\s+(${monthPattern})\\.?[,]?\\s+(\\d{4})\\b`, "g"))) {
+    recordDate(match.index, match.index + match[0].length, Number(match[3]), MONTH_NUMBER.get(match[2]) ?? 0, Number(match[1]));
+  }
+
+  for (const { start, end } of ranges.toSorted((left, right) => right.start - left.start)) {
+    remainder = blankRange(remainder, start, end);
+  }
+
+  const timeRanges: Array<{ start: number; end: number }> = [];
+  for (const match of remainder.matchAll(/(?<![+\-\d:])(\d{1,2}):(\d{2})(?::\d{2})?\s*(a\.?m\.?|p\.?m\.?)?(?![\d:])/g)) {
+    let hour = Number(match[1]);
+    const minute = Number(match[2]);
+    const meridiem = match[3]?.replaceAll(".", "");
+    if (hour > 23 || minute > 59) continue;
+    if (meridiem === "pm" && hour < 12) hour += 12;
+    if (meridiem === "am" && hour === 12) hour = 0;
+    tokens.add(`time:${hour.toString().padStart(2, "0")}:${minute.toString().padStart(2, "0")}`);
+    timeRanges.push({ start: match.index, end: match.index + match[0].length });
+  }
+  for (const { start, end } of timeRanges.toSorted((left, right) => right.start - left.start)) {
+    remainder = blankRange(remainder, start, end);
+  }
+
+  // UTC offsets are metadata for an already captured time, not an additional
+  // asserted quantity that a human-readable "MDT" quote needs to spell out.
+  remainder = remainder.replace(/[+\-]\d{2}:\d{2}\b/g, (offset) => " ".repeat(offset.length));
+
+  for (const match of remainder.matchAll(/(?<![\p{L}\p{N}])(?:\d{1,3}(?:[ ,]\d{3})+|\d+)(?:\.\d+)?(?![\p{L}\p{N}])/gu)) {
+    tokens.add(`number:${canonicalNumber(match[0])}`);
+  }
+  return tokens;
+}
+
+export function citationsMatchDocument(
+  citations: Citation[],
+  documentSha256: string
+): boolean {
+  const expected = documentSha256.toLowerCase();
+  return citations.length > 0 && citations.every(
+    (citation) => citation.verified && citation.document_sha256 === expected
+  );
+}
+
+export function assertionTokensSupportedByCitations(
+  assertion: string,
+  citations: Citation[]
+): boolean {
+  const asserted = extractAssertionTokens(assertion);
+  if (asserted.size === 0) return true;
+  const evidence = new Set(
+    citations.flatMap((citation) => [...extractAssertionTokens(citation.evidence_quote)])
+  );
+  return [...asserted].every((token) => evidence.has(token));
+}
+
 function findPage(
   candidate: CitationCandidate,
   index: PdfPageIndex

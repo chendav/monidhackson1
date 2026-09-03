@@ -3,8 +3,8 @@ import { AppError } from "@/lib/errors";
 import { STATUS_PROGRESS, type RunRecord } from "@/lib/runs/types";
 
 const transitions: Record<RunStatus, ReadonlySet<RunStatus>> = {
-  queued: new Set(["validating", "failed", "expired"]),
-  validating: new Set(["staging", "failed", "expired"]),
+  queued: new Set(["validating", "failed", "cleanup_pending", "expired"]),
+  validating: new Set(["staging", "failed", "cleanup_pending", "expired"]),
   staging: new Set(["page_indexing", "failed", "cleanup_pending", "expired"]),
   page_indexing: new Set(["parsing", "failed", "cleanup_pending", "expired"]),
   parsing: new Set(["purging_source", "failed", "cleanup_pending", "expired"]),
@@ -12,10 +12,10 @@ const transitions: Record<RunStatus, ReadonlySet<RunStatus>> = {
   extracting: new Set(["reconciling", "partial", "failed", "cleanup_pending", "expired"]),
   reconciling: new Set(["verifying", "partial", "failed", "cleanup_pending", "expired"]),
   verifying: new Set(["ready", "partial", "failed", "cleanup_pending", "expired"]),
-  ready: new Set(["expired"]),
-  partial: new Set(["expired"]),
+  ready: new Set(["cleanup_pending", "expired"]),
+  partial: new Set(["cleanup_pending", "expired"]),
   failed: new Set(["cleanup_pending", "expired"]),
-  cleanup_pending: new Set(["purging_source", "verifying", "ready", "partial", "failed", "expired"]),
+  cleanup_pending: new Set(["failed", "expired"]),
   expired: new Set()
 };
 

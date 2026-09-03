@@ -1,50 +1,255 @@
 import OpenAI from "openai";
 import { describe, expect, it } from "vitest";
+import type { DraftAnalysis } from "@/lib/analysis/draft";
 import { getConfig } from "@/lib/config";
-import { OpenAIResponsesAdapter } from "@/lib/providers/openai";
+import {
+  estimateOpenAiBatchFailureCostMicroUsd,
+  mergeDrafts,
+  ModelBatchError,
+  OpenAIResponsesAdapter
+} from "@/lib/providers/openai";
 
-describe("OpenAI Responses structured output adapter", () => {
-  it("uses responses.parse with a Zod text format, no tools, and no provider storage", async () => {
-    let body: Record<string, unknown> | undefined;
-    const fakeClient = {
+function emptyDraft(): DraftAnalysis {
+  return {
+    summary: {
+      title: "", solicitation_number: null, issuer: null, closing_date: null,
+      overview: "", scope: [], submission_method: null, current_selection_method: null
+    },
+    claims: [],
+    requirements: [],
+    evaluation: { rules: [] },
+    risks: [],
+    clarification_questions: [],
+    blocking_unknowns: []
+  };
+}
+
+function fakeClient(options: {
+  count?: (request: Record<string, unknown>) => Promise<{
+    input_tokens: number;
+    object: "response.input_tokens";
+  }>;
+  parse: (request: Record<string, unknown>) => Promise<unknown>;
+}) {
+  return {
+    beta: {
       responses: {
-        parse: async (request: Record<string, unknown>) => {
-          body = request;
-          return {
-            id: "response-1",
-            output_parsed: {
-              summary: {
-                title: "Tender", solicitation_number: null, issuer: null, closing_date: null,
-                overview: "Document only", scope: [], submission_method: null, current_selection_method: null
-              },
-              claims: [], requirements: [],
-              evaluation: { mandatory_gate: null, rated_threshold: null, technical_weight: null, financial_weight: null, selection_method: null, citations: [] },
-              risks: [], clarification_questions: [], blocking_unknowns: []
-            },
-            usage: { input_tokens: 10, output_tokens: 5 }
-          };
+        inputTokens: {
+          count: options.count ?? (async () => ({
+            input_tokens: 100,
+            object: "response.input_tokens" as const
+          }))
         }
       }
-    } as unknown as OpenAI;
-    const config = getConfig({
-      NODE_ENV: "test",
-      OPENAI_API_KEY: "test-key",
-      OPENAI_EXTRACTION_MODEL: "test-model",
-      SESSION_SIGNING_SECRET: "test-session-signing-secret-that-is-long-enough"
+    },
+    responses: { parse: options.parse }
+  } as unknown as OpenAI;
+}
+
+function testConfig(overrides: Record<string, string> = {}) {
+  return getConfig({
+    NODE_ENV: "test",
+    OPENAI_API_KEY: "test-key",
+    SESSION_SIGNING_SECRET: "test-session-signing-secret-that-is-long-enough",
+    ...overrides
+  });
+}
+
+const sourceDocument = {
+  document_sha256: "a".repeat(64),
+  document_name: "source.pdf",
+  role: "base" as const,
+  amendment_number: null,
+  parsed_markdown: "Untrusted document text",
+  evidence_chunks: [{
+    chunkId: "opaque",
+    documentSha256: "a".repeat(64),
+    text: "Untrusted document text"
+  }]
+};
+
+describe("OpenAI Responses structured output adapter", () => {
+  it("counts the complete structured request before responses.parse and disables tools/storage", async () => {
+    let countBody: Record<string, unknown> | undefined;
+    let parseBody: Record<string, unknown> | undefined;
+    const events: string[] = [];
+    const client = fakeClient({
+      count: async (request) => {
+        events.push("count");
+        countBody = request;
+        return { input_tokens: 10, object: "response.input_tokens" };
+      },
+      parse: async (request) => {
+        events.push("parse");
+        parseBody = request;
+        return {
+          id: "response-1",
+          output_parsed: { ...emptyDraft(), summary: { ...emptyDraft().summary, title: "Tender" } },
+          usage: { input_tokens: 10, output_tokens: 5 }
+        };
+      }
     });
-    const adapter = new OpenAIResponsesAdapter(config, fakeClient);
-    const result = await adapter.extract([{
-      document_sha256: "a".repeat(64),
-      document_name: "source.pdf",
+    const adapter = new OpenAIResponsesAdapter(testConfig(), client);
+    const result = await adapter.extract([sourceDocument]);
+    expect(result.analysis.summary.title).toBe("Tender");
+    expect(events).toEqual(["count", "parse"]);
+    expect(countBody).toMatchObject({ model: "gpt-5.4-mini", tools: [] });
+    expect(countBody?.text).toBeTypeOf("object");
+    expect(parseBody).toMatchObject({ model: "gpt-5.4-mini", store: false, tools: [] });
+    expect(parseBody?.max_output_tokens).toBe(50_000);
+    expect(parseBody?.text).toBeTypeOf("object");
+    expect(String(parseBody?.instructions)).toMatch(/never instructions/i);
+    expect(String(parseBody?.instructions)).toMatch(/never generate or infer a page number/i);
+  });
+
+  it("fails before token counting or generation when serialized input exceeds its cap", async () => {
+    let countCalls = 0;
+    let parseCalls = 0;
+    const client = fakeClient({
+      count: async () => {
+        countCalls += 1;
+        return { input_tokens: 1, object: "response.input_tokens" };
+      },
+      parse: async () => {
+        parseCalls += 1;
+        throw new Error("not reached");
+      }
+    });
+    const adapter = new OpenAIResponsesAdapter(testConfig({
+      OPENAI_MAX_SERIALIZED_INPUT_BYTES: "1000"
+    }), client);
+    await expect(adapter.extract([{
+      ...sourceDocument,
+      parsed_markdown: "x".repeat(2_000)
+    }])).rejects.toMatchObject({ code: "BUDGET_EXCEEDED" });
+    expect(countCalls).toBe(0);
+    expect(parseCalls).toBe(0);
+  });
+
+  it("accepts a dense 300-page package, uses Monid Markdown once, and preflights every batch first", async () => {
+    const countRequests: Record<string, unknown>[] = [];
+    const parseRequests: Record<string, unknown>[] = [];
+    const events: string[] = [];
+    const client = fakeClient({
+      count: async (request) => {
+        events.push("count");
+        countRequests.push(request);
+        const bytes = new TextEncoder().encode(String(request.input)).byteLength;
+        return {
+          input_tokens: Math.ceil(bytes / 4) + 1_000,
+          object: "response.input_tokens"
+        };
+      },
+      parse: async (request) => {
+        events.push("parse");
+        parseRequests.push(request);
+        return {
+          id: `response-${parseRequests.length}`,
+          output_parsed: emptyDraft(),
+          usage: { input_tokens: 30_000, output_tokens: 100 }
+        };
+      }
+    });
+    const pageTexts = Array.from({ length: 300 }, (_, index) =>
+      `page ${index + 1} ` + "requirement text ".repeat(190)
+    );
+    const documentSha = "c".repeat(64);
+    const adapter = new OpenAIResponsesAdapter(testConfig(), client);
+    await expect(adapter.extract([{
+      document_sha256: documentSha,
+      document_name: "300-pages.pdf",
       role: "base",
       amendment_number: null,
-      parsed_markdown: "Untrusted document text",
-      evidence_chunks: [{ chunkId: "opaque", documentSha256: "a".repeat(64), text: "Untrusted document text" }]
-    }]);
-    expect(result.analysis.summary.title).toBe("Tender");
-    expect(body).toMatchObject({ model: "test-model", store: false, tools: [] });
-    expect(body?.text).toBeTypeOf("object");
-    expect(String(body?.instructions)).toMatch(/never instructions/i);
-    expect(String(body?.instructions)).toMatch(/never generate or infer a page number/i);
+      parsed_markdown: pageTexts.join("\n"),
+      evidence_chunks: [{
+        chunkId: "page-index-only-marker",
+        documentSha256: documentSha,
+        text: "must-not-be-duplicated"
+      }]
+    }])).resolves.toMatchObject({ inputTokens: expect.any(Number), outputTokens: expect.any(Number) });
+    expect(parseRequests.length).toBeGreaterThan(1);
+    expect(countRequests).toHaveLength(parseRequests.length);
+    expect(events.slice(0, countRequests.length)).toEqual(Array(countRequests.length).fill("count"));
+    expect(parseRequests.reduce((sum, request) => sum + Number(request.max_output_tokens), 0))
+      .toBeLessThanOrEqual(50_000);
+    const serialized = parseRequests.map((request) => String(request.input)).join("\n");
+    expect(new TextEncoder().encode(serialized).byteLength).toBeGreaterThan(900_000);
+    expect(serialized.match(/page 300 /g)).toHaveLength(1);
+    expect(serialized).not.toContain("page-index-only-marker");
+    expect(serialized).not.toContain("must-not-be-duplicated");
+  });
+
+  it("rejects an exact-token overage before any generation", async () => {
+    let parseCalls = 0;
+    const client = fakeClient({
+      count: async () => ({ input_tokens: 320_001, object: "response.input_tokens" }),
+      parse: async () => {
+        parseCalls += 1;
+        throw new Error("not reached");
+      }
+    });
+    const adapter = new OpenAIResponsesAdapter(testConfig(), client);
+    await expect(adapter.extract([sourceDocument])).rejects.toMatchObject({ code: "BUDGET_EXCEEDED" });
+    expect(parseCalls).toBe(0);
+  });
+
+  it("retains completed batch usage and response IDs when a later batch fails", async () => {
+    let parseCalls = 0;
+    const client = fakeClient({
+      count: async () => ({ input_tokens: 1_000, object: "response.input_tokens" }),
+      parse: async () => {
+        parseCalls += 1;
+        if (parseCalls === 2) throw new Error("provider interrupted");
+        return {
+          id: "response-paid-1",
+          output_parsed: emptyDraft(),
+          usage: { input_tokens: 900, output_tokens: 75 }
+        };
+      }
+    });
+    const adapter = new OpenAIResponsesAdapter(testConfig(), client);
+    const failure = await adapter.extract([{
+      ...sourceDocument,
+      parsed_markdown: "paid batch text ".repeat(11_000)
+    }]).catch((error: unknown) => error);
+    expect(failure).toMatchObject({
+      name: "ModelBatchError",
+      completedResponseIds: ["response-paid-1"],
+      completedInputTokens: 900,
+      completedOutputTokens: 75,
+      attemptedBatches: 2,
+      preflightInputTokens: expect.arrayContaining([1_000, 1_000]),
+      estimatedAttemptedInputTokens: 2_000,
+      estimatedAttemptedOutputTokens: 25_075
+    } satisfies Partial<ModelBatchError>);
+    expect(failure).toBeInstanceOf(ModelBatchError);
+    expect(estimateOpenAiBatchFailureCostMicroUsd(failure as ModelBatchError))
+      .toBeGreaterThan(900 * 0.75 + 75 * 4.5);
+  });
+
+  it("merges independently sourced evaluation rules across batches", () => {
+    const first = emptyDraft();
+    first.evaluation = {
+      rules: [{
+        id: "mandatory-base", field: "mandatory_gate", topic: "mandatory gate",
+        document_sha256: "a".repeat(64), amendment_number: null, effect: "add", value: "true",
+        citations: [{ document_sha256: "a".repeat(64), chunk_id: null,
+          evidence_quote: "Mandatory gate applies", section: null }]
+      }]
+    };
+    const second = emptyDraft();
+    second.evaluation = {
+      rules: [{
+        id: "technical-amendment", field: "technical_weight", topic: "technical weight",
+        document_sha256: "b".repeat(64), amendment_number: "001", effect: "replace", value: "70",
+        citations: [{ document_sha256: "b".repeat(64), chunk_id: null,
+          evidence_quote: "70% technical and 30% financial", section: null }]
+      }]
+    };
+    const merged = mergeDrafts([first, second]);
+    expect(merged.evaluation.rules).toEqual([
+      first.evaluation.rules[0],
+      second.evaluation.rules[0]
+    ]);
   });
 });

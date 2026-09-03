@@ -34,8 +34,8 @@ export interface RunRecord {
   id: string;
   ownerId: string;
   quotaKey: string;
-  input: CreateRunRequest;
-  requestHash: string;
+  input: CreateRunRequest | null;
+  requestHash: string | null;
   idempotencyKey: string | null;
   status: RunStatus;
   stage: RunStatus;
@@ -54,6 +54,11 @@ export interface RunRecord {
   result: AnalysisResult | null;
   error: RunFailure | null;
   workflowRunId: string | null;
+  processingLeaseId: string | null;
+  processingLeaseExpiresAt: string | null;
+  processingFence: number;
+  terminalAfterCleanup: "failed" | "expired" | null;
+  auditExpiresAt: string | null;
   version: number;
   deletedAt: string | null;
 }

@@ -1,0 +1,322 @@
+import { describe, expect, it } from "vitest";
+import type { PresignUploadResponse } from "@/contracts";
+import { LocalDeterministicModel } from "@/lib/analysis/local-model";
+import { getConfig } from "@/lib/config";
+import { sha256Hex } from "@/lib/crypto";
+import { processRun } from "@/lib/pipeline";
+import { cleanupRun, expireDueRuns, expireRun } from "@/lib/runs/expiry";
+import { transitionRun } from "@/lib/runs/state-machine";
+import { InMemoryRunStore } from "@/lib/runs/store";
+import { InMemoryBudgetGuard } from "@/lib/security/budget";
+import { stagingBlobPath, type UploadStorage } from "@/lib/storage/uploads";
+import { makeMinimalPdf } from "../unit/minimal-pdf";
+
+class RevocationStorage implements UploadStorage {
+  readonly durableObjects = new Set<string>();
+  readonly removals: string[] = [];
+  readonly purges: string[] = [];
+
+  constructor(private readonly bytes: Uint8Array) {}
+
+  async presign(): Promise<PresignUploadResponse> {
+    throw new Error("not used");
+  }
+
+  async claimIncoming(): Promise<void> {}
+
+  async read(): Promise<Uint8Array> {
+    return this.bytes.slice();
+  }
+
+  async stage(path: string): Promise<void> {
+    this.durableObjects.add(path);
+  }
+
+  async temporaryReadUrl(): Promise<string> {
+    throw new Error("not used by local extraction");
+  }
+
+  async remove(path: string): Promise<void> {
+    this.removals.push(path);
+    this.durableObjects.delete(path);
+  }
+
+  async purgeIncomingToFence(path: string): Promise<void> {
+    this.purges.push(path);
+    this.durableObjects.delete(path);
+  }
+
+  async sweepExpiredIncoming(): Promise<string[]> {
+    return [];
+  }
+}
+
+const config = getConfig({
+  NODE_ENV: "test",
+  SESSION_SIGNING_SECRET: "test-session-signing-secret-that-is-long-enough",
+  IP_HASH_SECRET: "test-ip-hash-secret",
+  MAX_RUN_COST_MICRO_USD: "2000000",
+  DAILY_COST_CAP_MICRO_USD: "20000000"
+});
+
+async function createUploadRun(
+  store: InMemoryRunStore,
+  bytes: Uint8Array,
+  ownerId: string,
+  now: Date
+) {
+  const sha = sha256Hex(bytes);
+  const blobPath = `incoming/test/${ownerId}/${sha}.pdf`;
+  const record = (await store.create({
+    ownerId,
+    quotaKey: `ip:${ownerId}`,
+    input: {
+      documents: [{
+        role: "base",
+        source: {
+          type: "upload",
+          blob_path: blobPath,
+          sha256: sha,
+          size_bytes: bytes.byteLength,
+          filename: "fixture.pdf"
+        }
+      }]
+    },
+    idempotencyKey: null,
+    reservedMicroUsd: 104_500,
+    now
+  })).record;
+  return { record, blobPath };
+}
+
+describe("active-worker cancellation and stale-lease cleanup", () => {
+  it("fences a blocked worker immediately and expires only after its lease quiesces", async () => {
+    const claimedAt = new Date("2026-09-02T00:00:00.000Z");
+    const bytes = makeMinimalPdf(["The bidder must provide a detailed service plan."]);
+    const store = new InMemoryRunStore();
+    const storage = new RevocationStorage(bytes);
+    const { record } = await createUploadRun(store, bytes, "guest:cancel", claimedAt);
+    const local = new LocalDeterministicModel();
+    let signalStarted!: () => void;
+    let releaseModel!: () => void;
+    const modelStarted = new Promise<void>((resolve) => { signalStarted = resolve; });
+    const modelBlocked = new Promise<void>((resolve) => { releaseModel = resolve; });
+    const model = {
+      async extract(input: Parameters<typeof local.extract>[0]) {
+        signalStarted();
+        await modelBlocked;
+        return local.extract(input);
+      },
+      answer: local.answer.bind(local)
+    };
+
+    const worker = processRun(record.id, {
+      store,
+      uploadStorage: storage,
+      budget: new InMemoryBudgetGuard(config),
+      config,
+      model,
+      now: () => claimedAt
+    });
+    await modelStarted;
+
+    const beforeDelete = await store.get(record.id);
+    expect(beforeDelete?.status).toBe("extracting");
+    expect(beforeDelete?.processingLeaseId).not.toBeNull();
+    expect(beforeDelete?.processingLeaseExpiresAt).toBe("2026-09-02T00:20:00.000Z");
+    expect(beforeDelete?.cleanupExpectedResourceIds.some((id) => id.startsWith("page-text:"))).toBe(true);
+    expect(beforeDelete?.cleanupExpectedResourceIds.some((id) => id.startsWith("parsed:"))).toBe(true);
+
+    const pending = await expireRun(
+      beforeDelete!,
+      store,
+      storage,
+      new Date("2026-09-02T00:01:00.000Z")
+    );
+    expect(pending.status).toBe("cleanup_pending");
+    expect(pending.terminalAfterCleanup).toBe("expired");
+    expect(pending.cleanupConfirmed).toBe(false);
+    expect(pending.result).toBeNull();
+    expect(pending.citationReceipts).toEqual([]);
+    expect(pending.processingLeaseId).toBeNull();
+    expect(pending.processingLeaseExpiresAt).toBe("2026-09-02T00:20:00.000Z");
+    expect(pending.processingFence).toBe((beforeDelete?.processingFence ?? 0) + 1);
+    expect(pending.expiresAt).toBe("2026-09-02T00:20:00.000Z");
+    expect(pending.cleanupReceipts.some((receipt) =>
+      receipt.resourceKind === "page_text" && receipt.status === "deleted"
+    )).toBe(false);
+
+    const stillPending = await expireRun(
+      pending,
+      store,
+      storage,
+      new Date("2026-09-02T00:19:59.999Z")
+    );
+    expect(stillPending.status).toBe("cleanup_pending");
+    expect(stillPending.cleanupConfirmed).toBe(false);
+
+    // Model a revoked worker recreating its deterministic stage after the
+    // first cleanup pass. Before quiescence, historical receipts are not
+    // treated as proof that this newly-created object is absent.
+    const stagePath = stagingBlobPath(record.id, 0);
+    const removalsBeforeRecreate = storage.removals.filter((path) => path === stagePath).length;
+    storage.durableObjects.add(stagePath);
+    expect(storage.durableObjects.has(stagePath)).toBe(true);
+
+    releaseModel();
+    const fencedWorkerResult = await worker;
+    expect(fencedWorkerResult.status).toBe("cleanup_pending");
+    expect(fencedWorkerResult.result).toBeNull();
+    expect(fencedWorkerResult.citationReceipts).toEqual([]);
+
+    // An elapsed preserved lease is only a quiescence deadline. It must not
+    // make cleanup_pending reclaimable as analysis work.
+    expect(await store.claimProcessing(
+      record.id,
+      new Date("2026-09-02T00:20:00.001Z")
+    )).toBeNull();
+
+    const expired = await expireRun(
+      fencedWorkerResult,
+      store,
+      storage,
+      new Date("2026-09-02T00:20:00.001Z")
+    );
+    expect(expired.status).toBe("expired");
+    expect(expired.cleanupConfirmed).toBe(true);
+    expect(expired.result).toBeNull();
+    expect(expired.citationReceipts).toEqual([]);
+    expect(expired.processingLeaseId).toBeNull();
+    expect(expired.processingLeaseExpiresAt).toBeNull();
+    expect(storage.durableObjects.has(stagePath)).toBe(false);
+    expect(storage.removals.filter((path) => path === stagePath)).toHaveLength(
+      removalsBeforeRecreate + 1
+    );
+    expect(expired.cleanupReceipts).toContainEqual(expect.objectContaining({
+      resourceId: `sha256:${sha256Hex(`staged:${record.id}:0`)}`,
+      status: "deleted",
+      attemptedAt: "2026-09-02T00:20:00.001Z"
+    }));
+    expect(expired.cleanupReceipts.some((receipt) =>
+      receipt.resourceKind === "page_text" && receipt.status === "deleted"
+    )).toBe(true);
+    expect(expired.cleanupReceipts.some((receipt) =>
+      receipt.resourceKind === "parsed_markdown" && receipt.status === "deleted"
+    )).toBe(true);
+  });
+
+  it("the maintenance sweep fences and purges a crashed mid-stage worker at lease expiry", async () => {
+    const claimedAt = new Date("2026-09-02T02:00:00.000Z");
+    const bytes = makeMinimalPdf(["The bidder shall provide pricing evidence."]);
+    const store = new InMemoryRunStore();
+    const storage = new RevocationStorage(bytes);
+    const { record, blobPath } = await createUploadRun(store, bytes, "guest:crash", claimedAt);
+    storage.durableObjects.add(blobPath);
+
+    const claim = await store.claimProcessing(record.id, claimedAt);
+    expect(claim).not.toBeNull();
+    const stagePath = stagingBlobPath(record.id, 0);
+    storage.durableObjects.add(stagePath);
+    await store.update(record.id, (current) => transitionRun(current, "staging", claimedAt), {
+      leaseId: claim!.leaseId,
+      fence: claim!.fence
+    });
+
+    const swept = await expireDueRuns(
+      store,
+      storage,
+      new Date("2026-09-02T02:20:00.001Z")
+    );
+    expect(swept.map((item) => item.id)).toContain(record.id);
+    const expired = await store.get(record.id);
+    expect(expired?.status).toBe("expired");
+    expect(expired?.cleanupConfirmed).toBe(true);
+    expect(expired?.result).toBeNull();
+    expect(expired?.processingLeaseId).toBeNull();
+    expect(expired?.processingFence).toBe(claim!.fence + 1);
+    expect(storage.durableObjects.has(blobPath)).toBe(false);
+    expect(storage.durableObjects.has(stagePath)).toBe(false);
+    expect(storage.purges).toContain(blobPath);
+    expect(storage.removals).toContain(stagePath);
+
+    const replacement = await createUploadRun(
+      store,
+      bytes,
+      "guest:crash",
+      new Date("2026-09-02T02:20:01.000Z")
+    );
+    expect(replacement.record.status).toBe("queued");
+  });
+
+  it("selects a bounded set of due or stale records without returning future audit rows", async () => {
+    const createdAt = new Date("2026-09-02T03:00:00.000Z");
+    const dueAt = new Date("2026-09-03T04:00:00.000Z");
+    const bytes = makeMinimalPdf(["bounded cleanup candidates"]);
+    const store = new InMemoryRunStore();
+
+    for (const owner of ["one", "two", "three"]) {
+      await createUploadRun(store, bytes, `guest:${owner}`, createdAt);
+    }
+    const stale = await createUploadRun(store, bytes, "guest:stale", dueAt);
+    await store.claimProcessing(
+      stale.record.id,
+      new Date("2026-09-03T03:00:00.000Z"),
+      30 * 60_000
+    );
+    const futureAudit = await createUploadRun(store, bytes, "guest:audit", createdAt);
+    const expired = await expireRun(futureAudit.record, store, new RevocationStorage(bytes), dueAt);
+    expect(expired.status).toBe("expired");
+    expect(expired.auditExpiresAt).not.toBeNull();
+
+    const candidates = await store.listCleanupCandidates(dueAt, 2);
+    expect(candidates).toHaveLength(2);
+    expect(candidates.some((record) => record.id === expired.id)).toBe(false);
+    expect((await store.listCleanupCandidates(dueAt, 100)).map((record) => record.id))
+      .toContain(stale.record.id);
+  });
+
+  it("keeps expired as the monotonic winner when failed cleanup races with expiry", async () => {
+    const claimedAt = new Date("2026-09-02T05:00:00.000Z");
+    const bytes = makeMinimalPdf(["monotonic terminal intent"]);
+    const store = new InMemoryRunStore();
+    const storage = new RevocationStorage(bytes);
+    const { record } = await createUploadRun(store, bytes, "guest:terminal", claimedAt);
+    const claim = await store.claimProcessing(record.id, claimedAt);
+    expect(claim).not.toBeNull();
+
+    const failedPending = await cleanupRun(
+      claim!.record,
+      store,
+      storage,
+      "failed",
+      new Date("2026-09-02T05:01:00.000Z")
+    );
+    expect(failedPending.terminalAfterCleanup).toBe("failed");
+
+    const expiredPending = await expireRun(
+      failedPending,
+      store,
+      storage,
+      new Date("2026-09-02T05:02:00.000Z")
+    );
+    expect(expiredPending.terminalAfterCleanup).toBe("expired");
+
+    const failedAgain = await cleanupRun(
+      expiredPending,
+      store,
+      storage,
+      "failed",
+      new Date("2026-09-02T05:03:00.000Z")
+    );
+    expect(failedAgain.terminalAfterCleanup).toBe("expired");
+
+    const completed = await expireRun(
+      failedAgain,
+      store,
+      storage,
+      new Date("2026-09-02T05:20:00.001Z")
+    );
+    expect(completed.status).toBe("expired");
+    expect(completed.terminalAfterCleanup).toBeNull();
+  });
+});

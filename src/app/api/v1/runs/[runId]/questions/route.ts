@@ -6,7 +6,7 @@ import { AppError } from "@/lib/errors";
 import { auditLog } from "@/lib/logging";
 import { getQuestionAuditStore } from "@/lib/questions/audit-store";
 import { getRunStore } from "@/lib/runs/store";
-import { authenticateRequest, enforceMutationChallenge } from "@/lib/security/auth";
+import { authenticateRequest, enforceMutationChallenge, MUTATION_ACTIONS } from "@/lib/security/auth";
 
 export const runtime = "nodejs";
 
@@ -17,7 +17,7 @@ export async function POST(
   let principal;
   try {
     principal = authenticateRequest(request);
-    await enforceMutationChallenge(request, principal);
+    await enforceMutationChallenge(request, principal, MUTATION_ACTIONS.askQuestion);
     const parsed = QuestionRequestSchema.safeParse(await readJson(request));
     if (!parsed.success) {
       throw new AppError("ANALYSIS_INCOMPLETE", parsed.error.issues.map((issue) => issue.message).join(" "), {
@@ -26,7 +26,7 @@ export async function POST(
     }
     const store = await getRunStore();
     const record = await getOwnedRun(store, (await context.params).runId, principal);
-    if (!record.result || !["ready", "partial"].includes(record.status)) {
+    if (!record.result || !record.cleanupConfirmed || !["ready", "partial"].includes(record.status)) {
       throw new AppError("ANALYSIS_INCOMPLETE", "Questions are available after analysis completes.", {
         httpStatus: 409,
         retryable: !["failed", "expired"].includes(record.status)

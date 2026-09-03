@@ -89,6 +89,12 @@ export function getQuestionAuditStore(): QuestionAuditStore {
     neonStore ??= new NeonQuestionAuditStore(config.DATABASE_URL);
     return neonStore;
   }
+  if (config.NODE_ENV === "production") {
+    throw new AppError("ANALYSIS_INCOMPLETE", "Persistent question auditing is not configured.", {
+      httpStatus: 503,
+      retryable: true
+    });
+  }
   memory ??= new InMemoryQuestionAuditStore();
   return memory;
 }

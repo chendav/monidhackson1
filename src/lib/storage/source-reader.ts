@@ -3,7 +3,7 @@ import { sha256Hex } from "@/lib/crypto";
 import { AppError } from "@/lib/errors";
 import { assertPdfBytes, normalizeFilename, validateCanadaBuysUrl } from "@/lib/source-validation";
 import type { CleanupTarget } from "@/lib/cleanup";
-import type { UploadStorage } from "@/lib/storage/uploads";
+import { stagingBlobPath, type UploadStorage } from "@/lib/storage/uploads";
 
 type RunDocumentInput = CreateRunRequest["documents"][number];
 
@@ -23,6 +23,9 @@ export interface LoadedSource {
 export interface SourceReaderDependencies {
   uploadStorage: UploadStorage;
   fetcher?: typeof fetch;
+  runId: string;
+  ownerId: string;
+  documentIndex: number;
 }
 
 async function readBoundedBody(response: Response, maxBytes: number): Promise<Uint8Array> {
@@ -105,15 +108,50 @@ function filenameFromUrl(url: URL): string {
   }
 }
 
+async function readExistingStage(storage: UploadStorage, blobPath: string): Promise<Uint8Array | null> {
+  try {
+    return await storage.read(blobPath);
+  } catch (error) {
+    if (error instanceof AppError && error.code === "SOURCE_UNREACHABLE" && error.httpStatus === 404) {
+      return null;
+    }
+    throw error;
+  }
+}
+
+function stagedCleanupTarget(
+  storage: UploadStorage,
+  stagedPath: string,
+  stageResourceId: string,
+  bytes: Uint8Array
+): CleanupTarget {
+  return {
+    resourceId: stageResourceId,
+    resourceKind: "staged_source",
+    controlScope: "application",
+    remove: async () => {
+      bytes.fill(0);
+      await storage.remove(stagedPath);
+    }
+  };
+}
+
 export async function loadSource(
   document: RunDocumentInput,
   dependencies: SourceReaderDependencies
 ): Promise<LoadedSource> {
   const documentId = crypto.randomUUID();
+  const stageResourceId = `staged:${dependencies.runId}:${dependencies.documentIndex}`;
+  const stagedPath = stagingBlobPath(dependencies.runId, dependencies.documentIndex);
   if (document.source.type === "url") {
-    const fetched = await fetchCanadaBuysPdf(document.source.url, dependencies.fetcher ?? fetch);
+    const existing = await readExistingStage(dependencies.uploadStorage, stagedPath);
+    const fetched = existing
+      ? { bytes: existing, url: validateCanadaBuysUrl(document.source.url).toString() }
+      : await fetchCanadaBuysPdf(document.source.url, dependencies.fetcher ?? fetch);
     const bytes = fetched.bytes;
-    const stagedId = `staged:${documentId}`;
+    assertPdfBytes(bytes);
+    const digest = sha256Hex(bytes);
+    if (!existing) await dependencies.uploadStorage.stage(stagedPath, bytes);
     return {
       documentId,
       role: document.role,
@@ -122,22 +160,26 @@ export async function loadSource(
       sourceUrl: fetched.url,
       blobPath: null,
       bytes,
-      sha256: sha256Hex(bytes),
-      parserUrl: async () => fetched.url,
-      cleanupTargets: [
-        {
-          resourceId: stagedId,
-          resourceKind: "staged_source",
-          controlScope: "application",
-          remove: async () => {
-            bytes.fill(0);
-          }
-        }
-      ]
+      sha256: digest,
+      parserUrl: (validUntil) => dependencies.uploadStorage.temporaryReadUrl(stagedPath, validUntil),
+      cleanupTargets: [stagedCleanupTarget(
+        dependencies.uploadStorage,
+        stagedPath,
+        stageResourceId,
+        bytes
+      )]
     };
   }
 
-  const bytes = await dependencies.uploadStorage.read(document.source.blob_path);
+  await dependencies.uploadStorage.claimIncoming({
+    ownerId: dependencies.ownerId,
+    runId: dependencies.runId,
+    blobPath: document.source.blob_path,
+    expectedSha256: document.source.sha256,
+    expectedSize: document.source.size_bytes
+  });
+  const existing = await readExistingStage(dependencies.uploadStorage, stagedPath);
+  const bytes = existing ?? await dependencies.uploadStorage.read(document.source.blob_path);
   assertPdfBytes(bytes, document.source.size_bytes);
   const digest = sha256Hex(bytes);
   if (digest !== document.source.sha256) {
@@ -147,6 +189,18 @@ export async function loadSource(
     });
   }
   const blobPath = document.source.blob_path;
+  if (!existing) await dependencies.uploadStorage.stage(stagedPath, bytes, blobPath);
+  // Staging has been read back and verified by the storage adapter. Replace the
+  // replayable incoming URL's raw bytes immediately; Monid reads only staging.
+  try {
+    await dependencies.uploadStorage.purgeIncomingToFence(blobPath);
+  } catch (error) {
+    throw new AppError(
+      "SOURCE_CLEANUP_PENDING",
+      "The incoming upload could not be replaced by its replay fence.",
+      { retryable: true, cause: error }
+    );
+  }
   return {
     documentId,
     role: document.role,
@@ -156,22 +210,16 @@ export async function loadSource(
     blobPath,
     bytes,
     sha256: digest,
-    parserUrl: (validUntil) => dependencies.uploadStorage.temporaryReadUrl(blobPath, validUntil),
+    parserUrl: (validUntil) => dependencies.uploadStorage.temporaryReadUrl(stagedPath, validUntil),
     cleanupTargets: [
       {
         resourceId: `blob:${blobPath}`,
         resourceKind: "source_blob",
         controlScope: "application",
-        remove: () => dependencies.uploadStorage.remove(blobPath)
+        successDetail: "Incoming source content was purged and a verified replay-blocking fence remains until grant expiry.",
+        remove: () => dependencies.uploadStorage.purgeIncomingToFence(blobPath)
       },
-      {
-        resourceId: `staged:${documentId}`,
-        resourceKind: "staged_source",
-        controlScope: "application",
-        remove: async () => {
-          bytes.fill(0);
-        }
-      }
+      stagedCleanupTarget(dependencies.uploadStorage, stagedPath, stageResourceId, bytes)
     ]
   };
 }

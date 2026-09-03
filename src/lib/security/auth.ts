@@ -18,6 +18,15 @@ export interface Principal {
   setCookie?: string;
 }
 
+export const MUTATION_ACTIONS = {
+  uploadPresign: "upload_presign",
+  createRun: "create_run",
+  askQuestion: "ask_question",
+  deleteRun: "delete_run"
+} as const;
+export type MutationAction = typeof MUTATION_ACTIONS[keyof typeof MUTATION_ACTIONS];
+export const TURNSTILE_TOKEN_HEADER = "x-turnstile-token";
+
 function sessionSecret(config: AppConfig): string {
   if (config.SESSION_SIGNING_SECRET) {
     return config.SESSION_SIGNING_SECRET;
@@ -116,7 +125,12 @@ export function authenticateRequest(
 }
 
 export interface TurnstileVerifier {
-  verify(token: string, remoteIp?: string): Promise<boolean>;
+  verify(input: {
+    token: string;
+    remoteIp?: string;
+    expectedAction: MutationAction;
+    expectedHostname: string;
+  }): Promise<boolean>;
 }
 
 export class CloudflareTurnstileVerifier implements TurnstileVerifier {
@@ -125,9 +139,14 @@ export class CloudflareTurnstileVerifier implements TurnstileVerifier {
     private readonly fetcher: typeof fetch = fetch
   ) {}
 
-  async verify(token: string, remoteIp?: string): Promise<boolean> {
-    const body = new URLSearchParams({ secret: this.secret, response: token });
-    if (remoteIp) body.set("remoteip", remoteIp);
+  async verify(input: {
+    token: string;
+    remoteIp?: string;
+    expectedAction: MutationAction;
+    expectedHostname: string;
+  }): Promise<boolean> {
+    const body = new URLSearchParams({ secret: this.secret, response: input.token });
+    if (input.remoteIp) body.set("remoteip", input.remoteIp);
     const response = await this.fetcher("https://challenges.cloudflare.com/turnstile/v0/siteverify", {
       method: "POST",
       headers: { "content-type": "application/x-www-form-urlencoded" },
@@ -135,31 +154,50 @@ export class CloudflareTurnstileVerifier implements TurnstileVerifier {
       signal: AbortSignal.timeout(5_000)
     });
     if (!response.ok) return false;
-    const payload = (await response.json()) as { success?: unknown };
-    return payload.success === true;
+    const payload = (await response.json()) as {
+      success?: unknown;
+      action?: unknown;
+      hostname?: unknown;
+    };
+    return payload.success === true &&
+      payload.action === input.expectedAction &&
+      typeof payload.hostname === "string" &&
+      payload.hostname.toLowerCase() === input.expectedHostname.toLowerCase();
   }
 }
 
 export async function enforceMutationChallenge(
   request: Request,
   principal: Principal,
+  expectedAction: MutationAction,
   verifier?: TurnstileVerifier,
   config = getConfig()
 ) {
   if (principal.kind === "api" || config.NODE_ENV !== "production") return;
-  if (!config.TURNSTILE_SECRET_KEY) {
+  if (!config.TURNSTILE_SECRET_KEY || !config.TURNSTILE_EXPECTED_HOSTNAME) {
     throw new AppError("ANALYSIS_INCOMPLETE", "Guest abuse protection is not configured.", {
       httpStatus: 503,
       retryable: true
     });
   }
-  const token = request.headers.get("x-turnstile-token")?.trim();
+  const expectedHostname = config.TURNSTILE_EXPECTED_HOSTNAME.toLowerCase();
+  if (new URL(request.url).hostname.toLowerCase() !== expectedHostname) {
+    throw new AppError("RATE_LIMITED", "The request hostname is not allowed for this challenge.", {
+      httpStatus: 403
+    });
+  }
+  const token = request.headers.get(TURNSTILE_TOKEN_HEADER)?.trim();
   if (!token) {
     throw new AppError("RATE_LIMITED", "A Turnstile token is required.", { httpStatus: 403 });
   }
   const activeVerifier = verifier ?? new CloudflareTurnstileVerifier(config.TURNSTILE_SECRET_KEY);
   const remoteIp = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
-  if (!(await activeVerifier.verify(token, remoteIp))) {
+  if (!(await activeVerifier.verify({
+    token,
+    remoteIp,
+    expectedAction,
+    expectedHostname
+  }))) {
     throw new AppError("RATE_LIMITED", "The abuse-protection challenge was not accepted.", {
       httpStatus: 403
     });

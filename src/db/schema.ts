@@ -20,8 +20,8 @@ export const runs = pgTable(
     id: uuid("id").primaryKey(),
     ownerId: text("owner_id").notNull(),
     quotaKey: text("quota_key").notNull(),
-    input: jsonb("input").$type<CreateRunRequest>().notNull(),
-    requestHash: text("request_hash").notNull(),
+    input: jsonb("input").$type<CreateRunRequest | null>(),
+    requestHash: text("request_hash"),
     idempotencyKey: text("idempotency_key"),
     status: text("status").notNull(),
     stage: text("stage").notNull(),
@@ -37,6 +37,11 @@ export const runs = pgTable(
     result: jsonb("result").$type<AnalysisResult>(),
     error: jsonb("error").$type<RunFailure>(),
     workflowRunId: text("workflow_run_id"),
+    processingLeaseId: uuid("processing_lease_id"),
+    processingLeaseExpiresAt: timestamp("processing_lease_expires_at", { withTimezone: true }),
+    processingFence: integer("processing_fence").notNull().default(0),
+    terminalAfterCleanup: text("terminal_after_cleanup"),
+    auditExpiresAt: timestamp("audit_expires_at", { withTimezone: true }),
     version: integer("version").notNull().default(0),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull(),
@@ -49,7 +54,40 @@ export const runs = pgTable(
       .on(table.ownerId)
       .where(sql`${table.status} IN ('queued', 'validating', 'staging', 'page_indexing', 'parsing', 'purging_source', 'extracting', 'reconciling', 'verifying', 'cleanup_pending')`),
     index("runs_expires_at_idx").on(table.expiresAt),
+    index("runs_audit_expires_at_idx").on(table.auditExpiresAt),
+    index("runs_processing_lease_expiry_idx").on(table.processingLeaseExpiresAt),
     index("runs_quota_created_idx").on(table.quotaKey, table.createdAt)
+  ]
+);
+
+export const incomingUploads = pgTable(
+  "incoming_uploads",
+  {
+    blobPath: text("blob_path").primaryKey(),
+    ownerId: text("owner_id").notNull(),
+    expectedSha256: text("expected_sha256").notNull(),
+    expectedSize: integer("expected_size").notNull(),
+    status: text("status").notNull(),
+    claimedRunId: uuid("claimed_run_id"),
+    sourceEtag: text("source_etag"),
+    stagePath: text("stage_path"),
+    stageEtag: text("stage_etag"),
+    fenceEtag: text("fence_etag"),
+    leaseId: uuid("lease_id"),
+    leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true }),
+    version: integer("version").notNull().default(0),
+    cleanupAttempts: integer("cleanup_attempts").notNull().default(0),
+    lastCleanupErrorCode: text("last_cleanup_error_code"),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    cleanupDueAt: timestamp("cleanup_due_at", { withTimezone: true }).notNull(),
+    hardDeleteBy: timestamp("hard_delete_by", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull()
+  },
+  (table) => [
+    index("incoming_uploads_expiry_idx").on(table.expiresAt),
+    index("incoming_uploads_cleanup_due_idx").on(table.cleanupDueAt),
+    index("incoming_uploads_owner_idx").on(table.ownerId)
   ]
 );
 

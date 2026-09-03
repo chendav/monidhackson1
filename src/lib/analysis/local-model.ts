@@ -74,7 +74,6 @@ export class LocalDeterministicModel implements AnalysisModel {
       }));
     }
     const base = documents.find((document) => document.role === "base") ?? documents[0];
-    const baseEvidence = base ? firstEvidence(base) : null;
     const draft: DraftAnalysis = {
       summary: {
         title: base?.document_name.replace(/\.pdf$/i, "") ?? "Tender package",
@@ -89,12 +88,9 @@ export class LocalDeterministicModel implements AnalysisModel {
       claims,
       requirements,
       evaluation: {
-        mandatory_gate: requirements.length > 0 ? true : null,
-        rated_threshold: null,
-        technical_weight: null,
-        financial_weight: null,
-        selection_method: null,
-        citations: baseEvidence ? [baseEvidence] : []
+        // The local fallback cannot independently prove evaluation semantics;
+        // an arbitrary first sentence must never become a mandatory-gate rule.
+        rules: []
       },
       risks: [],
       clarification_questions: ["Confirm any blank pricing fields directly with the contracting authority."],

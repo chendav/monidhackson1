@@ -2,8 +2,8 @@ CREATE TABLE IF NOT EXISTS "runs" (
   "id" uuid PRIMARY KEY,
   "owner_id" text NOT NULL,
   "quota_key" text NOT NULL,
-  "input" jsonb NOT NULL,
-  "request_hash" text NOT NULL,
+  "input" jsonb,
+  "request_hash" text,
   "idempotency_key" text,
   "status" text NOT NULL,
   "stage" text NOT NULL,
@@ -19,6 +19,11 @@ CREATE TABLE IF NOT EXISTS "runs" (
   "result" jsonb,
   "error" jsonb,
   "workflow_run_id" text,
+  "processing_lease_id" uuid,
+  "processing_lease_expires_at" timestamptz,
+  "processing_fence" integer NOT NULL DEFAULT 0,
+  "terminal_after_cleanup" text,
+  "audit_expires_at" timestamptz,
   "version" integer NOT NULL DEFAULT 0,
   "created_at" timestamptz NOT NULL,
   "updated_at" timestamptz NOT NULL,
@@ -32,6 +37,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS "runs_owner_active_unique"
   ON "runs" ("owner_id")
   WHERE "status" IN ('queued', 'validating', 'staging', 'page_indexing', 'parsing', 'purging_source', 'extracting', 'reconciling', 'verifying', 'cleanup_pending');
 CREATE INDEX IF NOT EXISTS "runs_expires_at_idx" ON "runs" ("expires_at");
+CREATE INDEX IF NOT EXISTS "runs_audit_expires_at_idx" ON "runs" ("audit_expires_at");
 CREATE INDEX IF NOT EXISTS "runs_quota_created_idx" ON "runs" ("quota_key", "created_at");
 
 CREATE TABLE IF NOT EXISTS "run_documents" (
@@ -70,3 +76,28 @@ CREATE TABLE IF NOT EXISTS "question_audits" (
   "created_at" timestamptz NOT NULL
 );
 CREATE INDEX IF NOT EXISTS "question_audits_run_idx" ON "question_audits" ("run_id");
+
+CREATE TABLE IF NOT EXISTS "incoming_uploads" (
+  "blob_path" text PRIMARY KEY,
+  "owner_id" text NOT NULL,
+  "expected_sha256" text NOT NULL,
+  "expected_size" integer NOT NULL,
+  "status" text NOT NULL,
+  "claimed_run_id" uuid,
+  "source_etag" text,
+  "stage_path" text,
+  "stage_etag" text,
+  "fence_etag" text,
+  "lease_id" uuid,
+  "lease_expires_at" timestamptz,
+  "version" integer NOT NULL DEFAULT 0,
+  "cleanup_attempts" integer NOT NULL DEFAULT 0,
+  "last_cleanup_error_code" text,
+  "expires_at" timestamptz NOT NULL,
+  "cleanup_due_at" timestamptz NOT NULL,
+  "hard_delete_by" timestamptz NOT NULL,
+  "created_at" timestamptz NOT NULL,
+  "updated_at" timestamptz NOT NULL
+);
+CREATE INDEX IF NOT EXISTS "incoming_uploads_expiry_idx" ON "incoming_uploads" ("expires_at");
+CREATE INDEX IF NOT EXISTS "incoming_uploads_owner_idx" ON "incoming_uploads" ("owner_id");

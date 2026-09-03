@@ -1,4 +1,6 @@
 import { z } from "zod";
+import { lookup } from "node:dns/promises";
+import { isIP } from "node:net";
 import { getConfig, type AppConfig } from "@/lib/config";
 import { AppError } from "@/lib/errors";
 
@@ -41,6 +43,7 @@ export interface MonidAdapterOptions {
   inspectValidator?: MonidInspectValidator;
   pollIntervalMs?: number;
   maxPolls?: number;
+  resolveHostname?: (hostname: string) => Promise<string[]>;
 }
 
 function getPath(value: unknown, path: string): unknown {
@@ -126,6 +129,7 @@ export class MonidAdapter {
   private readonly inspectValidator?: MonidInspectValidator;
   private readonly pollIntervalMs: number;
   private readonly maxPolls: number;
+  private readonly resolveHostname: (hostname: string) => Promise<string[]>;
 
   constructor(options: MonidAdapterOptions = {}) {
     this.config = options.config ?? getConfig();
@@ -134,6 +138,8 @@ export class MonidAdapter {
     this.inspectValidator = options.inspectValidator;
     this.pollIntervalMs = options.pollIntervalMs ?? 1_000;
     this.maxPolls = options.maxPolls ?? 120;
+    this.resolveHostname = options.resolveHostname ?? (async (hostname) =>
+      (await lookup(hostname, { all: true, verbatim: true })).map((entry) => entry.address));
   }
 
   private async request(path: string, init: RequestInit): Promise<unknown> {
@@ -155,7 +161,57 @@ export class MonidAdapter {
         retryable: response.status === 429 || response.status >= 500
       });
     }
-    return response.json();
+    const text = await boundedText(response, 1024 * 1024);
+    try {
+      return JSON.parse(text) as unknown;
+    } catch {
+      throw new AppError("MONID_PARSE_FAILED", "Monid returned invalid JSON control data.");
+    }
+  }
+
+  private async validateArtifactUrl(rawUrl: string): Promise<URL> {
+    let url: URL;
+    try {
+      url = new URL(rawUrl);
+    } catch {
+      throw new AppError("MONID_PARSE_FAILED", "Monid returned an invalid parse artifact URL.");
+    }
+    const allowedHosts = new Set((this.config.MONID_ARTIFACT_HOST_ALLOWLIST ?? "")
+      .split(",").map((host) => host.trim().toLowerCase()).filter(Boolean));
+    const hostname = url.hostname.toLowerCase();
+    if (url.protocol !== "https:" || url.username || url.password ||
+      (url.port && url.port !== "443") || !allowedHosts.has(hostname)) {
+      throw new AppError("MONID_PARSE_FAILED", "Monid returned a parse artifact URL outside the configured allowlist.");
+    }
+    const addresses = isIP(hostname) ? [hostname] : await this.resolveHostname(hostname);
+    if (addresses.length === 0 || addresses.some((address) => !isPublicAddress(address))) {
+      throw new AppError("MONID_PARSE_FAILED", "The parse artifact host did not resolve exclusively to public addresses.");
+    }
+    return url;
+  }
+
+  private async fetchArtifact(rawUrl: string): Promise<{ response: Response; url: URL }> {
+    let current = await this.validateArtifactUrl(rawUrl);
+    for (let redirects = 0; redirects <= 3; redirects += 1) {
+      const response = await this.fetcher(current, {
+        method: "GET",
+        redirect: "manual",
+        credentials: "omit",
+        referrerPolicy: "no-referrer",
+        signal: AbortSignal.timeout(20_000)
+      });
+      if (response.status >= 300 && response.status < 400) {
+        const location = response.headers.get("location");
+        await response.body?.cancel();
+        if (!location || redirects === 3) {
+          throw new AppError("MONID_PARSE_FAILED", "The parse artifact redirect chain was rejected.");
+        }
+        current = await this.validateArtifactUrl(new URL(location, current).toString());
+        continue;
+      }
+      return { response, url: current };
+    }
+    throw new AppError("MONID_PARSE_FAILED", "The parse artifact redirect chain was rejected.");
   }
 
   async inspect(): Promise<unknown> {
@@ -255,16 +311,8 @@ export class MonidAdapter {
       [],
       "parse artifact URL"
     );
-    const artifactUrl = new URL(providerArtifactUrl);
-    if (artifactUrl.protocol !== "https:" || artifactUrl.username || artifactUrl.password) {
-      throw new AppError("MONID_PARSE_FAILED", "Monid returned an unsafe parse artifact URL.");
-    }
-    const artifact = await this.fetcher(artifactUrl, {
-      method: "GET",
-      credentials: "omit",
-      referrerPolicy: "no-referrer",
-      signal: AbortSignal.timeout(20_000)
-    });
+    const artifactResult = await this.fetchArtifact(providerArtifactUrl);
+    const artifact = artifactResult.response;
     if (!artifact.ok) {
       throw new AppError("MONID_PARSE_FAILED", "The temporary parsed artifact could not be downloaded.", {
         retryable: artifact.status >= 500 || artifact.status === 429
@@ -285,9 +333,33 @@ export class MonidAdapter {
         const value = getPath(terminal, this.config.MONID_COST_CURRENCY_PATH ?? "cost.currency");
         return typeof value === "string" ? value : null;
       })(),
-      providerArtifactUrl: artifactUrl.toString(),
+      providerArtifactUrl: artifactResult.url.toString(),
       providerRetention: "unknown",
       terminalPayload: terminal
     };
   }
+}
+
+function isPublicAddress(address: string): boolean {
+  const kind = isIP(address);
+  if (kind === 4) {
+    const [a, b, c] = address.split(".").map(Number);
+    return !(a === 0 || a === 10 || a === 127 || a >= 224 ||
+      (a === 100 && b >= 64 && b <= 127) ||
+      (a === 169 && b === 254) ||
+      (a === 172 && b >= 16 && b <= 31) ||
+      (a === 192 && b === 168) ||
+      (a === 192 && b === 0 && (c === 0 || c === 2)) ||
+      (a === 198 && (b === 18 || b === 19 || b === 51)) ||
+      (a === 203 && b === 0 && c === 113));
+  }
+  if (kind === 6) {
+    const normalized = address.toLowerCase();
+    if (normalized.startsWith("::ffff:")) return isPublicAddress(normalized.slice(7));
+    return !(normalized === "::" || normalized === "::1" ||
+      normalized.startsWith("fc") || normalized.startsWith("fd") ||
+      /^fe[89ab]/.test(normalized) || normalized.startsWith("ff") ||
+      normalized.startsWith("2001:db8:"));
+  }
+  return false;
 }

@@ -1,11 +1,12 @@
 import { neon } from "@neondatabase/serverless";
-import { and, eq, inArray, lte } from "drizzle-orm";
+import { and, asc, eq, inArray, isNotNull, lte, ne, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/neon-http";
 import { runs } from "@/db/schema";
 import { AppError } from "@/lib/errors";
 import {
   newRunRecord,
   ACTIVE_RUN_STATUSES,
+  LEASED_RUN_STATUSES,
   type CreateRunRecordInput,
   type RunStore
 } from "@/lib/runs/store";
@@ -35,6 +36,13 @@ function toRow(record: RunRecord): typeof runs.$inferInsert {
     result: record.result,
     error: record.error,
     workflowRunId: record.workflowRunId,
+    processingLeaseId: record.processingLeaseId,
+    processingLeaseExpiresAt: record.processingLeaseExpiresAt
+      ? new Date(record.processingLeaseExpiresAt)
+      : null,
+    processingFence: record.processingFence,
+    terminalAfterCleanup: record.terminalAfterCleanup,
+    auditExpiresAt: record.auditExpiresAt ? new Date(record.auditExpiresAt) : null,
     version: record.version,
     createdAt: new Date(record.createdAt),
     updatedAt: new Date(record.updatedAt),
@@ -68,6 +76,11 @@ function fromRow(row: RunRow): RunRecord {
     result: row.result,
     error: row.error,
     workflowRunId: row.workflowRunId,
+    processingLeaseId: row.processingLeaseId,
+    processingLeaseExpiresAt: row.processingLeaseExpiresAt?.toISOString() ?? null,
+    processingFence: row.processingFence,
+    terminalAfterCleanup: row.terminalAfterCleanup as RunRecord["terminalAfterCleanup"],
+    auditExpiresAt: row.auditExpiresAt?.toISOString() ?? null,
     version: row.version,
     deletedAt: row.deletedAt?.toISOString() ?? null
   };
@@ -137,7 +150,11 @@ export class NeonRunStore implements RunStore {
     return row ? fromRow(row) : undefined;
   }
 
-  async update(id: string, mutate: (record: RunRecord) => RunRecord): Promise<RunRecord> {
+  async update(
+    id: string,
+    mutate: (record: RunRecord) => RunRecord,
+    claim?: { leaseId: string; fence: number }
+  ): Promise<RunRecord> {
     for (let attempt = 0; attempt < 5; attempt += 1) {
       const current = await this.get(id);
       if (!current) {
@@ -145,10 +162,18 @@ export class NeonRunStore implements RunStore {
       }
       const mutated = mutate(structuredClone(current));
       const next = { ...mutated, version: current.version + 1 };
+      const guard = claim
+        ? and(
+            eq(runs.id, id),
+            eq(runs.version, current.version),
+            eq(runs.processingLeaseId, claim.leaseId),
+            eq(runs.processingFence, claim.fence)
+          )
+        : and(eq(runs.id, id), eq(runs.version, current.version));
       const [updated] = await this.db
         .update(runs)
         .set(toRow(next))
-        .where(and(eq(runs.id, id), eq(runs.version, current.version)))
+        .where(guard)
         .returning();
       if (updated) return fromRow(updated);
     }
@@ -158,12 +183,68 @@ export class NeonRunStore implements RunStore {
     });
   }
 
+  async claimProcessing(id: string, now = new Date(), leaseMs = 20 * 60_000) {
+    const leaseId = crypto.randomUUID();
+    const [claimed] = await this.db
+      .update(runs)
+      .set({
+        status: "validating",
+        stage: "validating",
+        progress: 5,
+        processingLeaseId: leaseId,
+        processingLeaseExpiresAt: new Date(now.getTime() + leaseMs),
+        processingFence: sql`${runs.processingFence} + 1`,
+        updatedAt: now,
+        version: sql`${runs.version} + 1`
+      })
+      .where(and(
+        eq(runs.id, id),
+        or(
+          eq(runs.status, "queued"),
+          and(inArray(runs.status, [...LEASED_RUN_STATUSES]), lte(runs.processingLeaseExpiresAt, now))
+        )
+      ))
+      .returning();
+    if (!claimed) {
+      const existing = await this.get(id);
+      if (!existing) {
+        throw new AppError("ANALYSIS_INCOMPLETE", "The run was not found.", { httpStatus: 404 });
+      }
+      return null;
+    }
+    const record = fromRow(claimed);
+    return { record, leaseId, fence: record.processingFence };
+  }
+
   async remove(id: string): Promise<void> {
     await this.db.delete(runs).where(eq(runs.id, id));
   }
 
   async listExpired(now = new Date()): Promise<RunRecord[]> {
     const rows = await this.db.select().from(runs).where(lte(runs.expiresAt, now));
+    return rows.map(fromRow);
+  }
+
+  async listCleanupCandidates(now = new Date(), limit = 100): Promise<RunRecord[]> {
+    const boundedLimit = Math.min(Math.max(Math.trunc(limit), 1), 1_000);
+    const rows = await this.db
+      .select()
+      .from(runs)
+      .where(or(
+        and(ne(runs.status, "expired"), lte(runs.expiresAt, now)),
+        and(
+          eq(runs.status, "expired"),
+          isNotNull(runs.auditExpiresAt),
+          lte(runs.auditExpiresAt, now)
+        ),
+        and(
+          inArray(runs.status, [...LEASED_RUN_STATUSES]),
+          isNotNull(runs.processingLeaseExpiresAt),
+          lte(runs.processingLeaseExpiresAt, now)
+        )
+      ))
+      .orderBy(asc(runs.updatedAt), asc(runs.id))
+      .limit(boundedLimit);
     return rows.map(fromRow);
   }
 }

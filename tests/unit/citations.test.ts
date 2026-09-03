@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { sha256Hex } from "@/lib/crypto";
-import { verifyCitation } from "@/lib/evidence/citations";
+import { assertionTokensSupportedByCitations, verifyCitation } from "@/lib/evidence/citations";
 import { normalizeEvidenceText, type PdfPageIndex } from "@/lib/pdf/page-index";
 
 const documentSha = "a".repeat(64);
@@ -53,5 +53,26 @@ describe("SHA-bound citation verification", () => {
       pdf_page_1based: null,
       verification_method: "manual_required"
     });
+  });
+
+  it("canonicalizes equivalent dates/times and rejects different scalar assertions", () => {
+    const citation = {
+      document_sha256: documentSha,
+      document_name: "source.pdf",
+      source_url: null,
+      pdf_page_1based: 2,
+      printed_page_label: null,
+      section: null,
+      evidence_quote: "Closes September 15, 2026 at 2:00 PM MDT with 70% technical weight.",
+      verified: true,
+      verification_method: "exact" as const
+    };
+    expect(assertionTokensSupportedByCitations(
+      "Closes 2026-09-15T14:00:00-06:00 with a 70% technical weight.",
+      [citation]
+    )).toBe(true);
+    expect(assertionTokensSupportedByCitations("Closes 2026-09-03 with 70% technical weight.", [citation]))
+      .toBe(false);
+    expect(assertionTokensSupportedByCitations("The technical weight is 99%.", [citation])).toBe(false);
   });
 });

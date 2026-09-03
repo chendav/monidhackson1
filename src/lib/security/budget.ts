@@ -169,6 +169,12 @@ export function getBudgetGuard(config = getConfig()): BudgetGuard {
     neonGuard ??= new NeonBudgetGuard(config.DATABASE_URL, config);
     return neonGuard;
   }
+  if (config.NODE_ENV === "production") {
+    throw new AppError("ANALYSIS_INCOMPLETE", "Persistent budget enforcement is not configured.", {
+      httpStatus: 503,
+      retryable: true
+    });
+  }
   memoryGuard ??= new InMemoryBudgetGuard(config);
   return memoryGuard;
 }

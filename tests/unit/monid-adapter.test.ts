@@ -10,6 +10,7 @@ function monidConfig(resultPath = "result.artifact.url") {
     MONID_PARSE_PROVIDER: "context-dev",
     MONID_PARSE_ENDPOINT: "parse",
     MONID_RESULT_URL_PATH: resultPath,
+    MONID_ARTIFACT_HOST_ALLOWLIST: "artifacts.monid.test",
     SESSION_SIGNING_SECRET: "test-session-signing-secret-that-is-long-enough"
   });
 }
@@ -42,7 +43,8 @@ describe("Monid nested run adapter", () => {
       fetcher,
       sleep: async () => undefined,
       pollIntervalMs: 0,
-      maxPolls: 3
+      maxPolls: 3,
+      resolveHostname: async () => ["93.184.216.34"]
     });
     const result = await adapter.parse({ fileUrl: "https://private-blob.test/source.pdf", ocr: true });
     expect(result.markdown).toContain("Parsed tender");
@@ -75,7 +77,10 @@ describe("Monid nested run adapter", () => {
         result: { status: 500, artifact: { url: "https://artifacts.monid.test/result.md" } }
       });
     }) as typeof fetch;
-    const adapter = new MonidAdapter({ config: monidConfig(), fetcher, sleep: async () => undefined });
+    const adapter = new MonidAdapter({
+      config: monidConfig(), fetcher, sleep: async () => undefined,
+      resolveHostname: async () => ["93.184.216.34"]
+    });
     await expect(adapter.parse({ fileUrl: "https://private-blob.test/source.pdf" }))
       .rejects.toMatchObject({ code: "MONID_PARSE_FAILED" });
   });
@@ -86,8 +91,50 @@ describe("Monid nested run adapter", () => {
       if (url.endsWith("/v1/run")) return Response.json({ id: "run-no-path" });
       return Response.json({ status: "COMPLETED", result: { status: 200, download: "https://example.test/a.md" } });
     }) as typeof fetch;
-    const adapter = new MonidAdapter({ config: monidConfig("result.artifact.url"), fetcher, sleep: async () => undefined });
+    const adapter = new MonidAdapter({
+      config: monidConfig("result.artifact.url"), fetcher, sleep: async () => undefined,
+      resolveHostname: async () => ["93.184.216.34"]
+    });
     await expect(adapter.parse({ fileUrl: "https://private-blob.test/source.pdf" }))
       .rejects.toThrow(/configured path/);
+  });
+
+  it("rejects allowlisted hostnames that resolve to private networks before artifact fetch", async () => {
+    let artifactFetched = false;
+    const fetcher = (async (input: URL | RequestInfo) => {
+      const url = input.toString();
+      if (url.endsWith("/v1/run")) return Response.json({ id: "run-private" });
+      if (url.endsWith("/v1/runs/run-private")) return Response.json({
+        status: "COMPLETED",
+        result: { status: 200, artifact: { url: "https://artifacts.monid.test/result.md" } }
+      });
+      artifactFetched = true;
+      return new Response("should not be fetched");
+    }) as typeof fetch;
+    const adapter = new MonidAdapter({
+      config: monidConfig(), fetcher, sleep: async () => undefined,
+      resolveHostname: async () => ["127.0.0.1"]
+    });
+    await expect(adapter.parse({ fileUrl: "https://private-blob.test/source.pdf" }))
+      .rejects.toMatchObject({ code: "MONID_PARSE_FAILED" });
+    expect(artifactFetched).toBe(false);
+  });
+
+  it("revalidates every manual artifact redirect against the exact host allowlist", async () => {
+    const fetcher = (async (input: URL | RequestInfo) => {
+      const url = input.toString();
+      if (url.endsWith("/v1/run")) return Response.json({ id: "run-redirect" });
+      if (url.endsWith("/v1/runs/run-redirect")) return Response.json({
+        status: "COMPLETED",
+        result: { status: 200, artifact: { url: "https://artifacts.monid.test/result.md" } }
+      });
+      return new Response(null, { status: 302, headers: { location: "https://127.0.0.1/secret" } });
+    }) as typeof fetch;
+    const adapter = new MonidAdapter({
+      config: monidConfig(), fetcher, sleep: async () => undefined,
+      resolveHostname: async () => ["93.184.216.34"]
+    });
+    await expect(adapter.parse({ fileUrl: "https://private-blob.test/source.pdf" }))
+      .rejects.toMatchObject({ code: "MONID_PARSE_FAILED" });
   });
 });

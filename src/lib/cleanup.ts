@@ -6,6 +6,7 @@ export interface CleanupTarget {
   controlScope: CleanupReceipt["controlScope"];
   remove?: () => Promise<void>;
   unknownDetail?: string;
+  successDetail?: string;
 }
 
 export async function executeCleanup(
@@ -38,7 +39,7 @@ export async function executeCleanup(
           status: "deleted",
           attemptedAt,
           confirmedAt: now().toISOString(),
-          detail: "Deletion confirmed by the controlling adapter."
+          detail: target.successDetail ?? "Deletion confirmed by the controlling adapter."
         };
       } catch {
         return {
@@ -72,9 +73,12 @@ export function cleanupDisclosure(receipts: CleanupReceipt[]) {
     (receipt) => receipt.controlScope === "provider" && receipt.status === "unknown"
   );
   return {
-    application_controlled_deleted: receipts
+    application_controlled_deleted: [...new Set(receipts
       .filter((receipt) => receipt.controlScope === "application")
-      .every((receipt) => receipt.status === "deleted"),
+      .map((receipt) => receipt.resourceId))]
+      .every((resourceId) => receipts.some(
+        (receipt) => receipt.resourceId === resourceId && receipt.status === "deleted"
+      )),
     provider_retention: providerUnknown ? "unknown" : "not_applicable"
   } as const;
 }

@@ -17,14 +17,22 @@ class FakeUploadStorage implements UploadStorage {
   async presign(): Promise<PresignUploadResponse> {
     throw new Error("not used");
   }
+  async claimIncoming(): Promise<void> {}
   async read(): Promise<Uint8Array> {
     return this.bytes.slice();
   }
+  async stage(): Promise<void> {}
   async temporaryReadUrl(): Promise<string> {
     throw new Error("not used by local fallback");
   }
   async remove(): Promise<void> {
+    // Staging deletion succeeds independently from incoming content purge.
+  }
+  async purgeIncomingToFence(): Promise<void> {
     if (this.failDeletion) throw new Error("simulated delete failure");
+  }
+  async sweepExpiredIncoming(): Promise<string[]> {
+    return [];
   }
 }
 
@@ -93,7 +101,7 @@ describe("cleanup readiness gate", () => {
     });
     expect(result.status).toBe("partial");
     expect(result.cleanupConfirmed).toBe(true);
-    expect(result.result?.package_completeness).toBe("verified");
+    expect(result.result?.package_completeness).toBe("incomplete");
     const deleted = new Set(result.cleanupReceipts.filter((receipt) => receipt.status === "deleted").map((receipt) => receipt.resourceId));
     expect(result.cleanupExpectedResourceIds.every((id) => deleted.has(id))).toBe(true);
   });

@@ -2,14 +2,18 @@ import type { CostEvent, DocumentManifest } from "@/contracts";
 import { materializeAnalysis } from "@/lib/analysis/materialize";
 import { LocalDeterministicModel } from "@/lib/analysis/local-model";
 import { cleanupGate, executeCleanup, type CleanupTarget } from "@/lib/cleanup";
-import { getConfig, hasLivePipelineConfig, type AppConfig } from "@/lib/config";
+import { getConfig, getProductionReadiness, hasLivePipelineConfig, type AppConfig } from "@/lib/config";
 import { asAppError, AppError } from "@/lib/errors";
 import { auditLog } from "@/lib/logging";
 import { buildPdfPageIndex, type PdfPageIndex } from "@/lib/pdf/page-index";
 import { MonidAdapter, type MonidParseResult } from "@/lib/providers/monid";
 import {
+  estimateOpenAiBatchFailureCostMicroUsd,
+  estimateOpenAiCostMicroUsd,
+  ModelBatchError,
   OpenAIResponsesAdapter,
   type AnalysisModel,
+  type ExtractionCallResult,
   type ModelDocumentInput
 } from "@/lib/providers/openai";
 import { getRunStore, type RunStore } from "@/lib/runs/store";
@@ -18,7 +22,7 @@ import type { CleanupReceipt, RunRecord } from "@/lib/runs/types";
 import { getBudgetGuard, type BudgetGuard } from "@/lib/security/budget";
 import { assertAggregatePages } from "@/lib/source-validation";
 import { loadSource, type LoadedSource } from "@/lib/storage/source-reader";
-import { getUploadStorage, type UploadStorage } from "@/lib/storage/uploads";
+import { getUploadStorage, stagingBlobPath, type UploadStorage } from "@/lib/storage/uploads";
 
 interface IndexedSource {
   source: LoadedSource;
@@ -117,8 +121,56 @@ function mergeReceipts(existing: CleanupReceipt[], additions: CleanupReceipt[]) 
   return [...existing, ...additions];
 }
 
-async function stage(store: RunStore, runId: string, status: RunRecord["status"]) {
-  return store.update(runId, (record) => transitionRun(record, status));
+interface ProcessingClaim {
+  leaseId: string;
+  fence: number;
+}
+
+async function stage(
+  store: RunStore,
+  runId: string,
+  status: RunRecord["status"],
+  claim: ProcessingClaim
+) {
+  return store.update(runId, (record) => transitionRun(record, status), claim);
+}
+
+function mergeTargets(current: CleanupTarget[], additions: CleanupTarget[]) {
+  const result = new Map(current.map((target) => [target.resourceId, target]));
+  for (const target of additions) result.set(target.resourceId, target);
+  return [...result.values()];
+}
+
+function plannedInputTargets(record: RunRecord, storage: UploadStorage): CleanupTarget[] {
+  if (!record.input) return [];
+  return record.input.documents.flatMap((document, index): CleanupTarget[] => {
+    const stageId = `staged:${record.id}:${index}`;
+    if (document.source.type === "url") {
+      return [{
+        resourceId: stageId,
+        resourceKind: "staged_source",
+        controlScope: "application",
+        remove: () => storage.remove(stagingBlobPath(record.id, index))
+      }];
+    }
+    const blobPath = document.source.blob_path;
+    const stagePath = stagingBlobPath(record.id, index);
+    return [
+      {
+        resourceId: `blob:${blobPath}`,
+        resourceKind: "source_blob",
+        controlScope: "application",
+        successDetail: "Incoming source content was purged and a verified replay-blocking fence remains until grant expiry.",
+        remove: () => storage.purgeIncomingToFence(blobPath)
+      },
+      {
+        resourceId: stageId,
+        resourceKind: "staged_source",
+        controlScope: "application",
+        remove: () => storage.remove(stagePath)
+      }
+    ];
+  });
 }
 
 function sourceCleanupSucceeded(source: LoadedSource, receipts: CleanupReceipt[]) {
@@ -164,6 +216,13 @@ function fetchWithDeadline(fetcher: typeof fetch, deadlineAt: number): typeof fe
 
 export async function processRun(runId: string, dependencies: PipelineDependencies = {}): Promise<RunRecord> {
   const config = dependencies.config ?? getConfig();
+  const readiness = getProductionReadiness(config);
+  if (!readiness.ready) {
+    throw new AppError("ANALYSIS_INCOMPLETE", "The production analysis pipeline is not fully configured.", {
+      httpStatus: 503,
+      retryable: true
+    });
+  }
   const live = hasLivePipelineConfig(config);
   const fetcher = fetchWithDeadline(
     dependencies.fetcher ?? fetch,
@@ -179,29 +238,56 @@ export async function processRun(runId: string, dependencies: PipelineDependenci
   let cleanupTargets: CleanupTarget[] = [];
   const costs: CostEvent[] = [];
 
-  const initial = await store.get(runId);
-  if (!initial) throw new AppError("ANALYSIS_INCOMPLETE", "The run was not found.", { httpStatus: 404 });
-  if (initial.status !== "queued") return initial;
+  const acquired = await store.claimProcessing(runId, now());
+  if (!acquired) {
+    const current = await store.get(runId);
+    if (!current) throw new AppError("ANALYSIS_INCOMPLETE", "The run was not found.", { httpStatus: 404 });
+    return current;
+  }
+  const initial = acquired.record;
+  const claim: ProcessingClaim = { leaseId: acquired.leaseId, fence: acquired.fence };
+  if (!initial.input) {
+    throw new AppError("ANALYSIS_INCOMPLETE", "The run input has already been scrubbed.", { httpStatus: 410 });
+  }
+  cleanupTargets = plannedInputTargets(initial, uploadStorage);
 
   try {
-    await stage(store, runId, "validating");
-    await stage(store, runId, "staging");
+    await stage(store, runId, "staging", claim);
     for (const document of initial.input.documents) {
-      loaded.push(await loadSource(document, { uploadStorage, fetcher }));
+      if (document.source.type !== "upload") continue;
+      await uploadStorage.claimIncoming({
+        ownerId: initial.ownerId,
+        runId,
+        blobPath: document.source.blob_path,
+        expectedSha256: document.source.sha256,
+        expectedSize: document.source.size_bytes
+      });
     }
-    cleanupTargets = loaded.flatMap((source) => source.cleanupTargets);
+    for (const [documentIndex, document] of initial.input.documents.entries()) {
+      const source = await loadSource(document, {
+        uploadStorage,
+        fetcher,
+        runId,
+        ownerId: initial.ownerId,
+        documentIndex
+      });
+      loaded.push(source);
+      cleanupTargets = mergeTargets(cleanupTargets, source.cleanupTargets);
+    }
     await store.update(runId, (record) => ({
       ...record,
-      cleanupExpectedResourceIds: cleanupTargets
-        .filter((target) => target.controlScope === "application")
-        .map((target) => target.resourceId),
+      cleanupExpectedResourceIds: [...new Set([
+        ...record.cleanupExpectedResourceIds,
+        ...cleanupTargets.filter((target) => target.controlScope === "application").map((target) => target.resourceId)
+      ])],
       updatedAt: now().toISOString()
-    }));
+    }), claim);
 
-    await stage(store, runId, "page_indexing");
+    await stage(store, runId, "page_indexing", claim);
     let remainingPages = 300;
     for (const source of loaded) {
       const index = await buildPdfPageIndex(source.bytes, { maxPages: remainingPages });
+      source.bytes.fill(0);
       remainingPages -= index.pagesTotal;
       indexed.push({
         source,
@@ -211,26 +297,41 @@ export async function processRun(runId: string, dependencies: PipelineDependenci
       });
     }
     assertAggregatePages(indexed.map((item) => item.index.pagesTotal));
-    cleanupTargets.push(...expectedRawTargets(indexed));
+    cleanupTargets = mergeTargets(cleanupTargets, expectedRawTargets(indexed));
     const manifests = indexed.map(manifestFor);
     await store.update(runId, (record) => ({
       ...record,
       manifests,
-      cleanupExpectedResourceIds: cleanupTargets
-        .filter((target) => target.controlScope === "application")
-        .map((target) => target.resourceId),
+      cleanupExpectedResourceIds: [...new Set([
+        ...record.cleanupExpectedResourceIds,
+        ...cleanupTargets.filter((target) => target.controlScope === "application").map((target) => target.resourceId)
+      ])],
       updatedAt: now().toISOString()
-    }));
+    }), claim);
 
-    await stage(store, runId, "parsing");
+    await stage(store, runId, "parsing", claim);
     const monid = live ? dependencies.monid ?? new MonidAdapter({ config, fetcher }) : null;
+    const sourceReceipts: CleanupReceipt[] = [];
     for (const item of indexed) {
       if (monid) {
         const started = performance.now();
-        const parserUrl = await item.source.parserUrl(new Date(now().getTime() + 5 * 60_000));
-        const result = await monid.parse({ fileUrl: parserUrl, extension: "pdf", ocr: true });
-        costs.push(providerCost(result, Math.round(performance.now() - started), config.MONID_PARSE_RESERVE_MICRO_USD));
-        parsed.push({ ...item, markdown: result.markdown, monid: result });
+        try {
+          const parserUrl = await item.source.parserUrl(new Date(now().getTime() + 5 * 60_000));
+          const result = await monid.parse({ fileUrl: parserUrl, extension: "pdf", ocr: true });
+          costs.push(providerCost(result, Math.round(performance.now() - started), config.MONID_PARSE_RESERVE_MICRO_USD));
+          parsed.push({ ...item, markdown: result.markdown, monid: result });
+        } catch (error) {
+          costs.push({
+            provider: "monid",
+            operation: "context_dev_parse",
+            status: "failed",
+            actual_micro_usd: null,
+            estimated_micro_usd: config.MONID_PARSE_RESERVE_MICRO_USD,
+            latency_ms: Math.round(performance.now() - started),
+            retry_of: null
+          });
+          throw error;
+        }
       } else {
         parsed.push({
           ...item,
@@ -247,19 +348,51 @@ export async function processRun(runId: string, dependencies: PipelineDependenci
           retry_of: null
         });
       }
+      const parsedItem = parsed.at(-1);
+      if (!parsedItem) {
+        throw new AppError("EMPTY_PARSE", "The parser produced no document representation.", {
+          retryable: true
+        });
+      }
+      cleanupTargets = mergeTargets(cleanupTargets, parsedTargets([parsedItem]));
+      // The provider now has its document representation. Delete this
+      // document's immutable staging object immediately instead of retaining
+      // all package inputs until every provider call finishes.
+      const documentReceipts = await executeCleanup(item.source.cleanupTargets, now);
+      sourceReceipts.push(...documentReceipts);
+      await store.update(runId, (record) => ({
+        ...record,
+        costs: [...costs],
+        cleanupReceipts: mergeReceipts(record.cleanupReceipts, documentReceipts),
+        cleanupExpectedResourceIds: [...new Set([
+          ...record.cleanupExpectedResourceIds,
+          ...cleanupTargets
+            .filter((target) => target.controlScope === "application")
+            .map((target) => target.resourceId)
+        ])],
+        updatedAt: now().toISOString()
+      }), claim);
+      if (documentReceipts.some(
+        (receipt) => receipt.controlScope === "application" && receipt.status !== "deleted"
+      )) {
+        throw new AppError(
+          "SOURCE_CLEANUP_PENDING",
+          "At least one source deletion could not be confirmed.",
+          { retryable: true }
+        );
+      }
     }
-    cleanupTargets.push(...parsedTargets(parsed));
     await store.update(runId, (record) => ({
       ...record,
       costs: [...costs],
-      cleanupExpectedResourceIds: cleanupTargets
-        .filter((target) => target.controlScope === "application")
-        .map((target) => target.resourceId),
+      cleanupExpectedResourceIds: [...new Set([
+        ...record.cleanupExpectedResourceIds,
+        ...cleanupTargets.filter((target) => target.controlScope === "application").map((target) => target.resourceId)
+      ])],
       updatedAt: now().toISOString()
-    }));
+    }), claim);
 
-    await stage(store, runId, "purging_source");
-    const sourceReceipts = await executeCleanup(loaded.flatMap((source) => source.cleanupTargets), now);
+    await stage(store, runId, "purging_source", claim);
     const sourceFailed = sourceReceipts.some(
       (receipt) => receipt.controlScope === "application" && receipt.status !== "deleted"
     );
@@ -275,9 +408,8 @@ export async function processRun(runId: string, dependencies: PipelineDependenci
     await store.update(runId, (record) => ({
       ...record,
       manifests: cleanedManifests,
-      cleanupReceipts: mergeReceipts(record.cleanupReceipts, sourceReceipts),
       updatedAt: now().toISOString()
-    }));
+    }), claim);
     if (sourceFailed) {
       throw new AppError(
         "SOURCE_CLEANUP_PENDING",
@@ -286,7 +418,7 @@ export async function processRun(runId: string, dependencies: PipelineDependenci
       );
     }
 
-    await stage(store, runId, "extracting");
+    await stage(store, runId, "extracting", claim);
     const model = dependencies.model ?? (live
       ? new OpenAIResponsesAdapter(config)
       : new LocalDeterministicModel());
@@ -298,18 +430,54 @@ export async function processRun(runId: string, dependencies: PipelineDependenci
       parsed_markdown: item.markdown,
       evidence_chunks: item.index.chunks
     }));
-    const extraction = await model.extract(modelInput);
-    costs.push({
-      provider: "openai",
-      operation: live ? "responses.parse.structured_extraction" : "local_deterministic_extraction",
-      status: "succeeded",
-      actual_micro_usd: live ? null : 0,
-      estimated_micro_usd: live ? config.OPENAI_RUN_RESERVE_MICRO_USD : null,
-      latency_ms: extraction.latencyMs,
-      retry_of: null
-    });
+    let extraction: ExtractionCallResult;
+    const modelStarted = performance.now();
+    try {
+      extraction = await model.extract(modelInput);
+      const estimatedModelCost = extraction.inputTokens === null || extraction.outputTokens === null
+        ? config.OPENAI_RUN_RESERVE_MICRO_USD
+        : estimateOpenAiCostMicroUsd(extraction.inputTokens, extraction.outputTokens);
+      costs.push({
+        provider: "openai",
+        operation: live ? "responses.parse.structured_extraction" : "local_deterministic_extraction",
+        status: "succeeded",
+        actual_micro_usd: live ? null : 0,
+        estimated_micro_usd: live ? estimatedModelCost : null,
+        latency_ms: extraction.latencyMs,
+        retry_of: null
+      });
+    } catch (error) {
+      const attemptedBatchCost = error instanceof ModelBatchError
+        ? estimateOpenAiBatchFailureCostMicroUsd(error)
+        : null;
+      if (error instanceof ModelBatchError) {
+        auditLog("openai_partial_batch_failure", {
+          completed_response_ids: error.completedResponseIds,
+          completed_batches: error.completedResponseIds.length,
+          attempted_batches: error.attemptedBatches,
+          completed_input_unit_count: error.completedInputTokens,
+          completed_output_unit_count: error.completedOutputTokens,
+          preflight_input_unit_counts: error.preflightInputTokens,
+          estimated_attempted_input_unit_count: error.estimatedAttemptedInputTokens,
+          estimated_attempted_output_unit_count: error.estimatedAttemptedOutputTokens,
+          estimated_attempted_micro_usd: attemptedBatchCost
+        });
+      }
+      costs.push({
+        provider: "openai",
+        operation: live ? "responses.parse.structured_extraction" : "local_deterministic_extraction",
+        status: "failed",
+        actual_micro_usd: null,
+        estimated_micro_usd: live
+          ? attemptedBatchCost ?? config.OPENAI_RUN_RESERVE_MICRO_USD
+          : 0,
+        latency_ms: Math.round(performance.now() - modelStarted),
+        retry_of: null
+      });
+      throw error;
+    }
 
-    await stage(store, runId, "reconciling");
+    await stage(store, runId, "reconciling", claim);
     const materialized = materializeAnalysis({
       draft: extraction.analysis,
       documents: indexed.map((item) => ({
@@ -325,38 +493,51 @@ export async function processRun(runId: string, dependencies: PipelineDependenci
       expiresAt: new Date(initial.expiresAt)
     });
 
-    await stage(store, runId, "verifying");
+    await stage(store, runId, "verifying", claim);
     const remainingTargets = cleanupTargets.filter(
       (target) => !loaded.some((source) => source.cleanupTargets.includes(target))
     );
     const remainingReceipts = await executeCleanup(remainingTargets, now);
     let updated = await store.update(runId, (record) => {
       const cleanupReceipts = mergeReceipts(record.cleanupReceipts, remainingReceipts);
-      const candidate = {
+      const cleanupConfirmed = cleanupGate({
+        cleanupExpectedResourceIds: record.cleanupExpectedResourceIds,
+        cleanupReceipts
+      });
+      const candidate: RunRecord = {
         ...record,
         cleanupReceipts,
-        citationReceipts: [...record.citationReceipts, ...materialized.receipts],
+        citationReceipts: cleanupConfirmed
+          ? [...record.citationReceipts, ...materialized.receipts]
+          : record.citationReceipts,
         costs,
         costMicroUsd: materialized.result.costs.total_micro_usd,
-        result: materialized.result,
-        cleanupConfirmed: cleanupGate({
-          cleanupExpectedResourceIds: record.cleanupExpectedResourceIds,
-          cleanupReceipts
-        }),
+        result: cleanupConfirmed ? materialized.result : null,
+        cleanupConfirmed,
         updatedAt: now().toISOString()
       };
       return candidate;
-    });
+    }, claim);
     if (!updated.cleanupConfirmed) {
-      updated = await store.update(runId, (record) => transitionRun(record, "cleanup_pending"));
+      updated = await store.update(runId, (record) => ({
+        ...transitionRun(record, "cleanup_pending"),
+        result: null,
+        terminalAfterCleanup: "failed"
+      }), claim);
       throw new AppError(
         "SOURCE_CLEANUP_PENDING",
         "Raw-resource deletion could not be confirmed; the run is not ready.",
         { retryable: true }
       );
     }
-    const finalStatus = materialized.result.blocking_unknowns.length > 0 ? "partial" : "ready";
-    updated = await store.update(runId, (record) => transitionRun(record, finalStatus));
+    const finalStatus = materialized.result.decision_readiness === "ready_for_bidder_assessment"
+      ? "ready"
+      : "partial";
+    updated = await store.update(runId, (record) => ({
+      ...transitionRun(record, finalStatus),
+      processingLeaseId: null,
+      processingLeaseExpiresAt: null
+    }), claim);
     await budget.settle(runId, updated.costMicroUsd, now());
     return updated;
   } catch (error) {
@@ -364,10 +545,7 @@ export async function processRun(runId: string, dependencies: PipelineDependenci
     auditLog("run_pipeline_failed", {
       run_id: runId,
       error_code: appError.code,
-      error_name: error instanceof Error ? error.name : "unknown",
-      error_message: error instanceof Error ? error.message : "unknown",
-      cause_name: error instanceof Error && error.cause instanceof Error ? error.cause.name : null,
-      cause_message: error instanceof Error && error.cause instanceof Error ? error.cause.message : null
+      error_name: error instanceof Error ? error.name : "unknown"
     });
     const alreadyDeleted = new Set(
       (await store.get(runId))?.cleanupReceipts
@@ -378,9 +556,11 @@ export async function processRun(runId: string, dependencies: PipelineDependenci
       (target) => target.controlScope !== "application" || !alreadyDeleted.has(target.resourceId)
     );
     const recoveryReceipts = pendingTargets.length > 0 ? await executeCleanup(pendingTargets, now) : [];
-    const failed = await store.update(runId, (record) => {
+    let failed: RunRecord;
+    try {
+      failed = await store.update(runId, (record) => {
       const cleanupReceipts = mergeReceipts(record.cleanupReceipts, recoveryReceipts);
-      const cleanupConfirmed = record.cleanupExpectedResourceIds.length === 0 || cleanupGate({
+      const cleanupConfirmed = cleanupGate({
         cleanupExpectedResourceIds: record.cleanupExpectedResourceIds,
         cleanupReceipts
       });
@@ -397,6 +577,11 @@ export async function processRun(runId: string, dependencies: PipelineDependenci
         ...next,
         cleanupReceipts,
         cleanupConfirmed,
+        result: null,
+        citationReceipts: [],
+        terminalAfterCleanup: cleanupConfirmed ? null : "failed",
+        processingLeaseId: null,
+        processingLeaseExpiresAt: null,
         costs,
         costMicroUsd: costs.reduce(
           (total, event) => total + (event.actual_micro_usd ?? event.estimated_micro_usd ?? 0),
@@ -410,7 +595,12 @@ export async function processRun(runId: string, dependencies: PipelineDependenci
         },
         updatedAt: now().toISOString()
       };
-    });
+      }, claim);
+    } catch (storeError) {
+      const current = await store.get(runId);
+      if (!current) throw storeError;
+      failed = current;
+    }
     await budget.settle(runId, failed.costMicroUsd, now());
     return failed;
   }

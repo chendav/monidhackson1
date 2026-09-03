@@ -224,3 +224,210 @@ left for the root integrator to disposition.
 ## Memory Disposition
 
 Proposed only. Promotion or rejection belongs to the root/reviewer workflow.
+
+---
+
+## Revision 1 — Cleanup, Concurrency, Grounding, and Spend Hardening
+
+This revision responds to the first independent Reviewer verdict in `qa_report.md`
+(`REQUEST_CHANGES`: one P0 and six consolidated P1 findings). It is implementation
+evidence for another review, not a self-certification. No deployment, migration,
+credentialed provider call, paid API call, or repository commit was performed.
+
+### Exact Revision 1 Files
+
+- Runtime/config/dependencies: `.env.example`, `package.json`, `pnpm-lock.yaml`,
+  `vercel.json`.
+- Persistence: `drizzle/0000_rfp_xray.sql`,
+  `drizzle/0001_revision1_privacy.sql`, `src/db/schema.ts`,
+  `src/db/neon-store.ts`.
+- API routes: `src/app/api/internal/maintenance/route.ts`,
+  `src/app/api/v1/health/route.ts`, `src/app/api/v1/runs/route.ts`,
+  `src/app/api/v1/runs/[runId]/route.ts`,
+  `src/app/api/v1/runs/[runId]/result/route.ts`,
+  `src/app/api/v1/runs/[runId]/questions/route.ts`, and
+  `src/app/api/v1/uploads/presign/route.ts`.
+- Analysis/providers/storage: `src/lib/analysis/draft.ts`,
+  `src/lib/analysis/materialize.ts`, `src/lib/analysis/reconciliation.ts`,
+  `src/lib/cleanup.ts`, `src/lib/config.ts`, `src/lib/pipeline.ts`,
+  `src/lib/providers/monid.ts`, `src/lib/providers/openai.ts`,
+  `src/lib/questions/audit-store.ts`, `src/lib/storage/source-reader.ts`, and
+  `src/lib/storage/uploads.ts`.
+- Run/security lifecycle: `src/lib/runs/create.ts`, `src/lib/runs/expiry.ts`,
+  `src/lib/runs/scheduler.ts`, `src/lib/runs/store.ts`,
+  `src/lib/runs/types.ts`, `src/lib/security/auth.ts`, and
+  `src/lib/security/budget.ts`.
+- Workflows: `src/workflows/analyze-run.ts`,
+  `src/workflows/retry-cleanup-step.ts`, `src/workflows/retry-cleanup.ts`,
+  `src/workflows/sweep-incoming-uploads-step.ts`, and
+  `src/workflows/sweep-incoming-uploads.ts`.
+- Tests: `tests/integration/cleanup-gate.test.ts`,
+  `tests/integration/pipeline-claim.test.ts`,
+  `tests/integration/retention-cleanup.test.ts`,
+  `tests/integration/upload-lifecycle.test.ts`,
+  `tests/unit/maintenance-route.test.ts`,
+  `tests/unit/materialize-reconciliation.test.ts`,
+  `tests/unit/monid-adapter.test.ts`, `tests/unit/openai-adapter.test.ts`,
+  `tests/unit/production-readiness.test.ts`, `tests/unit/turnstile.test.ts`, and
+  `tests/unit/vercel-upload-recovery.test.ts`.
+- Governance evidence: this `handoff-backend.md` revision section.
+
+The root-owned API-contract and golden-fixture revision agents separately changed
+their carved-out paths; those paths are intentionally not claimed in the list above.
+
+### Implemented Corrections
+
+- Result persistence and reads now require both a terminal `ready|partial` status and
+  `cleanupConfirmed`. Cleanup failure keeps the run in `cleanup_pending`, withholds
+  result/citation data, and makes DELETE return an explicit 503 instead of a false
+  204. Cleanup retries are bounded and idempotent.
+- Every input has a deterministic staging target derived from run id and document
+  index, registered before source I/O. Upload targets are also pre-registered and
+  pre-claimed. Empty cleanup ledgers cannot satisfy the gate.
+- Signed-PUT grants have a durable owner/path/SHA/size/claim/expiry ledger. Staging
+  uses an immutable destination, source-ETag conditional copy for uploads, and an
+  uncached exact-size/SHA readback. A retry after the object write but before ledger
+  persistence accepts only identical staged bytes; a mismatch fails closed.
+- After verified staging, incoming upload content is immediately replaced using an
+  ETag-conditional zero-byte fence. Monid receives only a temporary private staging
+  URL. Each document's stage is conditionally deleted as soon as that document's
+  Monid representation is captured; the incoming tombstone stays until signed-grant
+  expiry plus five minutes so `allowOverwrite:false` continues to reject replay.
+- Abandoned upload cleanup has a per-grant workflow and a five-minute authenticated
+  maintenance cron. The durable sweeper uses CAS leases, versions, attempts, retry
+  release, a 30-minute hard deadline, and hashed-only overdue logging.
+- Processing uses a run-level CAS lease and fencing counter. Concurrent
+  `processRun` calls reach paid providers and cleanup through one owner only.
+- Early delete and 24-hour expiry scrub source names/URLs/blob paths, input,
+  idempotency/request hashes, manifests, results, citation receipts, and workflow
+  metadata. Only non-body cost and hashed cleanup audit remains for at most 30 days.
+  Provider artifact deletion is still not claimed.
+- Summary factual fields are retained only when they exactly match a verified active
+  claim/requirement/evaluation value; otherwise they become neutral/null. Empty or
+  unverifiable extraction is `incomplete`, and the run is never `ready`. Coverage,
+  citation, unsupported-item, and critical-claim counts are computed from materialized
+  evidence rather than hard-coded.
+- Claims and requirements reconcile independently from server-derived document role
+  and amendment number. Model-supplied amendment ordering is non-authoritative.
+  Deletes remain internal tombstones, current-stage evidence drives conflicts, and an
+  internal same-amendment conflict uses the locked safe answer.
+- Production now fails closed unless Neon, private Blob, credentialed replay-fence
+  validation, Vercel Workflow, every Monid normalization/artifact-host setting,
+  OpenAI, session/IP secrets, Turnstile site/secret/hostname, and cron secret are
+  ready. Memory, local Blob, deterministic model, and microtask scheduling remain
+  development/test-only.
+- Guest mutation verification freezes header `X-Turnstile-Token` and actions
+  `upload_presign`, `create_run`, `ask_question`, and `delete_run`. Siteverify must
+  return success plus the expected action and hostname, and that hostname must match
+  the request URL. API bearer clients remain the explicit non-guest path.
+- OpenAI is pinned to the benchmarked `gpt-5.4-mini`; unknown model names fail config
+  validation. All deterministic batches are serialized before generation, capped at
+  1.2 MB total/140 KB per request, and exact-counted with
+  `beta.responses.inputTokens.count`, including instructions and the Structured
+  Output schema. The 320,000 input-token and 50,000 total output-token ceilings have
+  a worst-case estimate of 465,000 micro-USD at $0.75/M input and $4.50/M output,
+  below the 495,000 micro-USD reservation.
+- Model batches consume Monid Markdown once rather than duplicating it with PDF.js
+  chunks. A dense synthetic 300-page package over 900 KB passes batching/preflight.
+  No input or combined model output is silently truncated. Cross-batch evaluation is
+  selected as one coherent object with only its own citations. A late batch failure
+  retains returned response ids/usage plus every attempted batch's preflight input
+  count and a conservative failed-output estimate; pipeline cost settlement no
+  longer clamps actual estimated usage to the reservation.
+- Monid artifact fetching permits only exact configured HTTPS hosts on port 443,
+  resolves only public network addresses, follows redirects manually with validation
+  at every hop, bounds control JSON/string/array data, and logs safe metadata only.
+- `nanoid` is overridden to 5.1.16 and `undici` to 7.29.0. The high-severity audit
+  gate is clean; one moderate advisory remains below the requested threshold.
+
+### Revision 1 Verification Evidence
+
+- `pnpm check`: PASS, exit 0. ESLint and TypeScript passed; Vitest reported 21 files
+  passed, 1 optional file skipped, 78 tests passed, and 3 skipped.
+- `$env:RFP_XRAY_FIXTURE_DIR='C:\Users\chen0\AppData\Local\Temp\rfp-xray-fixtures'; pnpm exec vitest run tests/golden/official-fixture-audit.test.ts`:
+  PASS, exit 0; 1 file and 3 tests passed. The official PDFs stayed outside Git.
+- `pnpm build`: PASS, exit 0. Next compiled and type-checked; Workflow reported 9
+  steps and 3 workflows. Route output includes the locked public routes and
+  `/api/internal/maintenance`.
+- `pnpm audit --audit-level=high`: PASS, exit 0; zero high findings and one moderate
+  finding.
+- `git diff --check`: no whitespace errors; only Windows LF-to-CRLF notices.
+- No automated test contacted OpenAI, Monid, Neon, Vercel Blob, Turnstile, or a
+  deployed Workflow. Provider and Blob tests use injected/mocked adapters.
+- On 2026-09-02 MDT, a credentialed read-only contract probe called
+  `beta.responses.inputTokens.count` for `gpt-5.4-mini` with a short string and
+  returned `input_tokens=16`. No secret or document content was printed. This
+  proves the pinned model/count endpoint is available to the configured account;
+  it does not prove structured extraction quality or maximum-context capacity.
+
+### Remaining Unknowns and Required Independent Proof
+
+- Vercel's signed PUT has no documented revoke/one-time operation. The zero-byte
+  fence design is therefore production-disabled until a credentialed stress test
+  proves ETag CAS behavior and proves that an unexpired `allowOverwrite:false` URL
+  cannot replace the fence. `BLOB_REPLAY_FENCE_VALIDATED=false` remains the default;
+  production readiness reports unavailable until an operator explicitly changes it.
+- Local/mocked tests prove control flow, not Vercel Blob consistency or credential
+  permissions. They do not substantiate a production one-use claim. The immediate
+  fence avoids waiting for grant expiry, but the 60-second post-capture cleanup SLO
+  still needs credentialed timing evidence.
+- Monid's exact live request/result/artifact contract and provider retention/deletion
+  policy remain unverified. Provider-side retention is disclosed as unknown.
+- Exact OpenAI token preflight is live-verified only for a 16-token probe;
+  structured generation remains SDK-shape tested only. The dense 300-page case
+  proves local capacity/budget behavior, not live extraction recall or the 100%
+  mandatory-requirement target.
+- The 800-second single privacy step still requires Vercel Pro/Fluid Compute. Its
+  P95, cron delivery, crash behavior, and deployed lease recovery need staging/load
+  evidence; no Railway dependency was introduced.
+- The Neon migration was authored but not applied. Production index/transaction
+  behavior and 300-reader concurrency remain for independent deployed QA.
+
+---
+
+## Revision 2 — Cancellation and Evidence-Truth Integration
+
+This root-integrated revision supersedes any earlier implementation wording in this
+handoff where the details differ. It remains implementation evidence, not a Reviewer
+verdict.
+
+- Upload staging no longer relies on ambiguous Blob `copy(..., { ifMatch })`
+  semantics. The server writes the exact size/SHA-verified bytes with immutable
+  `put(..., { allowOverwrite:false })`, then performs an uncached size/SHA readback.
+- DELETE, TTL expiry, and stale-worker recovery revoke the processing lease and bump
+  its fence before cleanup. `cleanup_pending` cannot return to an analysis/ready
+  state. After the preserved lease deadline, cleanup re-deletes and reconfirms every
+  durable source/stage so a late stale write cannot hide behind an old receipt.
+- Five-minute maintenance now uses an indexed, server-filtered, 100-row cleanup
+  candidate query. It handles result expiry, 30-day audit purge, and crashed workers
+  whose 20-minute processing lease expired; it does not load the whole run table.
+- Only process-local page text and parsed Markdown receive synthetic release receipts,
+  and only after worker quiescence. Application-controlled durable objects still
+  require adapter-confirmed deletion in the final cleanup pass.
+- `unknown` claims cannot replace/delete facts, create conflicts, support summaries,
+  or satisfy readiness. Citation SHA must match the fact's source document, and
+  asserted numeric/date/time tokens must occur in its evidence.
+- Summary support is field-specific. Evaluation is a set of separately cited,
+  versioned rules (`mandatory_gate`, `rated_threshold`, `technical_weight`,
+  `financial_weight`, `selection_method`) reconciled in server-derived amendment
+  order. Risks are versioned too. One quote can no longer bless an entire evaluation.
+- Same-amendment distinct scalar values conflict even when the model labels them
+  `add` or varies topic wording. Replace/delete/supersede operations require verified
+  source evidence. Package completeness is conservatively `unverified` without an
+  authoritative inventory and `incomplete` for missing/mixed solicitation metadata,
+  amendment gaps, or duplicates.
+- A latest credentialed token-count probe verified the pinned `gpt-5.4-mini` and
+  `beta.responses.inputTokens.count` endpoint (`input_tokens=16`). Structured live
+  extraction, Monid, Neon, Blob, Turnstile, Workflow, and deployment remain unverified.
+
+### Latest Integrated Verification
+
+- `pnpm check`: PASS; 22 test files passed, 1 optional file skipped; 90 tests passed,
+  3 fixture-dependent tests skipped.
+- Official external fixture audit with `RFP_XRAY_FIXTURE_DIR` set: PASS, 3/3.
+- `pnpm build`: PASS; 9 Workflow steps, 3 workflows, and all locked/API compatibility
+  routes compiled.
+- `CI=1 pnpm test:e2e`: PASS, 14/14 across desktop Chromium and mobile viewport.
+- `pnpm audit --audit-level=high`: PASS at the configured gate; zero high findings,
+  one moderate advisory.
+- `git diff --check`: PASS; only Git's Windows LF-to-CRLF notices were emitted.

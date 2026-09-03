@@ -17,6 +17,17 @@ export const ACTIVE_RUN_STATUSES = [
   "cleanup_pending"
 ] as const satisfies readonly RunRecord["status"][];
 
+export const LEASED_RUN_STATUSES = [
+  "validating",
+  "staging",
+  "page_indexing",
+  "parsing",
+  "purging_source",
+  "extracting",
+  "reconciling",
+  "verifying"
+] as const satisfies readonly RunRecord["status"][];
+
 export function isActiveRunStatus(status: RunRecord["status"]): boolean {
   return (ACTIVE_RUN_STATUSES as readonly RunRecord["status"][]).includes(status);
 }
@@ -34,9 +45,19 @@ export interface CreateRunRecordInput {
 export interface RunStore {
   create(input: CreateRunRecordInput): Promise<{ record: RunRecord; created: boolean }>;
   get(id: string): Promise<RunRecord | undefined>;
-  update(id: string, mutate: (record: RunRecord) => RunRecord): Promise<RunRecord>;
+  update(
+    id: string,
+    mutate: (record: RunRecord) => RunRecord,
+    claim?: { leaseId: string; fence: number }
+  ): Promise<RunRecord>;
+  claimProcessing(
+    id: string,
+    now?: Date,
+    leaseMs?: number
+  ): Promise<{ record: RunRecord; leaseId: string; fence: number } | null>;
   remove(id: string): Promise<void>;
   listExpired(now?: Date): Promise<RunRecord[]>;
+  listCleanupCandidates(now?: Date, limit?: number): Promise<RunRecord[]>;
 }
 
 function clone<T>(value: T): T {
@@ -46,8 +67,9 @@ function clone<T>(value: T): T {
 export function newRunRecord(input: CreateRunRecordInput): RunRecord {
   const now = input.now ?? new Date();
   const config = getConfig();
+  const id = input.id ?? crypto.randomUUID();
   return {
-    id: input.id ?? crypto.randomUUID(),
+    id,
     ownerId: input.ownerId,
     quotaKey: input.quotaKey,
     input: clone(input.input),
@@ -60,7 +82,12 @@ export function newRunRecord(input: CreateRunRecordInput): RunRecord {
     updatedAt: now.toISOString(),
     expiresAt: new Date(now.getTime() + config.RUN_TTL_HOURS * 3_600_000).toISOString(),
     cleanupConfirmed: false,
-    cleanupExpectedResourceIds: [],
+    cleanupExpectedResourceIds: input.input.documents.flatMap((document, index) => {
+      const staged = `staged:${candidateStageId(id, index)}`;
+      return document.source.type === "upload"
+        ? [`blob:${document.source.blob_path}`, staged]
+        : [staged];
+    }),
     cleanupReceipts: [],
     citationReceipts: [],
     manifests: [],
@@ -70,9 +97,18 @@ export function newRunRecord(input: CreateRunRecordInput): RunRecord {
     result: null,
     error: null,
     workflowRunId: null,
+    processingLeaseId: null,
+    processingLeaseExpiresAt: null,
+    processingFence: 0,
+    terminalAfterCleanup: null,
+    auditExpiresAt: null,
     version: 0,
     deletedAt: null
   };
+}
+
+export function candidateStageId(runId: string, documentIndex: number) {
+  return `${runId}:${documentIndex}`;
 }
 
 export class InMemoryRunStore implements RunStore {
@@ -117,10 +153,20 @@ export class InMemoryRunStore implements RunStore {
     return record ? clone(record) : undefined;
   }
 
-  async update(id: string, mutate: (record: RunRecord) => RunRecord): Promise<RunRecord> {
+  async update(
+    id: string,
+    mutate: (record: RunRecord) => RunRecord,
+    claim?: { leaseId: string; fence: number }
+  ): Promise<RunRecord> {
     const current = this.records.get(id);
     if (!current) {
       throw new AppError("ANALYSIS_INCOMPLETE", "The run was not found.", { httpStatus: 404 });
+    }
+    if (claim && (current.processingLeaseId !== claim.leaseId || current.processingFence !== claim.fence)) {
+      throw new AppError("ANALYSIS_INCOMPLETE", "The processing lease is no longer current.", {
+        httpStatus: 409,
+        retryable: false
+      });
     }
     const next = mutate(clone(current));
     if (next.id !== current.id || next.ownerId !== current.ownerId) {
@@ -128,8 +174,40 @@ export class InMemoryRunStore implements RunStore {
         httpStatus: 500
       });
     }
+    if (current.idempotencyKey && next.idempotencyKey === null) {
+      this.idempotency.delete(`${current.ownerId}\u0000${current.idempotencyKey}`);
+    }
     this.records.set(id, clone(next));
     return clone(next);
+  }
+
+  async claimProcessing(id: string, now = new Date(), leaseMs = 20 * 60_000) {
+    const current = this.records.get(id);
+    if (!current) {
+      throw new AppError("ANALYSIS_INCOMPLETE", "The run was not found.", { httpStatus: 404 });
+    }
+    const leaseExpired = current.processingLeaseExpiresAt !== null &&
+      new Date(current.processingLeaseExpiresAt) <= now;
+    const reclaimable =
+      (LEASED_RUN_STATUSES as readonly RunRecord["status"][]).includes(current.status) &&
+      leaseExpired;
+    if (current.status !== "queued" && !reclaimable) return null;
+    if (["ready", "partial", "failed", "expired"].includes(current.status)) return null;
+    const leaseId = crypto.randomUUID();
+    const fence = current.processingFence + 1;
+    const record: RunRecord = {
+      ...current,
+      status: "validating",
+      stage: "validating",
+      progress: 5,
+      processingLeaseId: leaseId,
+      processingLeaseExpiresAt: new Date(now.getTime() + leaseMs).toISOString(),
+      processingFence: fence,
+      updatedAt: now.toISOString(),
+      version: current.version + 1
+    };
+    this.records.set(id, clone(record));
+    return { record: clone(record), leaseId, fence };
   }
 
   async remove(id: string): Promise<void> {
@@ -143,6 +221,28 @@ export class InMemoryRunStore implements RunStore {
   async listExpired(now = new Date()): Promise<RunRecord[]> {
     return [...this.records.values()]
       .filter((record) => new Date(record.expiresAt) <= now)
+      .map(clone);
+  }
+
+  async listCleanupCandidates(now = new Date(), limit = 100): Promise<RunRecord[]> {
+    const boundedLimit = Math.min(Math.max(Math.trunc(limit), 1), 1_000);
+    const dueAt = (record: RunRecord) => {
+      if (record.status === "expired") {
+        return record.auditExpiresAt ? new Date(record.auditExpiresAt).getTime() : Number.POSITIVE_INFINITY;
+      }
+      const retentionDueAt = new Date(record.expiresAt).getTime();
+      if (
+        (LEASED_RUN_STATUSES as readonly RunRecord["status"][]).includes(record.status) &&
+        record.processingLeaseExpiresAt !== null
+      ) {
+        return Math.min(retentionDueAt, new Date(record.processingLeaseExpiresAt).getTime());
+      }
+      return retentionDueAt;
+    };
+    return [...this.records.values()]
+      .filter((record) => dueAt(record) <= now.getTime())
+      .sort((left, right) => dueAt(left) - dueAt(right) || left.id.localeCompare(right.id))
+      .slice(0, boundedLimit)
       .map(clone);
   }
 
@@ -165,6 +265,12 @@ export async function getRunStore(): Promise<RunStore> {
   if (config.DATABASE_URL) {
     const { NeonRunStore } = await import("@/db/neon-store");
     return NeonRunStore.forUrl(config.DATABASE_URL);
+  }
+  if (config.NODE_ENV === "production") {
+    throw new AppError("ANALYSIS_INCOMPLETE", "Persistent run storage is not configured.", {
+      httpStatus: 503,
+      retryable: true
+    });
   }
   memoryStore ??= new InMemoryRunStore();
   return memoryStore;
