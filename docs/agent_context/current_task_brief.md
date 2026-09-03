@@ -2,7 +2,7 @@
 
 - Task ID: MH-001
 - Title: RFP X-Ray contest MVP
-- Status: Revision 4 release candidate awaiting independent re-review
+- Status: Local release candidate approved; credentialed production gates open
 - Chief owner: chief
 - Updated: 2026-09-03
 
@@ -53,17 +53,18 @@ reconciliation, grounded Q&A, citations, cleanup proof, and per-run cost.
 
 ## Current Phase
 
-The latest independent exact-commit review of `97c1417` found five P1 issues and
-no P0. Revision 4 closes admission concurrency, evidence-field binding,
-source-authorized amendment scope, cross-page stale risks, quota retention,
-uncertain Workflow acknowledgement, and orphan Blob-fence paths. It passes 122
-local tests, the five-official-PDF audit, production build, and 14 browser tests.
-Credentialed Monid/Blob/Neon/Workflow/Turnstile deployment gates remain; this is
-not yet a release approval.
+Commit `cc2831c` is the independently approved local release candidate.
+`pnpm check` passes 234 tests with 3 credential/fixture-gated skips; the official
+PDF audit passes 3/3, the production build emits 9 Workflow steps/3 workflows,
+and Playwright passes 14/14. Two bounded adversarial reviewers and the final
+Independent Reviewer report P0=0 and P1=0. Credentialed Monid, Blob, Neon,
+Workflow, Turnstile, cost, latency, deployment, video, and publication gates
+remain open, so this is not yet a production or contest-completion claim.
 
 ## Immediate Next Action
 
-Commit the Revision 4 candidate, rerun the exact-commit QA gate, and return it to
-the same independent Reviewer. Require `APPROVE`, P0=0, and P1=0 before any
-release claim; keep production fail-closed until platform credentials and live
-provider evidence are configured.
+Run the Monid contract spike and credentialed Vercel/Neon evidence suite, then
+execute the Edmonton ten-run benchmark and complete CER production demo. Keep
+production fail-closed until all provider configuration and cleanup receipts are
+verified. Continue with Vercel Workflow; add Railway only if measured runtime or
+long-lived-worker requirements invalidate the current architecture.

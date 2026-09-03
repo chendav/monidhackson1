@@ -27,3 +27,11 @@ Updated: 2026-09-03
 | QR-21 | Concurrent create or enqueue acknowledgement loss kills an admitted run | Admission lease, delayed-workflow, and uncertain-scheduler tests | pass locally; live Workflow gate open |
 | QR-22 | Adjacent title/issuer/timezone labels or a false amendment topic authorize another fact | Span binding, ambiguous-deadline, non-deadline mutation, and comma-separator adversarial tests | pass locally |
 | QR-23 | Missing upload ledger causes cleanup to create an orphan fence | No-ledger/no-object and orphan-object Blob adapter tests | pass locally; live Blob gate open |
+| QR-24 | Conditional or negated prose is published as current fact | Closing, selection, submission, evaluation, and mutation polarity suites | pass |
+| QR-25 | M3 `up to three` loses its maximum bound | Objective qualifier completeness regression | pass |
+| QR-26 | Old/new or amount/currency roles are spliced across mutation targets | Terminal-target and typed scalar tuple regressions | pass |
+| QR-27 | Mandatory predicate or submission channel is borrowed from an adjacent object | Coordinated-subject and bid-artifact relation regressions | pass |
+| QR-28 | Insurance premium, contract fee, or forecast payment steals a destructive closed key | Closed taxonomy and Basis of Payment subfield regressions | pass |
+| QR-29 | Operational deadline or scoring comparison populates executive summary | Closing/selection object allowlist regressions | pass |
+| QR-30 | Model-authored risk action retains a superseded scalar | Mixed-lineage and source-unbound action regressions | pass |
+| QR-31 | Amendment-cited old value escapes stale-risk invalidation because its SHA differs | Cross-document stale-risk materialization regression | pass |

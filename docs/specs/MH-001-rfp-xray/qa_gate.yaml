@@ -36,5 +36,5 @@ regression_checks:
   - unsupported claim and prompt-injection fixtures
 review:
   required: true
-  verdict: pending
+  verdict: pass-local-cc2831c
 max_revision_rounds: 3

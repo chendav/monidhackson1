@@ -27,7 +27,7 @@ exclude_paths: [src/app/page.tsx, src/components/**, src/app/globals.css, tests/
 edits_allowed: true
 acceptance: [AC-1, AC-2, AC-3, AC-4, AC-5, AC-6, AC-7, AC-9]
 handoff: handoff-backend.md
-status: revision-4-candidate
+status: local-release-candidate-approved-live-gates-open
 ```
 
 ## T3 Frontend working surface
@@ -42,7 +42,7 @@ exclude_paths: [src/app/api/**, src/lib/**, src/db/**, drizzle/**]
 edits_allowed: true
 acceptance: [AC-8, AC-10]
 handoff: handoff-frontend.md
-status: revision-4-candidate
+status: local-release-candidate-approved-live-gates-open
 ```
 
 ## QA1 Independent review
@@ -57,7 +57,7 @@ exclude_paths: []
 edits_allowed: false
 acceptance: [AC-1, AC-2, AC-3, AC-4, AC-5, AC-6, AC-7, AC-8, AC-9, AC-10, AC-11]
 handoff: qa_report.md
-status: awaiting-re-review
+status: passed-local-cc2831c
 ```
 
 ## REV-1 Release blockers
@@ -77,5 +77,20 @@ backend_scope:
   - complete Edmonton/CER frozen golden assertions
   - patched high-severity transitive dependencies
 review: independent re-review required
-status: candidate-complete-awaiting-review
+status: closed-local-cc2831c
+```
+
+## EXT-1 Credentialed production evidence
+
+```yaml
+id: EXT-1
+owner_profile: chief
+objective: Verify Monid, Blob, Neon, Workflow, Turnstile, cost, latency, production citations, deployment, video, and publication evidence with real credentials.
+depends_on: [QA1]
+include_paths: [docs/specs/MH-001-rfp-xray/**]
+exclude_paths: []
+edits_allowed: true
+acceptance: [AC-1, AC-3, AC-5, AC-6, AC-8, AC-9, AC-10]
+handoff: qa_report.md
+status: blocked-on-provider-and-deployment-credentials
 ```
