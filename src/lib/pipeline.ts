@@ -1,4 +1,4 @@
-import type { CostEvent, DocumentManifest } from "@/contracts";
+import type { AnalysisResult, CostEvent, DocumentManifest } from "@/contracts";
 import { materializeAnalysis } from "@/lib/analysis/materialize";
 import { LocalDeterministicModel } from "@/lib/analysis/local-model";
 import { cleanupGate, executeCleanup, type CleanupTarget } from "@/lib/cleanup";
@@ -90,6 +90,15 @@ export const PRE_MODEL_DEADLINE_MS = WORKFLOW_INTERNAL_DEADLINES_MS.pre_model;
 export const RESULT_COMMIT_DEADLINE_MS = WORKFLOW_INTERNAL_DEADLINES_MS.result_commit;
 export const MONID_PARSE_CONCURRENCY = SOURCE_CLEANUP_WATCHDOG_REGISTRATIONS_PER_BATCH;
 export const MONID_MIN_PAID_CALL_WINDOW_MS = 60_000;
+
+export function terminalStatusForAnalysis(
+  analysis: Pick<AnalysisResult, "decision_readiness">
+): "ready" | "partial" {
+  // READY means the document analysis completed and is publishable. It does
+  // not mean the bidder has supplied enough private facts to make a bid/no-bid
+  // decision, nor that the public tender package is authoritatively complete.
+  return analysis.decision_readiness === "incomplete" ? "partial" : "ready";
+}
 
 export interface PipelineDependencies {
   store?: RunStore;
@@ -887,6 +896,10 @@ export async function processRun(runId: string, dependencies: PipelineDependenci
     assertBeforeDeadline(workflowStarted + PRE_MODEL_DEADLINE_MS, "pre-model");
 
     await stage(store, runId, "extracting", claim);
+    // The state transition is an awaited database write. Re-check afterward so
+    // its latency cannot silently extend the model's independent 120-second
+    // clock beyond the Workflow result-commit envelope.
+    assertBeforeDeadline(workflowStarted + PRE_MODEL_DEADLINE_MS, "pre-model-after-stage");
     const model = dependencies.model ?? (live
       ? new OpenAIResponsesAdapter(config)
       : new LocalDeterministicModel());
@@ -1093,9 +1106,7 @@ export async function processRun(runId: string, dependencies: PipelineDependenci
         { retryable: true }
       );
     }
-    const finalStatus = materialized.result.decision_readiness === "ready_for_bidder_assessment"
-      ? "ready"
-      : "partial";
+    const finalStatus = terminalStatusForAnalysis(materialized.result);
     heartbeat.assertHealthy();
     await heartbeat.stop();
     assertBeforeDeadline(workflowStarted + RESULT_COMMIT_DEADLINE_MS, "final-ready-transition");

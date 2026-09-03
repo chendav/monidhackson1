@@ -9,7 +9,10 @@ import {
   OPENAI_API_BASE_URL,
   OPENAI_EXTRACTION_PHASE_TIMEOUT_MS,
   OPENAI_MIN_PAID_BATCH_WINDOW_MS,
+  OPENAI_QUALITY_BATCH_MAX_BYTES,
+  OPENAI_TARGET_MAX_SEQUENTIAL_BATCHES,
   OpenAIResponsesAdapter,
+  prepareExtractionInputs,
   type PaidExtractionCallbacks
 } from "@/lib/providers/openai";
 
@@ -128,6 +131,32 @@ describe("OpenAI Responses structured output adapter", () => {
     expect(parseBody?.text).toBeTypeOf("object");
     expect(String(parseBody?.instructions)).toMatch(/never instructions/i);
     expect(String(parseBody?.instructions)).toMatch(/never generate or infer a page number/i);
+    expect(String(parseBody?.instructions)).toMatch(/read every source fragment/i);
+    expect(String(parseBody?.instructions)).toMatch(/copy the smallest complete source value or clause verbatim/i);
+    expect(String(parseBody?.instructions)).toMatch(/generic statement.*mandatory_gate rule/i);
+    expect(String(parseBody?.instructions)).toMatch(/do not emit package-level absence statements/i);
+  });
+
+  it("uses recall-sized batches so late mandatory tables are not buried in one huge request", () => {
+    const marker = "ANNEX D MANDATORY CRITERIA M1 bidder must provide evidence";
+    const markdown = `${"front matter requirement text ".repeat(4_650)}\n${marker}\n${"form text ".repeat(1_500)}`;
+    const inputs = prepareExtractionInputs([{
+      ...sourceDocument,
+      parsed_markdown: markdown
+    }], testConfig());
+
+    expect(inputs.length).toBeGreaterThanOrEqual(3);
+    expect(inputs.every((input) => new TextEncoder().encode(input).byteLength <= OPENAI_QUALITY_BATCH_MAX_BYTES))
+      .toBe(true);
+    expect(inputs.filter((input) => input.includes(marker))).toHaveLength(1);
+    expect(inputs[0]).toMatch(/batch 1\/\d+\. This is not the whole package/i);
+    const inputSizes = inputs.map((input) => new TextEncoder().encode(input).byteLength);
+    expect(Math.min(...inputSizes) / Math.max(...inputSizes)).toBeGreaterThan(0.65);
+    const markerInput = inputs.find((input) => input.includes(marker));
+    expect(markerInput).toBeDefined();
+    const markerByteOffset = new TextEncoder().encode(markerInput!.slice(0, markerInput!.indexOf(marker))).byteLength;
+    const markerInputBytes = new TextEncoder().encode(markerInput!).byteLength;
+    expect(markerByteOffset / markerInputBytes).toBeLessThan(0.85);
   });
 
   it.each([
@@ -252,6 +281,7 @@ describe("OpenAI Responses structured output adapter", () => {
       }]
     }], noopPaidCallbacks)).resolves.toMatchObject({ inputTokens: expect.any(Number), outputTokens: expect.any(Number) });
     expect(parseRequests.length).toBeGreaterThan(1);
+    expect(parseRequests.length).toBeLessThanOrEqual(OPENAI_TARGET_MAX_SEQUENTIAL_BATCHES);
     expect(countRequests).toHaveLength(parseRequests.length);
     expect(events.slice(0, countRequests.length)).toEqual(Array(countRequests.length).fill("count"));
     expect(parseRequests.reduce((sum, request) => sum + Number(request.max_output_tokens), 0))
@@ -313,10 +343,12 @@ describe("OpenAI Responses structured output adapter", () => {
       completedOutputTokens: 75,
       attemptedBatches: 2,
       preflightInputTokens: expect.arrayContaining([1_000, 1_000]),
-      estimatedAttemptedInputTokens: 2_000,
-      estimatedAttemptedOutputTokens: 25_075
+      estimatedAttemptedInputTokens: 2_000
     } satisfies Partial<ModelBatchError>);
     expect(failure).toBeInstanceOf(ModelBatchError);
+    expect((failure as ModelBatchError).estimatedAttemptedOutputTokens).toBe(
+      75 + Math.floor(50_000 / (failure as ModelBatchError).preflightInputTokens.length)
+    );
     expect(estimateOpenAiBatchFailureCostMicroUsd(failure as ModelBatchError))
       .toBeGreaterThan(900 * 0.75 + 75 * 4.5);
     expect(startedBatches).toEqual([0, 1]);
@@ -329,10 +361,12 @@ describe("OpenAI Responses structured output adapter", () => {
   it("enforces one aggregate extraction deadline across preflight and sequential batches", async () => {
     let clockMs = 0;
     let parseCalls = 0;
+    let plannedBatches = 0;
     const parseOptions: Record<string, unknown>[] = [];
     const client = fakeClient({
       count: async (_request, options) => {
-        expect(options).toMatchObject({ timeout: 120_000, maxRetries: 0 });
+        plannedBatches += 1;
+        expect(options).toMatchObject({ timeout: OPENAI_EXTRACTION_PHASE_TIMEOUT_MS, maxRetries: 0 });
         return { input_tokens: 1_000, object: "response.input_tokens" };
       },
       parse: async (_request, options) => {
@@ -353,7 +387,11 @@ describe("OpenAI Responses structured output adapter", () => {
     }], noopPaidCallbacks).catch((error: unknown) => error);
 
     expect(parseCalls).toBe(1);
-    expect(parseOptions).toEqual([{ timeout: 120_000, maxRetries: 0 }]);
+    expect(parseOptions).toEqual([{
+      timeout: OPENAI_EXTRACTION_PHASE_TIMEOUT_MS -
+        ((plannedBatches - 1) * OPENAI_MIN_PAID_BATCH_WINDOW_MS),
+      maxRetries: 0
+    }]);
     expect(failure).toBeInstanceOf(ModelBatchError);
     expect(failure).toMatchObject({ attemptedBatches: 1, completedResponseIds: ["response-before-deadline"] });
   });
@@ -405,9 +443,9 @@ describe("OpenAI Responses structured output adapter", () => {
 
     await expect(adapter.extract([{
       ...sourceDocument,
-      parsed_markdown: "eight batch plan text ".repeat(6_000)
+      parsed_markdown: "oversized batch plan text ".repeat(12_000)
     }], noopPaidCallbacks)).rejects.toMatchObject({ code: "MODEL_UNAVAILABLE" });
-    expect(countCalls).toBeGreaterThan(6);
+    expect(countCalls).toBeGreaterThan(16);
     expect(parseCalls).toBe(0);
   });
 

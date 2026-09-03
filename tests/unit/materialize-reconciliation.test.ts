@@ -2613,4 +2613,199 @@ describe("server-owned materialization and reconciliation", () => {
     }).result;
     expect(result.risks).toEqual([]);
   });
+
+  it("canonicalizes only exact typed-field wrappers from cover labels", () => {
+    const cover = "Title: Repair & Maintenance on various File Bays. " +
+      "Solicitation No.: 100022184-A. Proposal To: Employment and Social Development Canada. " +
+      "The bidder must submit a signed form. A bid that fails a mandatory requirement will be non-compliant.";
+    const value = addMinimumCoverage(draft([]));
+    value.summary.title = "Repair & Maintenance on various File Bays";
+    value.summary.solicitation_number = "100022184-A";
+    value.summary.issuer = "Employment and Social Development Canada";
+    value.claims = [
+      {
+        claim_id: "cover-title", topic: "title",
+        claim_text: "The solicitation title is Repair & Maintenance on various File Bays.",
+        claim_type: "source", confidence: 1, document_sha256: baseSha,
+        amendment_number: null, effect: "add",
+        citations: [citation(baseSha, "Title: Repair & Maintenance on various File Bays")],
+        supersedes_claim_ids: []
+      },
+      {
+        claim_id: "cover-number", topic: "solicitation number",
+        claim_text: "The solicitation number is 100022184-A.", claim_type: "source",
+        confidence: 1, document_sha256: baseSha, amendment_number: null, effect: "add",
+        citations: [citation(baseSha, "Solicitation No.: 100022184-A")],
+        supersedes_claim_ids: []
+      },
+      {
+        claim_id: "cover-issuer", topic: "issuer",
+        claim_text: "The issuer is Employment and Social Development Canada.", claim_type: "source",
+        confidence: 1, document_sha256: baseSha, amendment_number: null, effect: "add",
+        citations: [citation(baseSha, "Proposal To: Employment and Social Development Canada")],
+        supersedes_claim_ids: []
+      }
+    ];
+    const result = materializeAnalysis({
+      draft: value,
+      documents: [{ name: "base.pdf", sourceUrl: null, index: index(baseSha, [cover]), role: "base", amendmentNumber: null }],
+      manifests: [manifests[0]], costs: [], expiresAt: new Date("2026-09-03T00:00:00Z")
+    }).result;
+
+    expect(Object.fromEntries(result.claims.map((claim) => [claim.claim_id, {
+      text: claim.claim_text,
+      status: claim.status
+    }]))).toEqual({
+      "cover-title": { text: "Repair & Maintenance on various File Bays", status: "active" },
+      "cover-number": { text: "100022184-A", status: "active" },
+      "cover-issuer": { text: "Employment and Social Development Canada", status: "active" }
+    });
+    expect(result.summary).toMatchObject({
+      title: "Repair & Maintenance on various File Bays",
+      solicitation_number: "100022184-A",
+      issuer: "Employment and Social Development Canada"
+    });
+  });
+
+  it("binds an email submission channel across comma-separated cover instructions", () => {
+    const instruction = "Bids must be submitted only to Employment and Social Development Canada by the date, time and place or email address indicated on page 1.";
+    const value = addMinimumCoverage(draft([]));
+    value.summary.submission_method = "email";
+    value.claims = [{
+      claim_id: "cover-email", topic: "submission method", claim_text: "email",
+      claim_type: "source", confidence: 1, document_sha256: baseSha,
+      amendment_number: null, effect: "add", citations: [citation(baseSha, instruction)],
+      supersedes_claim_ids: []
+    }];
+    const result = materializeAnalysis({
+      draft: value,
+      documents: [{ name: "base.pdf", sourceUrl: null,
+        index: index(baseSha, [instruction,
+          "The bidder must submit a signed form. A bid that fails a mandatory requirement will be non-compliant."]),
+        role: "base", amendmentNumber: null }],
+      manifests: [manifests[0]], costs: [], expiresAt: new Date("2026-09-03T00:00:00Z")
+    }).result;
+
+    expect(result.claims[0]).toMatchObject({ claim_id: "cover-email", status: "active" });
+    expect(result.summary.submission_method).toBe("email");
+  });
+
+  it("uses a sufficient verified citation subset and discloses rejected extras", () => {
+    const value = addMinimumCoverage(draft([]));
+    value.summary.title = "Real Contract";
+    value.claims = [{
+      claim_id: "title-with-extra", topic: "title", claim_text: "Real Contract",
+      claim_type: "source", confidence: 1, document_sha256: baseSha,
+      amendment_number: null, effect: "add",
+      citations: [
+        citation(baseSha, "RFP title: Real Contract"),
+        citation(baseSha, "This quote is not in the source")
+      ],
+      supersedes_claim_ids: []
+    }];
+    const result = materializeAnalysis({
+      draft: value,
+      documents: [{ name: "base.pdf", sourceUrl: null, index: baseIndex, role: "base", amendmentNumber: null }],
+      manifests: [manifests[0]], costs: [], expiresAt: new Date("2026-09-03T00:00:00Z")
+    }).result;
+
+    expect(result.claims[0]).toMatchObject({ claim_id: "title-with-extra", status: "active" });
+    expect(result.summary.title).toBe("Real Contract");
+    expect(result.quality.warnings).toContain(
+      "1 model-supplied citation candidate(s) could not be independently located and were omitted."
+    );
+  });
+
+  it("derives one server-owned identity for conflicting security-checklist annex labels", () => {
+    const annexD = "Security Requirements Check List and security guide (if applicable), attached at Annex D";
+    const annexE = "ANNEX \"E\" - SECURITY REQUIREMENTS CHECK LIST";
+    const value = addMinimumCoverage(draft([]));
+    value.claims = [
+      {
+        claim_id: "contract-annex", topic: "contract security attachment label",
+        claim_text: "Annex D", claim_type: "source", confidence: 1,
+        document_sha256: baseSha, amendment_number: null, effect: "add",
+        citations: [citation(baseSha, annexD)], supersedes_claim_ids: []
+      },
+      {
+        claim_id: "package-annex", topic: "present checklist heading",
+        claim_text: "Annex E", claim_type: "source", confidence: 1,
+        document_sha256: baseSha, amendment_number: null, effect: "add",
+        citations: [citation(baseSha, annexE)], supersedes_claim_ids: []
+      }
+    ];
+    const result = materializeAnalysis({
+      draft: value,
+      documents: [{ name: "base.pdf", sourceUrl: null,
+        index: index(baseSha, [annexD, annexE,
+          "The bidder must submit a signed form. A bid that fails a mandatory requirement will be non-compliant."]),
+        role: "base", amendmentNumber: null }],
+      manifests: [manifests[0]], costs: [], expiresAt: new Date("2026-09-03T00:00:00Z")
+    }).result;
+
+    expect(result.conflicts).toHaveLength(1);
+    expect(new Set(result.conflicts[0]?.candidate_values)).toEqual(new Set(["Annex D", "Annex E"]));
+    expect(result.conflicts[0]?.citations.map((item) => item.pdf_page_1based).toSorted()).toEqual([1, 2]);
+    expect(result.conflicts[0]?.safe_answer)
+      .toBe("The supplied document is internally inconsistent; clarification is required.");
+    expect(result.blocking_unknowns)
+      .toContain("The supplied package contains unresolved source conflicts.");
+  });
+
+  it("does not treat a position-title form label as the solicitation title", () => {
+    const formLabel = "Position title: Chief Financial Officer";
+    const value = addMinimumCoverage(draft([]));
+    value.summary.title = "Chief Financial Officer";
+    value.claims = [{
+      claim_id: "position-title", topic: "title", claim_text: "Chief Financial Officer",
+      claim_type: "source", confidence: 1, document_sha256: baseSha,
+      amendment_number: null, effect: "add", citations: [citation(baseSha, formLabel)],
+      supersedes_claim_ids: []
+    }];
+    const result = materializeAnalysis({
+      draft: value,
+      documents: [{ name: "base.pdf", sourceUrl: null,
+        index: index(baseSha, [formLabel,
+          "The bidder must submit a signed form. A bid that fails a mandatory requirement will be non-compliant."]),
+        role: "base", amendmentNumber: null }],
+      manifests: [manifests[0]], costs: [], expiresAt: new Date("2026-09-03T00:00:00Z")
+    }).result;
+
+    expect(result.claims.find((claim) => claim.claim_id === "position-title")?.status).toBe("needs_review");
+    expect(result.summary.title).toBe("Document-only RFP analysis");
+  });
+
+  it.each([
+    "If applicable, the Security Requirements Check List is attached at Annex D",
+    "The Security Requirements Check List is not attached at Annex D",
+    "The Security Requirements Check List is attached at Annex D if approved"
+  ])("does not publish a conditional or negative checklist annex relation: %s", (annexD) => {
+    const annexE = "ANNEX \"E\" - SECURITY REQUIREMENTS CHECK LIST";
+    const value = addMinimumCoverage(draft([]));
+    value.claims = [
+      {
+        claim_id: "contract-annex", topic: "contract security attachment label",
+        claim_text: "Annex D", claim_type: "source", confidence: 1,
+        document_sha256: baseSha, amendment_number: null, effect: "add",
+        citations: [citation(baseSha, annexD)], supersedes_claim_ids: []
+      },
+      {
+        claim_id: "package-annex", topic: "present checklist heading",
+        claim_text: "Annex E", claim_type: "source", confidence: 1,
+        document_sha256: baseSha, amendment_number: null, effect: "add",
+        citations: [citation(baseSha, annexE)], supersedes_claim_ids: []
+      }
+    ];
+    const result = materializeAnalysis({
+      draft: value,
+      documents: [{ name: "base.pdf", sourceUrl: null,
+        index: index(baseSha, [annexD, annexE,
+          "The bidder must submit a signed form. A bid that fails a mandatory requirement will be non-compliant."]),
+        role: "base", amendmentNumber: null }],
+      manifests: [manifests[0]], costs: [], expiresAt: new Date("2026-09-03T00:00:00Z")
+    }).result;
+
+    expect(result.conflicts).toEqual([]);
+    expect(result.claims.find((claim) => claim.claim_id === "contract-annex")?.status).toBe("needs_review");
+  });
 });

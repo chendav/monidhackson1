@@ -60,6 +60,21 @@ function significantWords(value: string) {
 }
 
 /**
+ * The Edmonton source qualifies only the adjacent "security guide" with
+ * "(if applicable)"; the following checklist-to-annex reference remains a
+ * definitive assertion. Remove that one local qualifier for polarity checks
+ * only when the asserted annex label is the target of the same verified
+ * relation. Conditions on the checklist or annex itself remain fail-closed.
+ */
+function sourceDefinitivenessScope(assertion: string, span: string) {
+  const assertedAnnex = /^annex\s*["']?\s*([a-z])\s*["']?$/.exec(normalizeEvidenceText(assertion));
+  if (!assertedAnnex) return span;
+  const checklistRelation = /\bsecurity requirements? check\s*list\b\s+and\s+security guide\s*\(\s*if applicable\s*\)\s*,?\s*attached at\s+annex\s*["']?\s*([a-z])\b/.exec(span);
+  if (!checklistRelation || checklistRelation[1] !== assertedAnnex[1]) return span;
+  return span.replace(/\bsecurity guide\s*\(\s*if applicable\s*\)/, "security guide");
+}
+
+/**
  * Scalar matching prevents altered numbers and dates. This companion check
  * prevents a model from attaching a real quote to different prose (for
  * example, "Fake Contract" cited to "RFP title: Real Contract"). Extraction
@@ -86,7 +101,8 @@ function proseAssertionSupportedByCitations(assertion: string, citations: Citati
   return evidenceSpans.some((span) => {
     const spanIsNegative = NEGATIVE_OR_EXCLUSIVE_ASSERTION.test(span);
     if (spanIsNegative !== assertionIsNegative) return false;
-    if (assertionIsDefinitive(assertion) && !assertionIsDefinitive(span)) return false;
+    if (assertionIsDefinitive(assertion) &&
+      !assertionIsDefinitive(sourceDefinitivenessScope(assertion, span))) return false;
     const assertionTokenSet = extractAssertionTokens(assertion);
     const sourceTokenSet = extractAssertionTokens(span);
     const relationCompletenessPrefixes = [
@@ -312,7 +328,11 @@ function evaluationCitationIsRelevant(field: EvaluationField, citation: Citation
   const quote = normalizeEvidenceText(citation.evidence_quote);
   switch (field) {
     case "mandatory_gate":
-      return /\bmandatory\b/.test(quote) && /\b(fail|failed|fails|non-compliant|noncompliant|must|required|responsive)\b/.test(quote);
+      return /\bmandatory\b/.test(quote) && (
+        /\b(fail|failed|fails|non-compliant|noncompliant|must|required|responsive)\b/.test(quote) ||
+        /\b(?:meet|meets|satisfy|satisfies)\s+all\s+mandatory\b/.test(quote) ||
+        /\bmandatory\b.{0,40}\b(?:must|required to)\s+be\s+(?:met|satisfied)\b/.test(quote)
+      );
     case "rated_threshold":
       return /\b(minimum|threshold|points?|rating|score|rated)\b/.test(quote);
     case "technical_weight":
@@ -451,12 +471,21 @@ function submissionRelationClauses(citation: Citation) {
   const relationClauses: string[] = [];
   for (const sentence of quote.split(/(?<!a\.m)(?<!p\.m)\.\s+|[\n]+/)) {
     if (!assertionIsDefinitive(sentence)) continue;
-    const topLevelLabel = /(?:^|[;])\s*submission method\s*:/.test(sentence);
+    const topLevelLabel = /(?:^|[;])\s*(?:submission method|return bids to)\s*:/.test(sentence);
+    const sentenceTenderSubject = /\b(?:bids?|proposals?|tenders?|offers?|responses?|submissions?)\b/.test(sentence);
+    const sentenceSubmitAction = /\b(?:submit(?:ted|ting|s)?|send|sent|return(?:ed|ing|s)?|upload(?:ed|ing|s)?|deliver(?:ed|ing|s)?|e-?mail(?:ed|ing|s)?|courier(?:ed|ing|s)?)\b/.test(sentence);
+    const sentenceUnrelatedSubject = /\b(?:questions?|enquir(?:y|ies)|clarifications?|invoices?|payments?|billing|timesheets?)\b/.test(sentence);
+    const sentenceTenderArtifact = /\b(?:bid|proposal|tender|offer|response|submission)\s+(?:security|bond|samples?|attachments?|copies|forms?|certificates?|appendix|schedule)\b/.test(sentence);
+    const sentenceHasChannel = submissionMethodSignatures(sentence).size > 0;
+    if (!negative.test(sentence) && !sentenceUnrelatedSubject && !sentenceTenderArtifact &&
+      sentenceHasChannel && (topLevelLabel || (sentenceTenderSubject && sentenceSubmitAction))) {
+      relationClauses.push(sentence.trim());
+    }
     for (const clause of sentence.split(/[;,]+|\b(?:while|whereas)\b/).map((item) => item.trim())) {
       if (!clause || negative.test(clause)) continue;
-      const exactLabel = /(?:^|\s)submission method\s*:/.test(clause);
+      const exactLabel = /(?:^|\s)(?:submission method|return bids to)\s*:/.test(clause);
       const tenderSubject = /\b(?:bids?|proposals?|tenders?|offers?|responses?|submissions?)\b/.test(clause);
-      const submitAction = /\b(?:submit(?:ted|ting|s)?|send|sent|upload(?:ed|ing|s)?|deliver(?:ed|ing|s)?|e-?mail(?:ed|ing|s)?|courier(?:ed|ing|s)?)\b/.test(clause);
+      const submitAction = /\b(?:submit(?:ted|ting|s)?|send|sent|return(?:ed|ing|s)?|upload(?:ed|ing|s)?|deliver(?:ed|ing|s)?|e-?mail(?:ed|ing|s)?|courier(?:ed|ing|s)?)\b/.test(clause);
       const unrelatedSubject = /\b(?:questions?|enquir(?:y|ies)|clarifications?|invoices?|payments?|billing|timesheets?)\b/.test(clause);
       const tenderArtifact = /\b(?:bid|proposal|tender|offer|response|submission)\s+(?:security|bond|samples?|attachments?|copies|forms?|certificates?|appendix|schedule)\b/.test(clause);
       const hasChannel = submissionMethodSignatures(clause).size > 0;
@@ -665,8 +694,10 @@ type AnchoredSpan = { full: string; value: string; context: string };
 
 const STRONG_FIELD_ANCHORS: ReadonlyArray<readonly [string, SummaryField | "question_deadline"]> = [
   ["\\b(?:rfp|tender|solicitation)\\s+(?:title|name)\\b", "title"],
-  ["\\b(?:solicitation|tender|rfp|reference)\\s*(?:number|no\\.?|id)\\b", "solicitation_number"],
+  ["^title\\s*(?=[:#=-])", "title"],
+  ["\\b(?:solicitation|tender|rfp|reference)\\s*(?:number\\b|no\\.?|id\\b)", "solicitation_number"],
   ["\\b(?:issuer|buyer|contracting authority|department|agency)\\b", "issuer"],
+  ["\\bproposal to\\s*(?=[:#=-])", "issuer"],
   ["\\b(?:(?:solicitation|bid|tender)\\s+)?(?:closing date|closing time)|\\b(?:solicitation|bid|tender)\\s+close(?:s|d)?\\b|\\b(?:submission deadline|submission date|bid deadline|tender deadline|solicitation deadline)\\b", "closing_date"],
   ["\\b(?:questions?|enquir(?:y|ies)|clarifications?)\\b.{0,40}\\b(?:close|closes|closing|cut[ -]?off|deadline|due|received|submitted)\\b", "question_deadline"],
   ["\\bdeadline\\s+for\\s+(?:submitting\\s+)?(?:questions?|enquir(?:y|ies)|clarifications?)\\b", "question_deadline"],
@@ -746,7 +777,8 @@ function citationSupportsSummaryValue(field: SummaryField, value: string, citati
   }
   const spans = anchoredFieldSpans(field, citation.evidence_quote);
   return spans.some((span) => {
-    if (!assertionIsDefinitive(span.context)) return false;
+    const definitiveCoverLabel = field === "issuer" && /^proposal to\s*:/.test(span.full);
+    if (!definitiveCoverLabel && !assertionIsDefinitive(span.context)) return false;
     if (field === "closing_date") {
       if (/\b(?:questions?|enquir(?:y|ies)|clarifications?)\b/i.test(span.full)) return false;
       if (/\b(?:insurance|security(?: clearance)?|invoice|payment|certificate|bond|sample|deliverable|milestone)\b.{0,80}\b(?:submission deadline|submission date|deadline|due date|expiry|expiration)\b/i.test(span.context)) {
@@ -770,20 +802,26 @@ function citationSupportsSummaryValue(field: SummaryField, value: string, citati
         }])) return false;
       }
     }
-    const scopedCitation = { ...citation, evidence_quote: span.full };
+    const exactValueField = ["title", "solicitation_number", "issuer"].includes(field);
+    const scopedCitation = { ...citation, evidence_quote: exactValueField ? span.value : span.full };
     if (!assertionTokensSupportedByCitations(value, [scopedCitation]) ||
       !proseAssertionSupportedByCitations(value, [scopedCitation])) return false;
-    return ["title", "solicitation_number", "issuer"].includes(field)
+    return exactValueField
       ? normalizeEvidenceText(value) === span.value
       : true;
   });
 }
 
-function topicFieldBindingSupported(topic: string, value: string, citations: Citation[]) {
+function summaryFieldForAssertion(topic: string, value: string): SummaryField | undefined {
   const assertedContext = `${topic} ${value}`;
-  const field = (["title", "solicitation_number", "issuer", "closing_date", "submission_method",
+  return (["title", "solicitation_number", "issuer", "closing_date", "submission_method",
     "current_selection_method"] as const)
     .find((candidate) => SUMMARY_TOPIC_PATTERNS[candidate].test(assertedContext));
+}
+
+function topicFieldBindingSupported(topic: string, value: string, citations: Citation[]) {
+  const assertedContext = `${topic} ${value}`;
+  const field = summaryFieldForAssertion(topic, value);
   if (field === "closing_date" &&
     /\b(?:insurance|security|deliverable|milestone|invoice|payment)\b.{0,50}\b(?:certificate|deadline|due date|expiry|expiration)\b/i.test(assertedContext)) {
     // An operational deadline may contain "submission deadline" without
@@ -810,6 +848,23 @@ function topicFieldBindingSupported(topic: string, value: string, citations: Cit
   return !field || citations.some((citation) => citationSupportsSummaryValue(field, value, citation));
 }
 
+function canonicalizeTypedSourceClaim(
+  claim: DraftAnalysis["claims"][number]
+): DraftAnalysis["claims"][number] {
+  if (claim.claim_type !== "source" || claim.effect === "delete") return claim;
+  const field = (["title", "solicitation_number", "issuer"] as const)
+    .find((candidate) => SUMMARY_TOPIC_PATTERNS[candidate].test(claim.topic));
+  if (!field) return claim;
+  const wrappers: Record<typeof field, RegExp> = {
+    title: /^(?:the\s+)?(?:solicitation|tender|rfp)\s+(?:title|name)\s+(?:is|:)\s*(.+?)\.?$/i,
+    solicitation_number: /^(?:the\s+)?(?:solicitation|tender|rfp|reference)\s+(?:number|no\.?|id)\s+(?:is|:)\s*(.+?)\.?$/i,
+    issuer: /^(?:the\s+)?(?:issuer|buyer|contracting authority|department|agency)\s+(?:is|:)\s*(.+?)\.?$/i
+  };
+  const match = wrappers[field].exec(claim.claim_text.trim());
+  const canonical = match?.[1]?.trim();
+  return canonical ? { ...claim, claim_text: canonical } : claim;
+}
+
 function mandatoryCategorySupported(text: string, citations: Citation[]) {
   const mandatoryLanguage = /\bmandatory\b|\bcondition(?:s)? of (?:bid|tender)\b|\bnon-compliant\b|\bnoncompliant\b|\b(?:bidder|offeror|proponent|tenderer)\b.{0,100}\b(?:must|shall|required to)\b.{0,100}\b(?:submit|provide|demonstrate|propose|include|complete|sign|obtain)\b/;
   return citations.some((citation) => normalizePolarityText(citation.evidence_quote)
@@ -834,6 +889,7 @@ export function materializeAnalysis(input: MaterializeInput): {
 } {
   const generatedAt = input.generatedAt ?? new Date();
   const receipts: QuoteVerificationReceipt[] = [];
+  let rejectedCitationCandidates = 0;
   let unsupportedItemsRemoved = 0;
   let truthReviewItems = 0;
   const duplicateClaimIds = duplicateIds(input.draft.claims, (claim) => claim.claim_id);
@@ -857,6 +913,7 @@ export function materializeAnalysis(input: MaterializeInput): {
       generatedAt
     );
     receipts.push(...verified.receipts);
+    rejectedCitationCandidates += verified.receipts.filter((receipt) => !receipt.verified).length;
     return {
       citations: verified.citations.filter((citation) => citation.verified),
       everyCandidateVerified: verified.citations.length > 0 && verified.citations.every(
@@ -871,7 +928,8 @@ export function materializeAnalysis(input: MaterializeInput): {
   }> = [];
   const reviewClaims: AnalysisResult["claims"] = [];
   let unknownClaimCount = 0;
-  for (const claim of input.draft.claims) {
+  for (const draftClaim of input.draft.claims) {
+    const claim = canonicalizeTypedSourceClaim(draftClaim);
     if (duplicateClaimIds.has(claim.claim_id)) {
       unsupportedItemsRemoved += 1;
       truthReviewItems += 1;
@@ -896,12 +954,14 @@ export function materializeAnalysis(input: MaterializeInput): {
       continue;
     }
     const document = input.documents.find((item) => item.index.documentSha256 === claim.document_sha256);
-    const sourceConsistent = Boolean(document && checked.everyCandidateVerified &&
-      citationsMatchDocument(checked.citations, claim.document_sha256));
+    const sourceConsistent = Boolean(document && matchingCitations.length > 0 &&
+      citationsMatchDocument(matchingCitations, claim.document_sha256));
     const scalarSupported = assertionTokensSupportedByCitations(claim.claim_text, matchingCitations);
     const proseSupported = proseAssertionSupportedByCitations(claim.claim_text, matchingCitations);
     const fieldBound = topicFieldBindingSupported(claim.topic, claim.claim_text, matchingCitations);
-    if (!sourceConsistent || !scalarSupported || !proseSupported || !fieldBound) {
+    const typedField = summaryFieldForAssertion(claim.topic, claim.claim_text);
+    const proseOrTypedFieldSupported = proseSupported || Boolean(typedField && fieldBound);
+    if (!sourceConsistent || !scalarSupported || !proseOrTypedFieldSupported || !fieldBound) {
       unsupportedItemsRemoved += 1;
       truthReviewItems += 1;
       if (claim.effect !== "delete") {
@@ -917,7 +977,7 @@ export function materializeAnalysis(input: MaterializeInput): {
       }
       continue;
     }
-    validClaimDrafts.push({ claim, citations: checked.citations, document: document! });
+    validClaimDrafts.push({ claim, citations: matchingCitations, document: document! });
   }
 
   const claimReconciliation = reconcileVersionedFacts(validClaimDrafts.map(({ claim, citations, document }) => ({
@@ -977,8 +1037,8 @@ export function materializeAnalysis(input: MaterializeInput): {
       (item) => item.index.documentSha256 === requirement.document_sha256
     );
     const sourceMarksMandatory = mandatoryCategorySupported(requirement.text, matchingCitations);
-    const supported = Boolean(document && checked.everyCandidateVerified &&
-      citationsMatchDocument(checked.citations, requirement.document_sha256) &&
+    const supported = Boolean(document && matchingCitations.length > 0 &&
+      citationsMatchDocument(matchingCitations, requirement.document_sha256) &&
       assertionTokensSupportedByCitations(requirement.text, matchingCitations) &&
       proseAssertionSupportedByCitations(requirement.text, matchingCitations) &&
       topicFieldBindingSupported(requirement.topic, requirement.text, matchingCitations) &&
@@ -1001,7 +1061,7 @@ export function materializeAnalysis(input: MaterializeInput): {
     }
     validRequirementDrafts.push({
       requirement,
-      citations: checked.citations,
+      citations: matchingCitations,
       document: document!,
       category: sourceMarksMandatory ? "mandatory" : requirement.category
     });
@@ -1097,10 +1157,13 @@ export function materializeAnalysis(input: MaterializeInput): {
     }
     const checked = verify(rule.citations);
     const document = input.documents.find((item) => item.index.documentSha256 === rule.document_sha256);
-    const sourceConsistent = Boolean(document && checked.everyCandidateVerified &&
-      citationsMatchDocument(checked.citations, rule.document_sha256));
+    const matchingCitations = checked.citations.filter(
+      (citation) => citation.document_sha256 === rule.document_sha256
+    );
+    const sourceConsistent = Boolean(document && matchingCitations.length > 0 &&
+      citationsMatchDocument(matchingCitations, rule.document_sha256));
     const supportedCitations = sourceConsistent
-      ? validatedEvaluationRule(rule.field, rule.value, checked.citations)
+      ? validatedEvaluationRule(rule.field, rule.value, matchingCitations)
       : null;
     if (!supportedCitations) {
       unsupportedItemsRemoved += 1;
@@ -1168,20 +1231,23 @@ export function materializeAnalysis(input: MaterializeInput): {
     }
     const checked = verify(risk.citations);
     const document = input.documents.find((item) => item.index.documentSha256 === risk.document_sha256);
-    const supported = Boolean(document && checked.everyCandidateVerified &&
-      citationsMatchDocument(checked.citations, risk.document_sha256) &&
-      proseAssertionSupportedByCitations(risk.finding, checked.citations) &&
-      topicFieldBindingSupported(risk.topic, risk.finding, checked.citations) &&
+    const matchingCitations = checked.citations.filter(
+      (citation) => citation.document_sha256 === risk.document_sha256
+    );
+    const supported = Boolean(document && matchingCitations.length > 0 &&
+      citationsMatchDocument(matchingCitations, risk.document_sha256) &&
+      proseAssertionSupportedByCitations(risk.finding, matchingCitations) &&
+      topicFieldBindingSupported(risk.topic, risk.finding, matchingCitations) &&
       assertionTokensSupportedByCitations(
         `${risk.finding} ${risk.impact} ${risk.recommended_action}`,
-        checked.citations
+        matchingCitations
       ));
     if (!supported) {
       unsupportedItemsRemoved += 1;
       truthReviewItems += 1;
       continue;
     }
-    validRiskDrafts.push({ risk, citations: checked.citations, document: document! });
+    validRiskDrafts.push({ risk, citations: matchingCitations, document: document! });
   }
   const riskReconciliation = reconcileVersionedFacts(validRiskDrafts.map(({ risk, citations, document }) => {
     const lineage = resolveRiskLineage(risk.finding, citations, risk.document_sha256);
@@ -1279,7 +1345,7 @@ export function materializeAnalysis(input: MaterializeInput): {
     blockingUnknowns.push("One or more model records reused an ambiguous identity and were withheld.");
   }
   if (conflicts.length > 0) {
-    blockingUnknowns.push("The package contains unresolved amendment conflicts.");
+    blockingUnknowns.push("The supplied package contains unresolved source conflicts.");
   }
 
   const baseCount = input.manifests.filter((manifest) => manifest.role === "base").length;
@@ -1444,7 +1510,10 @@ export function materializeAnalysis(input: MaterializeInput): {
       follow_embedded_link_events: 0,
       warnings: [
         "Analysis is restricted to the supplied documents.",
-        "Context.dev zero-data retention is not enabled; an upstream artifact expiry of seven days was observed in the release contract spike."
+        "Context.dev zero-data retention is not enabled; an upstream artifact expiry of seven days was observed in the release contract spike.",
+        ...(rejectedCitationCandidates > 0
+          ? [`${rejectedCitationCandidates} model-supplied citation candidate(s) could not be independently located and were omitted.`]
+          : [])
       ]
     },
     costs: {

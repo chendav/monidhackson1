@@ -181,6 +181,10 @@ function terminalMutationTargetSupportsFact(fact: VersionedFact, allowDateOnly =
 }
 
 function sourceKeyForSegment(segment: string, assertedValue = ""): string | null {
+  if (/\bsecurity requirements? check\s*list\b/.test(segment) &&
+    /\bannex\s*["']?\s*[a-z]\b/.test(segment)) {
+    return "document:security-requirements-checklist:annex";
+  }
   if (/\bbasis of payment\b/.test(segment)) {
     const asserted = normalizeEvidenceText(assertedValue);
     if (/\b(?:payment )?currenc(?:y|ies)\b/.test(`${segment} ${asserted}`)) {
@@ -719,6 +723,27 @@ function scalarValuesConflict(candidates: VersionedFact[]) {
   return signatures.every(Boolean) && new Set(signatures).size > 1;
 }
 
+function closedCategoricalValuesConflict(candidates: VersionedFact[]) {
+  if (candidates.length < 2) return false;
+  const keys = new Set(candidates.map((fact) =>
+    fact.factKey ? normalizeEvidenceText(fact.factKey) : deriveSourceFactKey(fact)
+  ));
+  if (keys.size !== 1 || !keys.has("document:security-requirements-checklist:annex")) return false;
+  return new Set(candidates.map((fact) => normalizeEvidenceText(fact.value))).size > 1;
+}
+
+function conflictSafeAnswer(candidates: VersionedFact[]) {
+  const documentIds = new Set(candidates.map((fact) => fact.documentSha256));
+  const roles = new Set(candidates.map((fact) => fact.documentRole));
+  if (documentIds.size === 1 && roles.size === 1 && roles.has("amendment")) {
+    return "The supplied amendment is internally inconsistent; clarification is required.";
+  }
+  if (documentIds.size === 1 && roles.size === 1 && roles.has("base")) {
+    return "The supplied document is internally inconsistent; clarification is required.";
+  }
+  return "The supplied package is internally inconsistent; clarification is required.";
+}
+
 export function reconcileVersionedFacts(input: VersionedFact[]): {
   facts: ReconciledFact[];
   conflicts: Conflict[];
@@ -762,7 +787,8 @@ export function reconcileVersionedFacts(input: VersionedFact[]): {
         if (!distinctValues.has(key)) distinctValues.set(key, fact.value);
       }
       const conflictAtStage = distinctValues.size > 1 && (
-        candidates.some((fact) => fact.effect === "replace") || scalarValuesConflict(candidates)
+        candidates.some((fact) => fact.effect === "replace") || scalarValuesConflict(candidates) ||
+        closedCategoricalValuesConflict(candidates)
       );
       if (conflictAtStage) {
         const conflicted = candidates.map((fact): ReconciledFact => ({ ...fact, status: "conflicted" }));
@@ -773,7 +799,7 @@ export function reconcileVersionedFacts(input: VersionedFact[]): {
           topic: stage[0].topic,
           status: "conflicted",
           candidate_values: [...distinctValues.values()],
-          safe_answer: "The supplied amendment is internally inconsistent; clarification is required.",
+          safe_answer: conflictSafeAnswer(candidates),
           citations: deduplicateCitations(candidates.flatMap((fact) => fact.citations))
         };
       } else {
@@ -792,7 +818,7 @@ export function reconcileVersionedFacts(input: VersionedFact[]): {
         result.set(fact.id, { ...fact, status: "superseded" });
       }
     }
-    if (!currentConflict && scalarValuesConflict(active)) {
+    if (!currentConflict && (scalarValuesConflict(active) || closedCategoricalValuesConflict(active))) {
       const distinctValues = new Map<string, string>();
       for (const fact of active) {
         const key = normalizeEvidenceText(fact.value);
@@ -805,7 +831,7 @@ export function reconcileVersionedFacts(input: VersionedFact[]): {
         topic: active[0].topic,
         status: "conflicted",
         candidate_values: [...distinctValues.values()],
-        safe_answer: "The supplied amendment is internally inconsistent; clarification is required.",
+        safe_answer: conflictSafeAnswer(active),
         citations: deduplicateCitations(active.flatMap((fact) => fact.citations))
       };
       active = active.map((fact) => ({ ...fact, status: "conflicted" }));
