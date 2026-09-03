@@ -329,10 +329,14 @@ export class InMemoryRunStore implements RunStore {
     const reclaimable =
       (LEASED_RUN_STATUSES as readonly RunRecord["status"][]).includes(current.status) &&
       leaseExpired;
-    // Once any paid attempt may have reached the provider, restarting the
-    // whole pipeline would risk a duplicate charge. The cleanup watchdog owns
-    // recovery from that point forward.
-    if (current.paidProviderAttemptStartedAt !== null) return null;
+    // Once source-cleanup recovery has been armed, restarting the whole
+    // pipeline could schedule a second package watchdog if the first
+    // Workflow acknowledgement was lost. Maintenance owns recovery from this
+    // point forward, even when no paid-provider start marker was committed.
+    if (
+      current.sourceCleanupWatchdogs.length > 0 ||
+      current.paidProviderAttemptStartedAt !== null
+    ) return null;
     if (current.status !== "queued" && !reclaimable) return null;
     if (["ready", "partial", "failed", "expired"].includes(current.status)) return null;
     const leaseId = crypto.randomUUID();

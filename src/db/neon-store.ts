@@ -325,6 +325,11 @@ export class NeonRunStore implements RunStore {
       .where(and(
         eq(runs.id, id),
         isNull(runs.paidProviderAttemptStartedAt),
+        // An armed cleanup watchdog permanently transfers crash recovery to
+        // maintenance. This atomic JSONB guard prevents a replacement worker
+        // from scheduling a duplicate package watchdog after an ACK-lost
+        // Workflow start but before the paid-provider marker is committed.
+        sql`jsonb_array_length(${runs.sourceCleanupWatchdogs}) = 0`,
         or(
           eq(runs.status, "queued"),
           and(inArray(runs.status, [...LEASED_RUN_STATUSES]), lte(runs.processingLeaseExpiresAt, now))

@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { PresignUploadResponse } from "@/contracts";
 import { NeonRunStore } from "@/db/neon-store";
 import { sha256Hex } from "@/lib/crypto";
-import { cleanupRun } from "@/lib/runs/expiry";
+import { cleanupRun, expireDueRuns } from "@/lib/runs/expiry";
 import {
   PROCESSING_LEASE_MS,
   InMemoryRunStore
@@ -78,6 +78,118 @@ async function enterParsing(store: InMemoryRunStore, runId: string, at: Date) {
 }
 
 describe("durable per-document source cleanup watchdog", () => {
+  it("leaves an expired worker with an armed watchdog to maintenance before any paid call", async () => {
+    const startedAt = new Date("2026-09-03T11:00:00.000Z");
+    let clock = startedAt;
+    const store = new InMemoryRunStore();
+    const blobPath = `incoming/watchdog/pre-dispatch/${"0".repeat(64)}.pdf`;
+    const created = (await store.create({
+      ownerId: "guest:watchdog-pre-dispatch-kill",
+      quotaKey: "ip:watchdog-pre-dispatch-kill",
+      input: {
+        documents: [{
+          role: "base",
+          source: {
+            type: "upload",
+            blob_path: blobPath,
+            sha256: "0".repeat(64),
+            size_bytes: 123,
+            filename: "source.pdf"
+          }
+        }]
+      },
+      idempotencyKey: null,
+      reservedMicroUsd: 104_500,
+      now: startedAt
+    })).record;
+    const claim = await enterParsing(store, created.id, startedAt);
+    const stagePath = stagingBlobPath(created.id, 0);
+    const storage = new WatchdogStorage(() => clock);
+    storage.objects.add(blobPath);
+    storage.objects.add(stagePath);
+
+    const armed = await armSourceCleanupWatchdog({
+      store,
+      runId: created.id,
+      documentIndex: 0,
+      documentId: "pre-dispatch-document-id",
+      resourceIds: [`blob:${blobPath}`, `staged:${created.id}:0`],
+      claim,
+      now: new Date(startedAt.getTime() + 1_000)
+    });
+    await recordSourceCleanupWatchdogScheduled({
+      store,
+      runId: created.id,
+      registrationId: armed.registrationId,
+      workflowRunId: "possibly-ack-lost-package-watchdog",
+      claim,
+      now: new Date(startedAt.getTime() + 2_000)
+    });
+    expect(await store.get(created.id)).toMatchObject({
+      status: "parsing",
+      paidProviderAttemptStartedAt: null,
+      sourceCleanupWatchdogs: [{
+        registrationId: armed.registrationId,
+        watchdogScheduledAt: new Date(startedAt.getTime() + 2_000).toISOString(),
+        providerCallStartedAt: null
+      }]
+    });
+
+    // Simulate a hard kill after package-watchdog dispatch but before the
+    // paid-call marker. Reclaiming would execute pipeline scheduling again.
+    clock = new Date(startedAt.getTime() + PROCESSING_LEASE_MS + 1);
+    expect(await store.claimProcessing(created.id, clock)).toBeNull();
+
+    const maintained = await expireDueRuns(store, storage, clock);
+    expect(maintained.map((record) => record.id)).toContain(created.id);
+    expect(await store.get(created.id)).toMatchObject({
+      status: "expired",
+      cleanupConfirmed: true,
+      paidProviderAttemptStartedAt: null,
+      processingLeaseId: null,
+      processingLeaseExpiresAt: null
+    });
+    expect(storage.objects.has(blobPath)).toBe(false);
+    expect(storage.objects.has(stagePath)).toBe(false);
+  });
+
+  it("still permits expired-lease reclaim before any cleanup watchdog is armed", async () => {
+    const startedAt = new Date("2026-09-03T11:30:00.000Z");
+    const store = new InMemoryRunStore();
+    const created = (await store.create({
+      ownerId: "guest:pre-watchdog-reclaim",
+      quotaKey: "ip:pre-watchdog-reclaim",
+      input: {
+        documents: [{
+          role: "base",
+          source: {
+            type: "url",
+            url: "https://canadabuys.canada.ca/pre-watchdog-reclaim.pdf"
+          }
+        }]
+      },
+      idempotencyKey: null,
+      reservedMicroUsd: 104_500,
+      now: startedAt
+    })).record;
+    const first = await enterParsing(store, created.id, startedAt);
+    const reclaimed = await store.claimProcessing(
+      created.id,
+      new Date(startedAt.getTime() + PROCESSING_LEASE_MS + 1)
+    );
+
+    expect(reclaimed).not.toBeNull();
+    expect(reclaimed).toMatchObject({
+      fence: first.fence + 1,
+      record: {
+        status: "validating",
+        sourceCleanupWatchdogs: [],
+        paidProviderAttemptStartedAt: null
+      }
+    });
+    expect(reclaimed!.leaseId).not.toBe(first.leaseId);
+  });
+
   it("does not delete before capture and recovers a hard-killed paid worker within 60 seconds", async () => {
     const startedAt = new Date("2026-09-03T12:00:00.000Z");
     let clock = startedAt;
