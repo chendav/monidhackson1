@@ -92,7 +92,7 @@ exclude_paths: []
 edits_allowed: true
 acceptance: [AC-1, AC-3, AC-5, AC-6, AC-8, AC-9, AC-10]
 handoff: qa_report.md
-status: deployed-fail-closed-monid-spike-passed-turnstile-open
+status: deployed-fail-closed-turnstile-configured-redeploy-open
 confirmed_progress:
   - Public sample deployment is reachable at https://rfp-xray.vercel.app.
   - Landing, OpenAPI, and Edmonton sample returned HTTP 200 on 2026-09-03.
@@ -102,13 +102,13 @@ confirmed_progress:
   - Dedicated Railway private Bucket has a bound attestation through 2026-09-10 04:11:53 MDT; current S3 live and real Chromium production-Origin probes each passed 1/1.
   - Railway provides private S3-compatible storage plus one no-domain, zero-idle-instance maintenance Cron; it runs no RFP analysis worker.
   - Vercel project settings are Node 22 with Fluid Compute enabled; deployment-bound runtime attestation code is independently approved P0/P1/P2=0.
-  - Provider-contract attestation code is independently approved P0/P1/P2=0; the Monid side is configured and live-probed, while the exact deployment/OpenAI-bound receipt remains open.
+  - Provider-contract attestation code is independently approved P0/P1/P2=0; the Monid side is configured/live-probed and the current exact deployment/OpenAI-bound receipt passed.
   - Security re-review returned APPROVE P0=0/P1=0; both P2 recommendations are implemented and tested.
-  - Current regression gate is 44 files/423 tests passed with 4 files/10 tests skipped; build 8 steps/4 workflows/13 pages; local E2E 14/2; fixtures 3/3. The opt-in paid Monid/Railway probe separately passed 1/1; the live Neon suite passed 4/4 on schema v9.
+  - Current regression gate is 47 files/465 tests passed with 4 files/10 tests skipped; build 9 steps/5 workflows/13 pages; local E2E 14/2; fixtures 3/3. The opt-in paid Monid/Railway probe separately passed 1/1; the live Neon suite passed 4/4 on schema v9.
   - Production dependency audit has no known vulnerabilities; full audit has zero high/critical findings with one low and three moderate development-chain findings.
   - The paid live verifier exists and received an independent PASS with P0=0/P1=0; its paid path has never been executed.
   - Application commit fbb48d09bda4f8d671f6b1679c66d3e0400f45db and release commit 76e0f4e01f93d67eab4da9b98807959b81578396 are pushed; CI run 33793276409 passed and the current production release passed remote read-only smoke 4/4.
-  - Local candidate 120e38a25824e083cce54470d9e27b17ff06844a prevents hard-kill replacement workers from duplicating an armed package cleanup watchdog; independent delta review APPROVE P0=0/P1=0. It is intentionally not pushed until the Turnstile release can ship once.
+  - Local reviewed implementation 4089397de8f2cfc3dc4846911bd9767adea178f4 includes the hard-kill watchdog fence, provider-free redelivery verifier, and reproducible read-only log receipt; independent reviews APPROVE P0=0/P1=0. It is intentionally not pushed until the Turnstile release can ship once.
   - Local video scaffold fc054660aab99dbb46128a7d519bf1885f43ad5a defines the truthful 90-second sequence and an independently approved evidence gate; all canonical build/render/publish commands currently stop on 23 unresolved live markers.
   - Captured Vercel deployment dpl_5dMrPWKGMCKxy5hcQUfq57uLmZce has deployment-bound 300-second runtime and Monid/OpenAI provider-contract receipts.
   - Railway Cron completed seven consecutive scheduled maintenance cycles across more than 30 minutes; independent review APPROVE P0/P1/P2=0 closed the scheduler-evidence P1.
@@ -120,11 +120,12 @@ confirmed_progress:
   - Context.dev fetched a five-minute Railway signed URL, returned byte-identical Markdown, and application-controlled cleanup/absence was confirmed in 8.140 seconds.
   - Context.dev ZDR is unavailable for this workspace and its response reported a seven-day upstream artifact expiry; the candidate now discloses this before submission and in Audit & Cost.
   - Monid emitted no physical-page boundary signals, so the PDF.js index remains the only citation-page authority.
+  - One isolated provider-free Preview canary was started once, received a literal SIGKILL, and completed through same-step platform redelivery. The final read-only verifier started zero workflows and recorded two ordered starts, materialized/output attempt 2, one completion, zero retry/failure events, and no third attempt. Its tracked log receipt is deployment/window-bounded rather than exact-run-bound because the row contains no raw run ID. This does not prove full application cleanup recovery.
+  - A Cloudflare Managed Turnstile widget allowlists only rfp-xray.vercel.app; its site key, sensitive secret, and expected hostname are configured in Vercel Production.
 open_blockers:
   - Vercel Fluid Compute is bounded at 300 seconds with 105/150/285-second deadlines and Monid concurrency 4; one parse passed, but the ten-run Edmonton/CER campaign remains required.
-  - Production Turnstile is absent, so guest live mutations cannot be released.
-  - Cloudflare is authenticated and widget creation is authorized, but Windows browser control stopped before every page action because it could not verify Chrome's URL; no key was created or handled.
-  - Turnstile configuration will require one new exact deployment and refreshed attestations; paid Edmonton/CER campaigns, 12 production citation clicks, final video, contest submission, and five social publications remain open.
+  - Production Turnstile is configured but the current immutable deployment predates it, so guest live mutations cannot yet be released.
+  - The Turnstile-triggered deployment requires fresh exact-deployment attestations and a real browser challenge; paid Edmonton/CER campaigns, 12 production citation clicks, final video, contest submission, and five social publications remain open.
   - No full live mutation flow or production citation click-through evidence is captured.
 evidence:
   - release-evidence/railway-storage-probe.md
@@ -133,6 +134,7 @@ evidence:
   - release-evidence/deployment-summary.md
   - release-evidence/bidworx-pricing-2026-09-03.md
   - release-evidence/monid-contract-spike-2026-09-03.md
+  - release-evidence/workflow-recovery-canary-2026-09-03.md
 scheduled_refresh: S3/runtime/provider receipts on Sep 9 and Sep 10 at 12:00 MDT
-truth_boundary: The public sample, private-storage contract probe, and Neon probes are partial release evidence only. They do not establish deployed end-to-end source cleanup, Monid readiness, provider retention, latency, cost, video, submission, or publication completion.
+truth_boundary: The public sample, private-storage contract probe, Neon probes, and isolated Workflow redelivery canary are partial release evidence only. They do not establish deployed end-to-end source cleanup, full application recovery, provider retention, latency, cost, video, submission, or publication completion.
 ```

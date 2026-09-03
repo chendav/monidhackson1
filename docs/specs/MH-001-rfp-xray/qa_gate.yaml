@@ -37,12 +37,12 @@ regression_checks:
 review:
   required: true
   release_verdict: not_ready
-  reviewed_implementation_commit: 120e38a25824e083cce54470d9e27b17ff06844a
+  reviewed_implementation_commit: 4089397de8f2cfc3dc4846911bd9767adea178f4
   deployed_release_commit: 76e0f4e01f93d67eab4da9b98807959b81578396
-  current_candidate_review: approve_p0_0_p1_0_p2_1_nonblocking
+  current_candidate_review: approve_p0_0_p1_0_nonblocking_truth_boundary_notes
   reviewed_release_candidate:
-    pnpm_check: 44_files_passed_4_skipped_423_tests_passed_10_skipped
-    build: pass_8_steps_4_workflows_13_pages
+    pnpm_check: 47_files_passed_4_skipped_465_tests_passed_10_skipped
+    build: pass_9_steps_5_workflows_13_pages
     local_e2e: 14_passed_2_live_skipped
     official_fixture_audit: 3_passed
     production_audit: no_known_vulnerabilities
@@ -55,6 +55,11 @@ review:
   paid_live_verifier_component: pass-p0-0-p1-0
   analysis_dispatch_ack_loss_fence: approve_p0_0_p1_0_p2_0
   watchdog_reclaim_fence: approve_p0_0_p1_0_p2_1_nonblocking
+  workflow_redelivery_verifier: approve_p0_0_p1_0_existing_run_start_count_0
+  workflow_redelivery_canary: passed_isolated_platform_scope_full_app_recovery_open
+  workflow_sigkill_log_receipt: approve_p0_0_p1_0_deployment_window_bounded_not_exact_run
+  workflow_sigkill_log_generator_commit: 4089397de8f2cfc3dc4846911bd9767adea178f4
+  workflow_sigkill_log_receipt_sha256: 6c2465a15c9732bb459ee65c99dc6c4305cfe8ec33b5038029983221a92f5349
   video_evidence_gate: approve_p0_0_p1_0_p2_1_nonblocking
 max_revision_rounds: 3
 external_release_evidence:
@@ -145,7 +150,7 @@ external_release_evidence:
     required: true
     result: blocked
     blockers:
-      - Production Turnstile is absent.
+      - Production Turnstile is configured but the current immutable deployment predates it and the live challenge has not run.
       - One 8.140-second signed-URL parse passed, but the required ten-run Edmonton and CER campaign has not run.
       - Read-only smoke does not satisfy the deployed mutation-flow and citation-review gate.
   maintenance:
@@ -159,6 +164,6 @@ external_release_evidence:
   release_verdict: not_ready
   generated_function_invocation_envelope: 24
   five_document_full_reserve_usd: 1.412123
-  open_gates: turnstile_then_redeploy_and_refresh_receipts_paid_campaigns_citation_clicks_video_submission_social
+  open_gates: redeploy_turnstile_and_refresh_receipts_paid_campaigns_citation_clicks_video_submission_social
   railway: private_s3_plus_short_lived_maintenance_cron_no_analysis_worker
   rule: Never convert sample-route availability, component probes, or local Reviewer PASS into a live-provider or contest-completion claim.

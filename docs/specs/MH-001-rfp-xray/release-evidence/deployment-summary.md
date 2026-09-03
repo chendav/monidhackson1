@@ -20,8 +20,8 @@ production citation review has not run.
 
 | Check | Result |
 |---|---|
-| `pnpm check` | PASS: 44 files passed, 4 skipped; 423 tests passed, 10 skipped |
-| Production build | PASS: 8 Workflow steps, 4 workflows, 13 pages |
+| `pnpm check` | PASS: 47 files passed, 4 skipped; 465 tests passed, 10 skipped |
+| Production build | PASS: 9 Workflow steps, 5 workflows, 13 pages |
 | Local Playwright | PASS: 14 passed, 2 explicit live skips |
 | Official fixture audit | PASS: 3/3 |
 | Production dependency audit | PASS: no known vulnerabilities |
@@ -36,7 +36,9 @@ production citation review has not run.
 | Deployment-bound provider contract | `APPROVE`, P0/P1/P2=0 | Passed for captured deployment; Monid and OpenAI are actively verified. |
 | Security re-review | `APPROVE`, P0=0/P1=0 | Both P2 recommendations were implemented and tested afterward. |
 | Maintenance scheduler | `APPROVE`, P0/P1/P2=0 | Railway proved seven scheduled cycles across more than 30 minutes; GitHub schedule remains unobserved redundancy. |
-| Current candidate | `APPROVE`, P0/P1/P2=0 | Analysis-dispatch ACK-loss fence and final cost/retention evidence were independently reviewed. |
+| Current candidate | `APPROVE`, P0/P1=0 | Analysis-dispatch, watchdog-reclaim, and provider-free redelivery deltas were independently reviewed; two wording/timing P2 notes remain non-blocking. |
+| Workflow redelivery verifier | `APPROVE`, P0/P1=0 | Read-only existing-run mode starts zero workflows; omitted attempts are labeled derived from ordered events plus materialized/output attempt 2. |
+| Reproducible SIGKILL log receipt | `APPROVE`, P0/P1=0 | Generator commit `4089397de8f2cfc3dc4846911bd9767adea178f4`; v2 receipt is deployment/window-bounded and not exact-run-bound. |
 
 The conservative five-document full reserve is USD 1.412123 and includes 24
 generated function invocations. It is estimated allocation evidence, not a
@@ -76,6 +78,18 @@ The exact deployment also has a provider-contract receipt with payload SHA-256
 Both receipts are deployment-bound and must be refreshed after any subsequent
 deployment or before their recorded expiry.
 
+One isolated provider-free Preview canary received a literal `SIGKILL` and
+completed through Vercel Workflow same-step redelivery. The final verifier
+re-read the existing run with `workflow_start_count=0`; it observed seven
+events, two ordered starts, a completed materialized step/output at attempt 2,
+one completion, zero retry/failure events, and no third attempt. A bounded v2
+log receipt corroborates one literal hard kill in that deployment and window;
+the row contains no run ID, so exact log-row-to-run binding is explicitly not
+claimed. Its unsalted hashes are local-receipt pseudonymization, not anonymity.
+The earlier local v1 receipt is superseded. This proves platform redelivery
+only, not the full application cleanup path. See
+[workflow recovery canary](workflow-recovery-canary-2026-09-03.md).
+
 `CRON_SECRET` was rotated consistently in Vercel production/preview, GitHub
 Actions, and Railway. GitHub manual run `33760198137` succeeded after rotation.
 Railway Cron then produced seven consecutive bounded production heartbeats
@@ -103,13 +117,17 @@ reported a seven-day upstream artifact expiry. See
 
 ## Open gates and evidence boundary
 
-- Current candidate independent review: `APPROVE`, P0=0, P1=0, P2=0.
+- Current candidate independent review: `APPROVE`, P0=0, P1=0; wording and
+  existing-run timing P2 notes are explicitly bounded above.
 - Production schema v9 is applied, probed, and served by the matching release.
-- Turnstile is absent.
+- The Turnstile widget and Vercel Production values are configured, but the
+  current immutable deployment predates them; redeployment and a live challenge
+  remain open.
 - The next deployment caused by Turnstile configuration will require fresh
   runtime and provider-contract receipts.
 - No real Edmonton ten-run benchmark or complete CER campaign has occurred.
-- No end-to-end production Workflow recovery, cleanup timing, live cost,
+- Isolated provider-free platform redelivery is proven; no full application
+  production Workflow recovery, cleanup timing, live cost,
   latency, retention/deletion, or citation click-through has been established.
 - No final video, contest submission, or five-platform social publication has
   occurred.

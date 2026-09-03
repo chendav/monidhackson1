@@ -92,8 +92,9 @@ The intended Monid workspace is now authenticated, the exact configuration is
 stored in Vercel, and two paid Edmonton contract-spike parses passed. The
 five-minute signed-URL path captured its artifact and confirmed source cleanup
 in 8.140 seconds, well within the Vercel envelope. The current exact deployment
-has a successful Monid/OpenAI provider receipt. Production Turnstile is absent;
-its resulting redeployment must receive fresh runtime and provider receipts.
+has a successful Monid/OpenAI provider receipt. Production Turnstile is
+configured but not present in that older immutable deployment; the resulting
+redeployment must receive fresh runtime and provider receipts.
 
 ## Why Railway does not run the application
 
@@ -128,8 +129,8 @@ half-migrated second analysis path.
 
 ## Verification summary
 
-- `pnpm check`: PASS, 44 files passed/4 skipped; 423 tests passed/10 skipped.
-- Production build: PASS, 8 Workflow steps, 4 workflows, 13 pages.
+- `pnpm check`: PASS, 47 files passed/4 skipped; 465 tests passed/10 skipped.
+- Production build: PASS, 9 Workflow steps, 5 workflows, 13 pages.
 - Local E2E: PASS, 14 passed/2 explicit live skips.
 - Official fixture audit: PASS, 3/3.
 - Production dependency audit: no known vulnerabilities. The full audit has
@@ -141,6 +142,11 @@ half-migrated second analysis path.
   implemented and tested.
 - Analysis Workflow claim/start/settlement ACK-loss fencing is implemented,
   focused-tested, and independently approved with P0=0, P1=0, and P2=0.
+- One isolated provider-free Preview Workflow hard-kill canary passed platform
+  redelivery. Its final verification re-read the existing run with start count
+  zero; the log corroboration is explicitly deployment/window-bounded because
+  the row contains no raw run ID. This does not prove the full application
+  cleanup-recovery path.
 - Production schema v9 is applied and probed; the matching application build is
   deployed and has current runtime/provider receipts.
 - The five-document full reserve is USD 1.412123 and contains 24 generated

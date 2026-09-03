@@ -728,3 +728,34 @@ The Turnstile-triggered redeployment and refreshed
 attestations, paid Edmonton/CER, end-to-end
 cleanup/cost/latency, citation click-through, video, submission, and five
 publication gates remain open. The release remains `NOT_READY`.
+
+## Revision 9 — Turnstile Configuration and Platform Redelivery Canary
+
+This section supersedes older Turnstile, local-candidate, and regression-count
+statements.
+
+- Current reviewed implementation candidate:
+  `4089397de8f2cfc3dc4846911bd9767adea178f4`; it is reviewed, committed, and
+  intentionally unpushed until the single final production deployment.
+- A Cloudflare Managed Turnstile widget allowlists only
+  `rfp-xray.vercel.app`; the site key, sensitive secret, and exact hostname are
+  configured in Vercel Production. The current immutable production deployment
+  predates them, so health remains correctly fail-closed until redeployment.
+- Current checks: 47 test files passed/4 skipped, 465 tests passed/10 skipped;
+  build PASS with 9 steps/5 workflows/13 pages.
+- One provider-free Preview canary was started once, received a literal
+  `SIGKILL`, and completed through same-step Vercel Workflow redelivery. Its
+  final verifier re-read the same run with `workflow_start_count=0`, two ordered
+  starts, materialized/output attempt 2, one completion, zero retry/failure
+  events, and no third attempt. Vercel omitted optional event attempt fields,
+  so the `[1,2]` sequence is explicitly marked derived.
+- Independent verifier, pagination, reproducible log-generator, and combined
+  evidence reviews returned `APPROVE`, P0=0/P1=0. Because the Vercel log row
+  contains no raw run ID, its truth boundary is deployment/window
+  corroboration only, not exact-run binding. This is isolated
+  platform-redelivery evidence, not full application cleanup recovery.
+
+Still open: final deployment and fresh attestations, real Turnstile challenge,
+full guest flow, paid Edmonton/CER campaign, cleanup/latency/cost reconciliation,
+12-citation review, final video, registration, submission, and five social
+publications.

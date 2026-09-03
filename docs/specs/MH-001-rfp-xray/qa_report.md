@@ -1,8 +1,8 @@
 review_scope: retention_cost_citation_monid_contract_and_analysis_dispatch_candidate
 recorded_at: 2026-09-03
-reviewed_application_commit: 120e38a25824e083cce54470d9e27b17ff06844a
+reviewed_application_commit: 4089397de8f2cfc3dc4846911bd9767adea178f4
 deployed_release_commit: 76e0f4e01f93d67eab4da9b98807959b81578396
-candidate_state: reviewed_committed_not_deployed_turnstile_blocked
+candidate_state: reviewed_committed_not_deployed_turnstile_configured
 captured_public_deployment_id: dpl_5dMrPWKGMCKxy5hcQUfq57uLmZce
 captured_public_deployment_url: https://rfp-xray-3dpwofwgr-chendavs-projects.vercel.app
 public_deployment_state: current_fail_closed_build_missing_turnstile_only
@@ -11,14 +11,14 @@ release_verdict: NOT_READY
 local_verification:
   pnpm_check:
     result: pass
-    test_files_passed: 44
+    test_files_passed: 47
     test_files_skipped: 4
-    tests_passed: 423
+    tests_passed: 465
     tests_skipped: 10
   production_build:
     result: pass
-    workflow_steps: 8
-    workflows: 4
+    workflow_steps: 9
+    workflows: 5
     application_pages: 13
   local_playwright:
     result: pass
@@ -71,12 +71,30 @@ independent_reviews:
   current_candidate:
     verdict: APPROVE
     prior_verdict: APPROVE_P0_0_P1_0_P2_0
-    delta: watchdog_reclaim_fence_plus_prior_infrastructure_and_analysis_dispatch_fences
+    delta: watchdog_reclaim_fence_plus_provider_free_redelivery_verifier_and_list_cap
     p0: 0
     p1: 0
-    p2: 1
-    p2_scope: arm_only_ack_loss_test
-    evidence: 44_files_423_tests_passed_4_files_10_tests_skipped_build_8_steps_4_workflows_13_pages_playwright_14_passed_2_live_skipped
+    p2: 2
+    p2_scope: hard_kill_is_combined_evidence_and_existing_duration_is_verification_latency
+    evidence: 47_files_465_tests_passed_4_files_10_tests_skipped_build_9_steps_5_workflows_13_pages_playwright_14_passed_2_live_skipped
+  workflow_redelivery_verifier:
+    verdict: APPROVE
+    p0: 0
+    p1: 0
+    attempt_observation: derived_platform_omitted_event_attempts
+    existing_run_start_count: 0
+    pagination_delta_verdict: APPROVE_P0_0_P1_0
+  workflow_sigkill_log_receipt:
+    verdict: APPROVE
+    p0: 0
+    p1: 0
+    p2: 3
+    generator_commit: 4089397de8f2cfc3dc4846911bd9767adea178f4
+    receipt_sha256: 6c2465a15c9732bb459ee65c99dc6c4305cfe8ec33b5038029983221a92f5349
+    corroboration_kind: deployment_bounded_window_corroboration_only
+    exact_run_binding: false
+    hash_semantics: local_receipt_pseudonymization_not_anonymity
+    supersedes: local_v1_receipt_and_hash
   video_evidence_gate:
     verdict: APPROVE
     p0: 0
@@ -132,6 +150,23 @@ live_component_evidence:
     upstream_artifact_expiry_observed_days: 7
     provider_early_delete_verified: false
     evidence: release-evidence/monid-contract-spike-2026-09-03.md
+  workflow_redelivery_canary:
+    result: pass_with_narrow_scope
+    environment: preview
+    deployed_git_commit: d5dc60a0331cd41b37f8f9ef7024c528f828b43e
+    run_id_sha256: e99c78790735d30512bbbf5bf0d3f94f74cd983efb1180ceacb434b94f3ceaf6
+    workflow_start_count_during_final_verification: 0
+    event_count: 7
+    ordered_same_step_starts: 2
+    materialized_step_attempt: 2
+    output_attempt: 2
+    retry_failure_third_attempt_count: 0
+    literal_sigkill_log_count: 1
+    log_corroboration_kind: deployment_bounded_window_corroboration_only
+    exact_log_row_to_run_binding: false
+    provider_calls: 0
+    limitation: isolated_platform_redelivery_not_full_application_cleanup_recovery
+    evidence: release-evidence/workflow-recovery-canary-2026-09-03.md
 
 release_configuration:
   vercel_node: 22.x
@@ -140,7 +175,9 @@ release_configuration:
   monid_key_local_cli_store_active: true
   monid_key_vercel_sensitive_secret_targets: [production, preview, development]
   monid_exact_adapter_configuration_vercel_targets: [production, preview, development]
-  production_turnstile_configured: false
+  production_turnstile_configured: true
+  production_turnstile_deployed: false
+  production_turnstile_hostname: rfp-xray.vercel.app
   captured_runtime_receipt: dpl_5dMrPWKGMCKxy5hcQUfq57uLmZce
   captured_provider_receipt: dpl_5dMrPWKGMCKxy5hcQUfq57uLmZce
   receipt_refresh_heartbeat: Sep_9_and_Sep_10_at_12_00_MDT
@@ -159,10 +196,10 @@ price_evidence:
     - Typical usage is shown as one tender.
 
 open_release_gates:
-  - Configure production Turnstile, redeploy once, and refresh both deployment-bound receipts.
+  - Redeploy once with the configured production Turnstile values and refresh both deployment-bound receipts.
   - Verify the deployed guest mutation lifecycle.
   - Run the budget-capped Edmonton ten-run benchmark and complete the four-document CER campaign.
-  - Verify end-to-end Workflow recovery, cleanup timing, cost, latency, and every required citation.
+  - Verify full application Workflow recovery, cleanup timing, cost, latency, and every required citation.
   - Complete an independent deployed review of at least 12 high-risk citations.
   - Record the final video and complete registration, contest submission, and five social publications.
 
@@ -170,11 +207,11 @@ limitations:
   - The two paid Monid parses are contract-spike evidence, not the final campaign.
   - The current provider receipt is valid only for the captured deployment and must be refreshed after Turnstile redeployment.
   - Interactive production citation review has not run.
-  - Production Turnstile is absent.
-  - Cloudflare login and action authorization are present, but browser automation stopped fail-closed before any page action because Chrome's URL could not be verified.
+  - Production Turnstile is configured but not deployed or challenge-verified.
+  - The isolated provider-free redelivery canary does not prove full application cleanup recovery.
   - Context.dev ZDR is unavailable and upstream artifact expiry was observed at seven days.
   - The real Edmonton/CER campaign, video, submission, and social publication have not occurred.
   - Component checks do not prove end-to-end production readiness.
   - The public sample must not be represented as live-provider execution.
 
-next_gate: Configure Turnstile, redeploy once, refresh both exact-deployment receipts, and require health 200 before live work.
+next_gate: Redeploy once with Turnstile, refresh both exact-deployment receipts, and require health 200 before live work.

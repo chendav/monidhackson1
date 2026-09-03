@@ -9,10 +9,11 @@
   application-code parent
   `fbb48d09bda4f8d671f6b1679c66d3e0400f45db`; pushed to `origin/main`,
   deployed, and independently re-reviewed.
-- Local candidate commit:
-  `120e38a25824e083cce54470d9e27b17ff06844a`; independently approved P0=0,
-  P1=0 for the watchdog-reclaim delta and intentionally not pushed until the
-  Turnstile deployment gate can be closed in the same release.
+- Local reviewed implementation commit:
+  `4089397de8f2cfc3dc4846911bd9767adea178f4`; its watchdog-reclaim,
+  provider-free redelivery, and reproducible read-only log-receipt changes were
+  independently approved with P0=0 and P1=0. It is intentionally not pushed
+  until the Turnstile deployment gate can be closed in the same release.
 
 ## Outcome
 
@@ -32,12 +33,12 @@ predictions, and long-term tender storage remain out of scope.
 
 ## Current release evidence
 
-- `pnpm check`: PASS, 44 test files passed and 4 skipped; 423 tests passed and
+- `pnpm check`: PASS, 47 test files passed and 4 skipped; 465 tests passed and
   10 explicitly skipped. The live-only skips include the deliberate paid
   Monid/Railway contract probe, which passed 1/1 when explicitly enabled, and
   the new Neon cleanup-retry and analysis-dispatch CAS race probes, which now
   pass 4/4 against production schema v9.
-- Production build: PASS, emitting 8 Workflow steps, 4 workflows, and 13
+- Production build: PASS, emitting 9 Workflow steps, 5 workflows, and 13
   application pages.
 - Local Playwright: 14 passed and 2 explicit live-environment skips.
 - Official fixture audit: 3/3 passed.
@@ -78,27 +79,38 @@ predictions, and long-term tender storage remain out of scope.
   redundancy.
 - A sanitized bidworx price capture records Starter at £190/month with typical
   usage of one tender. It is price evidence only.
+- One provider-free Preview Workflow canary was started exactly once, received
+  a real process `SIGKILL`, and completed after same-step redelivery. The
+  revised verifier re-read that same run with `workflow_start_count=0`; Vercel
+  omitted event attempt values, so `[1,2]` is explicitly marked as derived from
+  two ordered starts plus the completed materialized step/output at attempt 2.
+  A separately generated Vercel log receipt is deployment-and-window-bounded,
+  not exact-run-bound, because the raw log row contains no Workflow run ID.
+  Its tracked generator and combined evidence received independent `APPROVE`,
+  P0=0/P1=0.
+  This is platform-redelivery evidence only, not full application recovery.
 
 ## Evidence boundary
 
 The public deployment at https://rfp-xray.vercel.app serves the reviewed
 fail-closed application and passed remote smoke 4/4. It must not be described
-as live-provider ready: health remains 503 only because production Turnstile
-is absent. Schema v9, the matching release deployment, and both exact-
-deployment attestations are present.
+as live-provider ready: the Cloudflare widget and three Vercel Production
+variables are configured, but the current deployment predates them and health
+therefore remains 503 until redeployment. Schema v9, the matching release
+deployment, and both exact-deployment attestations are present.
 
 The contract spike is not the final campaign. It also proved that Context.dev
 ZDR is unavailable for this workspace and reported a seven-day upstream
 artifact expiry; that limitation is now disclosed before submission and in the
 audit view. No complete Edmonton/CER production campaign, deployment-bound
 provider receipt, production citation click-through, final video, contest
-submission, or five-platform social publication has occurred. Turnstile is
-absent, and the required interactive production review has not run. The release
-verdict therefore remains `NOT_READY`.
+submission, or five-platform social publication has occurred. The deployed
+Turnstile challenge and required interactive production review have not run.
+The release verdict therefore remains `NOT_READY`.
 
 ## Immediate next action
 
-Configure production Turnstile, redeploy once, then issue fresh runtime and
+Redeploy once with the configured Turnstile values, then issue fresh runtime and
 provider-contract attestations for that exact deployment before any public
 mutation. After every preflight gate passes, run the budget-capped
 Edmonton/CER campaigns and click at least 12 production citations. The final

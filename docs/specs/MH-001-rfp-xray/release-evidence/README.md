@@ -11,21 +11,24 @@ text, provider payloads, or wallet secrets.
 Application commit `fbb48d09bda4f8d671f6b1679c66d3e0400f45db` and release commit
 `76e0f4e01f93d67eab4da9b98807959b81578396` are pushed. The public alias
 serves that reviewed fail-closed release. Exact-deployment runtime and
-Monid/OpenAI provider receipts both passed; Turnstile and real campaign gates
-still prevent public source or paid work.
+Monid/OpenAI provider receipts both passed. The Turnstile widget and Vercel
+Production values are configured, but the current deployment predates them;
+redeployment and real campaign gates still prevent public source or paid work.
 
-Local candidate `120e38a25824e083cce54470d9e27b17ff06844a`
-adds an independently approved watchdog-reclaim fence and is intentionally not
-pushed or deployed until it can ship with the Turnstile configuration.
-Video scaffold `fc054660aab99dbb46128a7d519bf1885f43ad5a` is also local-only;
+Local reviewed implementation `4089397de8f2cfc3dc4846911bd9767adea178f4`
+includes the independently approved watchdog-reclaim fence, provider-free
+Workflow redelivery proof, and reproducible read-only Vercel log-receipt
+generator. It is intentionally not pushed or deployed until it can ship with
+the Turnstile configuration. Video scaffold
+`fc054660aab99dbb46128a7d519bf1885f43ad5a` is also local-only;
 its evidence gate is supposed to fail until the real campaign supplies every
 capture and measured value.
 
 ## Evidence classes
 
-1. **Pre-deploy local candidate** — current checks pass: 44 test files and 423
-   tests passed, with 4 files/10 tests explicitly skipped; build PASS with 8
-   Workflow steps, 4 workflows, and 13 pages; local E2E 14/2; official fixtures
+1. **Pre-deploy local candidate** — current checks pass: 47 test files and 465
+   tests passed, with 4 files/10 tests explicitly skipped; build PASS with 9
+   Workflow steps, 5 workflows, and 13 pages; local E2E 14/2; official fixtures
    3/3; no known production dependency vulnerabilities. The full audit has zero
    high/critical findings and 1 low/3 moderate development-chain findings.
 2. **Independent implementation review** — runtime attestation and provider
@@ -33,16 +36,23 @@ capture and measured value.
    received `APPROVE`, P0=0/P1=0, and both earlier P2 recommendations were
    implemented and tested. The current candidate's analysis-dispatch ACK-loss
    fence is focused-tested and independently approved with P0=0, P1=0, and
-   P2=0. Local commit `120e38a` adds the independently approved watchdog-
-   reclaim fence (P0=0, P1=0, one non-blocking test suggestion). The video
+   P2=0. The current local candidate adds the independently approved watchdog-
+   reclaim fence and provider-free redelivery verifier (P0=0, P1=0). The video
    evidence gate is separately approved P0=0/P1=0 and currently blocks all
    canonical build/render/publish commands on 23 real open markers.
-3. **Live component probes** — Neon schema/concurrency, Railway private
+3. **Live recovery canary** — one isolated provider-free Preview run received
+   a literal `SIGKILL` and completed through same-step platform redelivery. Its
+   final verifier was read-only with `workflow_start_count=0`; this does not
+   prove full application cleanup recovery. The separately reviewed v2 log
+   receipt is deployment/window-bounded, not exact-run-bound. Its unsalted
+   hashes are local-receipt pseudonymization, not anonymity. The earlier local
+   v1 receipt and hash are superseded and must not be cited.
+4. **Live component probes** — Neon schema/concurrency, Railway private
    storage, and the Monid contract spike passed their stated scopes. These are
    not complete production campaign evidence.
-4. **Public sample** — current static/sample product surface only; it is not a
+5. **Public sample** — current static/sample product surface only; it is not a
    live-provider execution.
-5. **Live-provider release** — not ready and not executed.
+6. **Live-provider release** — not ready and not executed.
 
 ## Current live component facts
 
@@ -83,13 +93,15 @@ capture and measured value.
 - [Railway maintenance Cron probe](railway-maintenance-cron.md)
 - [bidworx pricing evidence](bidworx-pricing-2026-09-03.md)
 - [Monid contract spike](monid-contract-spike-2026-09-03.md)
+- [Workflow recovery canary](workflow-recovery-canary-2026-09-03.md)
 - [Infrastructure cost estimate contract](infrastructure-cost-estimates-2026-09-03.md)
 - `bidworx-pricing-2026-09-03.png` — 714876 bytes; SHA-256
   `5a4d44ba608131cabb7770a28321d85d5552ba52fb4f86fb0b3520340b4f9b34`.
 
 ## Open gates
 
-Turnstile is absent. Interactive production citation review has not run.
+Turnstile is configured but not yet present in a deployed build, and its live
+challenge has not run. Interactive production citation review has not run.
 The two paid Monid calls are bounded contract-spike evidence, not the real
 Edmonton/CER campaign. The Turnstile-triggered redeployment and renewed
 attestations, paid Edmonton/CER

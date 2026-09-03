@@ -1,4 +1,4 @@
-# Chief Handoff — Monid Contract Spike Passed, Release Still Fail-Closed
+# Chief Handoff — Turnstile Configured, Recovery Canary Passed, Release Still Fail-Closed
 
 Updated: 2026-09-03.
 
@@ -12,14 +12,15 @@ and cost USD 0.0009. A direct official-URL parse produced byte-identical
 Markdown at the same cost.
 
 This is component evidence, not the full production campaign. Production stays
-`NOT_READY` until Turnstile, live Workflow runs, final citation review, and
-contest/publication gates pass. The current deployment already has runtime and
-Monid/OpenAI receipts; both must be refreshed after the Turnstile redeployment.
+`NOT_READY` until the configured Turnstile values are deployed, live provider
+Workflow runs, final citation review, and contest/publication gates pass. The
+current deployment already has runtime and Monid/OpenAI receipts; both must be
+refreshed after the Turnstile redeployment.
 
 ## Release identity
 
-- Reviewed local candidate commit:
-  `120e38a25824e083cce54470d9e27b17ff06844a` (not deployed).
+- Reviewed local implementation commit:
+  `4089397de8f2cfc3dc4846911bd9767adea178f4` (not deployed).
 - Reviewed application commit:
   `fbb48d09bda4f8d671f6b1679c66d3e0400f45db`.
 - Deployed release commit:
@@ -67,8 +68,8 @@ OCR facts that cannot bind to the native physical index are withheld.
 
 ## Verification
 
-- `pnpm check`: 44 files passed/4 skipped, 423 tests passed/10 skipped.
-- Production build: PASS, 8 Workflow steps, 4 workflows, 13 pages.
+- `pnpm check`: 47 files passed/4 skipped, 465 tests passed/10 skipped.
+- Production build: PASS, 9 Workflow steps, 5 workflows, 13 pages.
 - Local Playwright: 14 passed/2 explicit live skips.
 - Official PDF fixture audit: 3/3.
 - Opt-in paid Monid/Railway live integration: 1/1 PASS.
@@ -79,8 +80,13 @@ OCR facts that cannot bind to the native physical index are withheld.
 The analysis-dispatch ACK-loss fence is implemented and its focused claim,
 start, settlement, replay, maintenance, and concurrency regressions pass. The
 prior candidate received final independent `APPROVE` with P0=0, P1=0, and
-P2=0. The watchdog-reclaim delta in local commit `120e38a` separately received
-`APPROVE` with P0=0, P1=0, and one non-blocking test-hardening suggestion. The
+P2=0. The watchdog-reclaim and provider-free redelivery deltas separately
+received `APPROVE` with P0=0 and P1=0. One real Preview canary received a
+  literal `SIGKILL` and completed after same-step redelivery; its final verifier
+  re-read the existing run with `workflow_start_count=0`. The tracked log
+  receipt is deployment/window-bounded rather than exact-run-bound, and the
+  combined evidence review is `APPROVE`, P0=0/P1=0. This proves isolated
+  platform redelivery, not full application cleanup recovery. The
 conservative five-document full reserve is
 USD 1.412123 and includes 24 generated function invocations; this is an
 estimate, not a provider receipt.
@@ -99,8 +105,8 @@ and long-term source storage remain out of scope.
 
 ## Next gates
 
-1. Configure production Turnstile, redeploy once, and refresh both exact-
-   deployment receipts.
+1. Redeploy once with the configured production Turnstile values and refresh
+   both exact-deployment receipts.
 2. Require health 200 and verify real guest mutations.
 3. Run the capped ten-run Edmonton benchmark and four-document CER campaign.
 4. Complete an independent production review of at least 12 high-risk links.
