@@ -70,7 +70,7 @@
 
 ## Unknown
 
-- Production Turnstile token acquisition is not wired because the frozen browser contract does not specify a token source. The API currently treats `X-Turnstile-Token` as optional.
+- Production Turnstile has not been exercised with live site/secret keys or the final deployment hostname. Revision 1 wires the browser lifecycle and fails closed when the production public site key is absent.
 - A real production object-store CORS policy and cross-origin presigned PUT were not exercised; E2E coverage mocks that browser boundary.
 - Provider-specific retention terms and any zero-retention eligibility remain unverified and are labeled as such in the UI.
 - No browser in the verification environment exposed native WebMCP. Registration, tool execution, staged input, and cleanup were verified with a standards-shaped browser mock.
@@ -105,7 +105,7 @@
 - Independent Reviewer should compare all frontend behavior against the frozen contracts and verify no cleanup-gated result can leak through a race.
 - QA should run the full project gate and E2E suite from a clean server process, and should inspect one real presigned upload when a non-production test object store is available.
 - Product/legal should replace the provider-retention disclosure only after production provider terms are confirmed.
-- If production Turnstile becomes mandatory, freeze a client token-acquisition contract before adding that header to mutations.
+- Configure `NEXT_PUBLIC_TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET_KEY`, and `TURNSTILE_EXPECTED_HOSTNAME` together in production, then verify them on the deployed hostname.
 
 ## Proposed Long-Term Memory
 
@@ -115,3 +115,60 @@
 ## Memory Disposition
 
 - Proposed only. No durable memory was promoted by the frontend implementation worker.
+
+## Revision 1: Production Guest Mutation Challenge
+
+### Assignment
+
+- Resolve QR-11/R-12 by adding a production browser Turnstile lifecycle without changing backend, API, contract, package, or configuration files.
+- Obtain a fresh action-bound token for every guest presign, run creation, grounded question, and deletion request. Never add the token to direct Blob PUTs or reads.
+
+### Official Sources Checked
+
+- [Cloudflare: Embed the widget](https://developers.cloudflare.com/turnstile/get-started/client-side-rendering/) for the exact script URL, explicit SPA rendering, widget lifecycle, and execute mode.
+- [Cloudflare: Widget configurations](https://developers.cloudflare.com/turnstile/get-started/client-side-rendering/widget-configurations/) for `action`, `execution`, `appearance`, callbacks, responsive sizes, and English-language configuration.
+- [Cloudflare: Validate the token](https://developers.cloudflare.com/turnstile/get-started/server-side-validation/) for five-minute expiry, single-use tokens, mandatory server validation, and action/hostname checks.
+- [Cloudflare: Testing](https://developers.cloudflare.com/turnstile/troubleshooting/testing/) for standards-shaped browser mocking and official non-production site-key behavior.
+
+### Changed Files
+
+- `src/components/turnstile-provider.tsx` (new)
+- `src/components/rfp-workspace.tsx`
+- `src/components/analysis-surface.tsx`
+- `src/app/globals.css`
+- `tests/e2e/rfp-workspace.spec.ts`
+- `docs/specs/MH-001-rfp-xray/handoff-frontend.md`
+
+### Implementation Decisions
+
+- The shared provider loads Cloudflare's exact `api.js?render=explicit` URL and serializes challenge acquisition across the workspace and analysis surface.
+- Every acquisition renders a new widget with `execution: "execute"`, `appearance: "interaction-only"`, English language, and one of the frozen actions: `upload_presign`, `create_run`, `ask_question`, or `delete_run`.
+- A token is submitted immediately, never cached, and the widget is removed after callback. Abort, expiry, timeout, unsupported-browser, invalid-token, and script-load paths discard the widget/token and reject with user-facing copy.
+- `x-turnstile-token` is attached only to the four relative same-origin API mutations. Presigned upload headers are copied into a `Headers` object and any case-insensitive Turnstile header is explicitly removed before the Blob PUT.
+- Development without a site key preserves the server's local bypass. Production without `NEXT_PUBLIC_TURNSTILE_SITE_KEY` fails closed and exposes a persistent accessible configuration error. The standards-shaped E2E test hook is ignored in production builds.
+- Run idempotency keys remain stable across an uncertain retry, while every retry obtains a new Turnstile token.
+
+### User-Visible States
+
+- While a challenge runs, a responsive live-status panel explains the protected action and keeps an interactive challenge visible and keyboard reachable.
+- Script failure produces an assertive alert with a reload control; the initiating flow also shows its existing focused error state and sends no mutation.
+- Missing production configuration announces that guest changes are disabled instead of attempting an unprotected request.
+- The originating analysis/question/delete controls remain disabled through their existing pending states while token acquisition is in flight.
+
+### Checks and Exact Outcomes
+
+- `pnpm exec eslint src/components/turnstile-provider.tsx src/components/rfp-workspace.tsx src/components/analysis-surface.tsx tests/e2e/rfp-workspace.spec.ts` -> PASS, exit code 0.
+- `pnpm exec tsc --noEmit --pretty false` -> PASS at the frontend revision checkpoint, exit code 0.
+- `pnpm exec playwright test tests/e2e/rfp-workspace.spec.ts --grep "Turnstile"` -> PASS, 4 tests across Chromium desktop and mobile in 14.1 seconds.
+- `pnpm exec playwright test tests/e2e/rfp-workspace.spec.ts` -> PASS, 14 tests across Chromium desktop and mobile in 21.6 seconds.
+- The mutation test performs two presigns, one create, one question, and one delete. It proves five distinct tokens, exact actions, explicit execute rendering, widget disposal, no token on either same-origin mock Blob PUT, and no token on status/analysis GETs.
+- The unavailable-script test proves an accessible alert, focused flow error, and zero protected API requests.
+- All browser tests use a local standards-shaped mock; no live Turnstile/provider call was made.
+- The final whole-repository shared-tree typecheck/gate remains pending because backend revision files are still changing concurrently. The Chief Agent will rerun integration gates after convergence.
+- Independent re-review remains required. This development-worker handoff does not self-certify the release blocker.
+
+### Residual Risks
+
+- Deployment must expose `NEXT_PUBLIC_TURNSTILE_SITE_KEY` at build time and align its hostname allowlist with the server's expected hostname.
+- Deployment CSP, network policy, and browser extensions can block `challenges.cloudflare.com`; the UI fails closed, but live-host verification is still required.
+- No production token was redeemed during this revision, so final action/hostname acceptance depends on the independently tested server verifier and deployment configuration.

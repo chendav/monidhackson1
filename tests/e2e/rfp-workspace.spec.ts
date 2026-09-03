@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 
 const RUN_ID = "11111111-1111-4111-8111-111111111111";
 const REQUEST_ID = "22222222-2222-4222-8222-222222222222";
@@ -238,6 +238,67 @@ function status(statusValue: string, progress: number, cleanupConfirmed: boolean
   };
 }
 
+async function installTurnstileMock(page: Page, tokenDelayMs = 0) {
+  await page.addInitScript(({ tokenDelayMs: callbackDelay }) => {
+    type WidgetOptions = {
+      action: string;
+      execution: string;
+      appearance: string;
+      callback: (token: string) => void;
+    };
+    type WidgetRecord = { action: string; container: HTMLElement; options: WidgetOptions };
+    const widgets = new Map<string, WidgetRecord>();
+    const audit = {
+      renders: [] as Array<{ id: string; action: string; execution: string; appearance: string; token?: string }>,
+      executes: [] as string[],
+      removes: [] as string[],
+    };
+    let widgetSequence = 0;
+    let tokenSequence = 0;
+
+    Object.defineProperty(window, "__RFP_XRAY_TURNSTILE_TEST_SITE_KEY__", { value: "1x00000000000000000000AA" });
+    Object.defineProperty(window, "__turnstileAudit", { value: audit });
+    Object.defineProperty(window, "turnstile", {
+      configurable: true,
+      value: {
+        ready(callback: () => void) {
+          queueMicrotask(callback);
+        },
+        render(container: HTMLElement, options: WidgetOptions) {
+          const id = `widget-${++widgetSequence}`;
+          widgets.set(id, { action: options.action, container, options });
+          audit.renders.push({ id, action: options.action, execution: options.execution, appearance: options.appearance });
+          const accessibleMock = document.createElement("div");
+          accessibleMock.setAttribute("role", "group");
+          accessibleMock.setAttribute("aria-label", `Security challenge for ${options.action}`);
+          accessibleMock.textContent = "Security challenge";
+          container.replaceChildren(accessibleMock);
+          return id;
+        },
+        execute(target: string | HTMLElement) {
+          const widgetId = typeof target === "string"
+            ? target
+            : [...widgets.entries()].find(([, record]) => record.container === target)?.[0];
+          if (!widgetId) throw new Error("Unknown widget target");
+          const widget = widgets.get(widgetId);
+          if (!widget) throw new Error(`Unknown widget ${widgetId}`);
+          audit.executes.push(widgetId);
+          const token = `token-${widget.action}-${++tokenSequence}`;
+          const render = audit.renders.find((entry) => entry.id === widgetId);
+          if (render) render.token = token;
+          window.setTimeout(() => widget.options.callback(token), callbackDelay);
+        },
+        remove(widgetId: string) {
+          const widget = widgets.get(widgetId);
+          widget?.container.replaceChildren();
+          widgets.delete(widgetId);
+          audit.removes.push(widgetId);
+        },
+      },
+    });
+  }, { tokenDelayMs });
+}
+
 test("keeps source input and the verified sample useful in the first desktop viewport", async ({ page, isMobile }) => {
   await page.goto("/");
 
@@ -311,11 +372,13 @@ test("shows loading and API error states without presenting success", async ({ p
 });
 
 test("holds a live result behind the cleanup confirmation gate", async ({ page }) => {
+  await installTurnstileMock(page);
   let allowReady = false;
   await page.route("**/api/v1/runs", async (route) => {
     const request = route.request();
     expect(request.method()).toBe("POST");
     expect(request.headers()["idempotency-key"]).toBeTruthy();
+    expect(request.headers()["x-turnstile-token"]).toMatch(/^token-create_run-/);
     expect(request.postDataJSON()).toEqual({ documents: [{ role: "base", source: { type: "url", url: "https://canadabuys.canada.ca/tender.pdf" } }] });
     await route.fulfill({ status: 201, contentType: "application/json", body: JSON.stringify({ run_id: RUN_ID, status: "queued", status_url: `/api/v1/runs/${RUN_ID}` }) });
   });
@@ -331,6 +394,147 @@ test("holds a live result behind the cleanup confirmation gate", async ({ page }
 
   allowReady = true;
   await expect(page.getByRole("heading", { name: "File Bay Repair & Maintenance", level: 1 })).toBeVisible({ timeout: 5_000 });
+});
+
+test("uses a fresh action-bound Turnstile token for every guest mutation without leaking it to the Blob PUT", async ({ page }) => {
+  await installTurnstileMock(page, 400);
+  const protectedRequests: Array<{ method: string; path: string; token: string }> = [];
+  const observedGets: Array<{ path: string; token?: string }> = [];
+  const blobPutTokens: Array<string | undefined> = [];
+  let presignSequence = 0;
+
+  await page.route("**/api/v1/uploads/presign", async (route) => {
+    const request = route.request();
+    const token = request.headers()["x-turnstile-token"];
+    presignSequence += 1;
+    protectedRequests.push({ method: request.method(), path: new URL(request.url()).pathname, token });
+    await route.fulfill({
+      status: 201,
+      contentType: "application/json",
+      body: JSON.stringify({
+        blob_path: `incoming/document-${presignSequence}.pdf`,
+        upload_url: `http://localhost:3000/test-blob-upload/${presignSequence}`,
+        expires_at: "2026-09-02T18:05:00.000Z",
+        method: "PUT",
+        headers: { "content-type": "application/pdf", "X-Turnstile-Token": "must-not-leak" },
+      }),
+    });
+  });
+  await page.route("**/test-blob-upload/*", async (route) => {
+    blobPutTokens.push(route.request().headers()["x-turnstile-token"]);
+    await route.fulfill({ status: 201, body: "" });
+  });
+  await page.route("**/api/v1/runs", async (route) => {
+    const request = route.request();
+    const token = request.headers()["x-turnstile-token"];
+    protectedRequests.push({ method: request.method(), path: new URL(request.url()).pathname, token });
+    await route.fulfill({ status: 201, contentType: "application/json", body: JSON.stringify({ run_id: RUN_ID, status: "queued", status_url: `/api/v1/runs/${RUN_ID}` }) });
+  });
+  await page.route(`**/api/v1/runs/${RUN_ID}`, async (route) => {
+    const request = route.request();
+    if (request.method() === "DELETE") {
+      const token = request.headers()["x-turnstile-token"];
+      protectedRequests.push({ method: request.method(), path: new URL(request.url()).pathname, token });
+      await route.fulfill({ status: 204, body: "" });
+      return;
+    }
+    observedGets.push({ path: new URL(request.url()).pathname, token: request.headers()["x-turnstile-token"] });
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(status("ready", 100, true)) });
+  });
+  await page.route(`**/api/v1/runs/${RUN_ID}/analysis`, async (route) => {
+    observedGets.push({ path: new URL(route.request().url()).pathname, token: route.request().headers()["x-turnstile-token"] });
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(sampleResult) });
+  });
+  await page.route(`**/api/v1/runs/${RUN_ID}/questions`, async (route) => {
+    const request = route.request();
+    const token = request.headers()["x-turnstile-token"];
+    protectedRequests.push({ method: request.method(), path: new URL(request.url()).pathname, token });
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ answerability: "answered", answer: "The completed pricing form is required.", citations: [citation()], warning: null }),
+    });
+  });
+
+  await page.goto("/");
+  await expect(page.getByTestId("turnstile-facility")).toHaveAttribute("data-availability", "ready");
+  await page.getByRole("button", { name: "PDF pack" }).click();
+  await page.locator("#pdf-pack").setInputFiles([
+    {
+      name: "base.pdf",
+      mimeType: "application/pdf",
+      buffer: Buffer.from("%PDF-1.4\n% deterministic base browser fixture"),
+    },
+    {
+      name: "amendment.pdf",
+      mimeType: "application/pdf",
+      buffer: Buffer.from("%PDF-1.4\n% deterministic amendment browser fixture"),
+    },
+  ]);
+  await page.getByRole("button", { name: "Analyze 2 documents" }).click();
+  await expect(page.getByTestId("turnstile-facility")).toHaveAttribute("role", "status");
+  await expect(page.getByTestId("turnstile-facility").getByText(/securing an upload/i)).toBeVisible();
+  await expect(page.getByRole("group", { name: "Security challenge for upload_presign" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "File Bay Repair & Maintenance", level: 1 })).toBeVisible();
+
+  await page.getByRole("tab", { name: "Ask This RFP" }).click();
+  await page.getByLabel("Question").fill("Which pricing form is required?");
+  await page.getByRole("button", { name: "Ask this RFP" }).click();
+  await expect(page.getByText("The completed pricing form is required.")).toBeVisible();
+
+  page.once("dialog", (dialog) => void dialog.accept());
+  await page.getByRole("button", { name: "Delete analysis" }).click();
+  await expect(page.getByRole("heading", { name: "Analyze a tender pack", level: 1 })).toBeVisible();
+
+  expect(protectedRequests.map(({ method, path }) => `${method} ${path}`)).toEqual([
+    "POST /api/v1/uploads/presign",
+    "POST /api/v1/uploads/presign",
+    "POST /api/v1/runs",
+    `POST /api/v1/runs/${RUN_ID}/questions`,
+    `DELETE /api/v1/runs/${RUN_ID}`,
+  ]);
+  const tokens = protectedRequests.map(({ token }) => token);
+  expect(new Set(tokens).size).toBe(5);
+  expect(tokens[0]).toMatch(/^token-upload_presign-/);
+  expect(tokens[1]).toMatch(/^token-upload_presign-/);
+  expect(tokens[2]).toMatch(/^token-create_run-/);
+  expect(tokens[3]).toMatch(/^token-ask_question-/);
+  expect(tokens[4]).toMatch(/^token-delete_run-/);
+  expect(blobPutTokens).toEqual([undefined, undefined]);
+  expect(observedGets.every(({ token }) => token === undefined)).toBe(true);
+
+  const turnstileAudit = await page.evaluate(() => (window as typeof window & {
+    __turnstileAudit: { renders: Array<{ id: string; action: string; execution: string; appearance: string; token: string }>; executes: string[]; removes: string[] };
+  }).__turnstileAudit);
+  expect(turnstileAudit.renders.map(({ action }) => action)).toEqual(["upload_presign", "upload_presign", "create_run", "ask_question", "delete_run"]);
+  expect(turnstileAudit.renders.every(({ execution, appearance }) => execution === "execute" && appearance === "interaction-only")).toBe(true);
+  expect(new Set(turnstileAudit.renders.map(({ token }) => token)).size).toBe(5);
+  expect(turnstileAudit.executes).toHaveLength(5);
+  expect(turnstileAudit.removes).toHaveLength(5);
+});
+
+test("fails closed with an accessible message when Turnstile cannot load", async ({ page }) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(window, "__RFP_XRAY_TURNSTILE_TEST_SITE_KEY__", { value: "1x00000000000000000000AA" });
+  });
+  await page.route("https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit", (route) => route.abort("failed"));
+  let runRequests = 0;
+  await page.route("**/api/v1/runs", (route) => {
+    runRequests += 1;
+    return route.abort("blockedbyclient");
+  });
+
+  await page.goto("/");
+  const facility = page.getByTestId("turnstile-facility");
+  await expect(facility).toHaveAttribute("data-availability", "failed");
+  await expect(facility).toHaveAttribute("role", "alert");
+  await expect(facility.getByText("Security verification unavailable")).toBeVisible();
+
+  await page.getByLabel("CanadaBuys PDF URL").fill("https://canadabuys.canada.ca/tender.pdf");
+  await page.getByRole("button", { name: "Analyze pack" }).click();
+  await expect(page.getByRole("heading", { name: "The pack could not be analyzed" })).toBeFocused();
+  await expect(page.getByText(/Security verification is unavailable/i)).toBeVisible();
+  expect(runRequests).toBe(0);
 });
 
 test("registers and cleans up progressive WebMCP tools when the browser exposes the API", async ({ page }) => {

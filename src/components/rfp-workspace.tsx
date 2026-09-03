@@ -41,6 +41,7 @@ import type {
   RunStatusResponse,
 } from "@/contracts";
 import { AnalysisSurface } from "./analysis-surface";
+import { TurnstileProvider, useTurnstile } from "./turnstile-provider";
 
 const MAX_FILES = 5;
 const MAX_FILE_BYTES = 25 * 1024 * 1024;
@@ -370,7 +371,7 @@ function SourceBuilder({
           </div>
         )}
 
-        {validationError ? <div className="inline-alert error-alert form-error" role="alert"><CircleAlert aria-hidden="true" size={18} /><p>{validationError}</p></div> : null}
+        {validationError ? <div className="inline-alert error-alert form-error" role="alert" tabIndex={-1}><CircleAlert aria-hidden="true" size={18} /><p>{validationError}</p></div> : null}
 
         <div className="ingest-footer">
           <div className="privacy-note"><ShieldCheck aria-hidden="true" size={18} /><span>Private transfer. App-controlled source files are deleted before results are released.</span></div>
@@ -464,7 +465,8 @@ function ErrorSurface({ error, onBack, onRetry }: { error: UiError; onBack: () =
   );
 }
 
-export function RfpWorkspace() {
+function RfpWorkspaceContent() {
+  const { getMutationHeaders } = useTurnstile();
   const [mode, setMode] = useState<SourceMode>("url");
   const [urlDrafts, setUrlDraftsState] = useState<UrlDraft[]>([{ id: "url-base", role: "base", url: "" }]);
   const [fileDrafts, setFileDraftsState] = useState<FileDraft[]>([]);
@@ -719,18 +721,25 @@ export function RfpWorkspace() {
           setLocalMessage(`Securing ${draft.file.name}`);
           setLocalProgress(8 + Math.round((index / fileDrafts.length) * 34));
           const sha256 = await sha256Hex(draft.file);
+          const presignHeaders = await getMutationHeaders(
+            "upload_presign",
+            controller.signal,
+            { "content-type": "application/json" },
+          );
           const presignResponse = await fetch("/api/v1/uploads/presign", {
             method: "POST",
             credentials: "same-origin",
-            headers: { "content-type": "application/json" },
+            headers: presignHeaders,
             body: JSON.stringify({ filename: draft.file.name, size_bytes: draft.file.size, sha256 }),
             signal: controller.signal,
           });
           if (!presignResponse.ok) throw await parseApiError(presignResponse);
           const presign = await presignResponse.json() as PresignUploadResponse;
+          const uploadHeaders = new Headers(presign.headers);
+          uploadHeaders.delete("x-turnstile-token");
           const uploadResponse = await fetch(presign.upload_url, {
             method: presign.method,
-            headers: presign.headers,
+            headers: uploadHeaders,
             body: draft.file,
             signal: controller.signal,
           });
@@ -746,10 +755,15 @@ export function RfpWorkspace() {
       setLocalProgress(46);
       const idempotencyKey = idempotencyKeyRef.current ?? newId("run");
       idempotencyKeyRef.current = idempotencyKey;
+      const createHeaders = await getMutationHeaders(
+        "create_run",
+        controller.signal,
+        { "content-type": "application/json", "idempotency-key": idempotencyKey },
+      );
       const response = await fetch("/api/v1/runs", {
         method: "POST",
         credentials: "same-origin",
-        headers: { "content-type": "application/json", "idempotency-key": idempotencyKey },
+        headers: createHeaders,
         body: JSON.stringify({ documents } satisfies CreateRunRequest),
         signal: controller.signal,
       });
@@ -767,7 +781,7 @@ export function RfpWorkspace() {
       else showError({ code: "START_FAILED", message: caught instanceof Error ? caught.message : "The analysis could not be started.", retryable: true });
     }
   // Source arrays are intentionally dependencies because retry uses the currently reviewed pack.
-  }, [fileDrafts, mode, showError, urlDrafts, validateSources]);
+  }, [fileDrafts, getMutationHeaders, mode, showError, urlDrafts, validateSources]);
 
   function submitSources(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -793,7 +807,8 @@ export function RfpWorkspace() {
       resetToInputs();
       return;
     }
-    const response = await fetch(`/api/v1/runs/${runId}`, { method: "DELETE", credentials: "same-origin" });
+    const headers = await getMutationHeaders("delete_run");
+    const response = await fetch(`/api/v1/runs/${runId}`, { method: "DELETE", credentials: "same-origin", headers });
     if (!response.ok && response.status !== 204) {
       const error = await parseApiError(response);
       throw new Error(error.message);
@@ -838,5 +853,13 @@ export function RfpWorkspace() {
         </main>
       ) : null}
     </div>
+  );
+}
+
+export function RfpWorkspace() {
+  return (
+    <TurnstileProvider>
+      <RfpWorkspaceContent />
+    </TurnstileProvider>
   );
 }

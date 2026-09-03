@@ -42,6 +42,7 @@ import type {
   Requirement,
   RunStatusResponse,
 } from "@/contracts";
+import { useTurnstile } from "./turnstile-provider";
 
 const ICON_SIZE = 17;
 const ICON_STROKE = 1.8;
@@ -440,6 +441,7 @@ async function readErrorMessage(response: Response) {
 }
 
 function AskRfp({ runId, isSample }: { runId: string | null; isSample: boolean }) {
+  const { getMutationHeaders } = useTurnstile();
   const [question, setQuestion] = useState("");
   const [answer, setAnswer] = useState<QuestionResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -459,10 +461,15 @@ function AskRfp({ runId, isSample }: { runId: string | null; isSample: boolean }
     setError(null);
     setAnswer(null);
     try {
+      const headers = await getMutationHeaders(
+        "ask_question",
+        controller.signal,
+        { "content-type": "application/json" },
+      );
       const response = await fetch(`/api/v1/runs/${runId}/questions`, {
         method: "POST",
         credentials: "same-origin",
-        headers: { "content-type": "application/json" },
+        headers,
         body: JSON.stringify({ question: trimmed }),
         signal: controller.signal,
       });
