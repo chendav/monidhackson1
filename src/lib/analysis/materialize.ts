@@ -91,7 +91,10 @@ function semanticDependencyTokens(value: string) {
 
 function riskSemanticallyDependsOnSupersededFact(
   risk: { topic: string; value: string; documentSha256: string; citations: Citation[] },
-  superseded: { topic: string; value: string; documentSha256: string; citations: Citation[] }
+  superseded: {
+    topic: string; factKey?: string; value: string; documentSha256: string; citations: Citation[];
+  },
+  currentValues: string[]
 ) {
   if (risk.documentSha256 !== superseded.documentSha256) return false;
   if (risk.citations.some((riskCitation) => superseded.citations.some((sourceCitation) =>
@@ -100,10 +103,32 @@ function riskSemanticallyDependsOnSupersededFact(
   const riskObjectiveTokens = extractAssertionTokens(risk.value);
   const sourceObjectiveTokens = extractAssertionTokens(superseded.value);
   if (riskObjectiveTokens.size === 0 || sourceObjectiveTokens.size === 0) return false;
-  if (![...sourceObjectiveTokens].some((token) => riskObjectiveTokens.has(token))) return false;
+  const currentObjectiveTokens = new Set(currentValues.flatMap((value) => [...extractAssertionTokens(value)]));
+  const invalidatedSourceTokens = currentValues.length > 0
+    ? [...sourceObjectiveTokens].filter((token) => !currentObjectiveTokens.has(token))
+    : [...sourceObjectiveTokens];
+  const sharedObjectiveTokens = invalidatedSourceTokens.filter((token) => riskObjectiveTokens.has(token));
+  if (sharedObjectiveTokens.length === 0) return false;
 
-  const riskTopics = semanticDependencyTokens(risk.topic);
-  const sourceTopics = semanticDependencyTokens(superseded.topic);
+  // A risk that repeats the exact old date/time from a superseded temporal
+  // fact is stale regardless of the model-provided risk topic. Requiring the
+  // risk topic to agree would let topic drift preserve an obsolete deadline.
+  const sourceContext = normalizeEvidenceText([
+    superseded.topic,
+    superseded.value,
+    ...superseded.citations.map((citation) => citation.evidence_quote)
+  ].join(" "));
+  const sourceIsTemporal = superseded.factKey?.startsWith("deadline:") ||
+    /\b(?:closing|deadline|due|date|time|term|period|expir(?:y|ation)|delivery|milestone|schedule)\b/.test(sourceContext);
+  const sourceDeadlineKey = superseded.factKey?.startsWith("deadline:") ? superseded.factKey : null;
+  const riskDeadlineKey = deriveDeadlineFactKey(risk.value, risk.citations);
+  if (sourceDeadlineKey && riskDeadlineKey && sourceDeadlineKey !== riskDeadlineKey) return false;
+  if (sourceIsTemporal && sharedObjectiveTokens.some((token) =>
+    /^(?:date|time|timezone|utc-offset):/.test(token)
+  )) return true;
+
+  const riskTopics = semanticDependencyTokens(`${risk.topic} ${risk.value}`);
+  const sourceTopics = semanticDependencyTokens(`${superseded.topic} ${superseded.value}`);
   return [...riskTopics].some((token) => sourceTopics.has(token));
 }
 
@@ -121,6 +146,110 @@ function evaluationCitationIsRelevant(field: EvaluationField, citation: Citation
     case "selection_method":
       return /\b(award|selection|select|selected|rating|lowest|highest)\b/.test(quote);
   }
+}
+
+type SelectionMethodSignature =
+  | "highest_combined_rating"
+  | "lowest_evaluated_price"
+  | "lowest_price"
+  | "best_value"
+  | "highest_score";
+
+const SELECTION_METHOD_SOURCE =
+  "(highest\\s+combined\\s+rating|lowest\\s+evaluated\\s+(?:total\\s+)?price|" +
+  "lowest\\s+(?:total\\s+)?price|best\\s+value|highest\\s+(?:technical\\s+)?score)";
+
+function selectionMethodSignature(value: string): SelectionMethodSignature | null {
+  const normalized = normalizeEvidenceText(value);
+  const signatures = new Set<SelectionMethodSignature>();
+  if (/\bhighest\s+combined\s+rating\b/.test(normalized)) signatures.add("highest_combined_rating");
+  if (/\blowest\s+evaluated\s+(?:total\s+)?price\b/.test(normalized)) {
+    signatures.add("lowest_evaluated_price");
+  } else if (/\blowest\s+(?:total\s+)?price\b/.test(normalized)) {
+    signatures.add("lowest_price");
+  }
+  if (/\bbest\s+value\b/.test(normalized)) signatures.add("best_value");
+  if (/\bhighest\s+(?:technical\s+)?score\b/.test(normalized)) signatures.add("highest_score");
+  return signatures.size === 1 ? [...signatures][0] : null;
+}
+
+function selectionRelationsInCitation(citation: Citation) {
+  const quote = normalizeEvidenceText(citation.evidence_quote);
+  const relations = new Set<SelectionMethodSignature>();
+  const withoutAnotherClause = "(?:(?![.;]|\\b(?:while|whereas|but)\\b).)";
+  const forward = new RegExp(
+    `\\b(?:award|selection|select(?:s|ed|ion)?|recommend(?:s|ed|ation)?)\\b` +
+    `${withoutAnotherClause}{0,180}?\\b${SELECTION_METHOD_SOURCE}\\b`,
+    "g"
+  );
+  const reverse = new RegExp(
+    `\\b${SELECTION_METHOD_SOURCE}\\b${withoutAnotherClause}{0,180}?` +
+    "\\b(?:will\\s+be\\s+(?:selected|recommended|awarded)|for\\s+award|basis\\s+of\\s+selection)\\b",
+    "g"
+  );
+  for (const expression of [forward, reverse]) {
+    for (const match of quote.matchAll(expression)) {
+      const signature = selectionMethodSignature(match[1]);
+      if (signature) relations.add(signature);
+    }
+  }
+  return relations;
+}
+
+type SubmissionMethodSignature =
+  | "email"
+  | "portal"
+  | "electronic"
+  | "fax"
+  | "postal_mail"
+  | "courier"
+  | "hand_delivery";
+
+function submissionMethodSignatures(value: string) {
+  const normalized = normalizeEvidenceText(value);
+  const signatures = new Set<SubmissionMethodSignature>();
+  if (/\be-?mail(?:ed|ing|s)?\b|\b[\w.+-]+@[\w.-]+\.[a-z]{2,}\b/.test(normalized)) {
+    signatures.add("email");
+  }
+  if (/\b(?:portal|canadabuys|buyandsell|epost|e-?procurement)\b/.test(normalized)) {
+    signatures.add("portal");
+  }
+  if (/\belectronic(?:ally)?\b/.test(normalized)) signatures.add("electronic");
+  if (/\bfax(?:ed|ing|es)?\b/.test(normalized)) signatures.add("fax");
+  if (/\b(?:postal mail|registered mail)\b|(?<!e-)\bmail(?:ed|ing)?\b/.test(normalized)) {
+    signatures.add("postal_mail");
+  }
+  if (/\bcourier(?:ed|ing|s)?\b/.test(normalized)) signatures.add("courier");
+  if (/\b(?:hand delivery|hand-deliver(?:ed|y)?|in person)\b/.test(normalized)) {
+    signatures.add("hand_delivery");
+  }
+  if (signatures.has("portal") || signatures.has("email")) signatures.delete("electronic");
+  return signatures;
+}
+
+function submissionRelationClauses(citation: Citation) {
+  return normalizeEvidenceText(citation.evidence_quote)
+    .split(/(?<!a\.m)(?<!p\.m)\.\s+|[;,\n]+|\b(?:while|whereas|but)\b/)
+    .map((clause) => clause.trim())
+    .filter((clause) => {
+      const explicitLabel = /\bsubmission (?:method|portal|instructions?)\b/.test(clause);
+      const tenderSubject = /\b(?:bids?|proposals?|tenders?|offers?|responses?|submissions?)\b/.test(clause);
+      const submitAction = /\b(?:submit(?:ted|ting|s)?|send|sent|upload(?:ed|ing|s)?|deliver(?:ed|ing|s)?|e-?mail(?:ed|ing|s)?|courier(?:ed|ing|s)?)\b/.test(clause);
+      const unrelatedSubject = /\b(?:questions?|enquir(?:y|ies)|clarifications?|invoices?|payments?|billing)\b/.test(clause);
+      return !unrelatedSubject && (explicitLabel || (tenderSubject && submitAction));
+    });
+}
+
+function citationSupportsSubmissionMethod(value: string, citation: Citation) {
+  const expected = submissionMethodSignatures(value);
+  const relationClauses = submissionRelationClauses(citation);
+  if (relationClauses.length === 0) return false;
+  const supported = new Set(relationClauses.flatMap((clause) => [...submissionMethodSignatures(clause)]));
+  if (expected.size > 0) {
+    return supported.size === 1 && expected.size === 1 && supported.has([...expected][0]);
+  }
+  const normalizedValue = normalizeEvidenceText(value);
+  return relationClauses.filter((clause) => clause.includes(normalizedValue)).length === 1;
 }
 
 type WeightField = "technical_weight" | "financial_weight";
@@ -255,6 +384,12 @@ function validatedEvaluationRule(
     ).map((binding) => binding.citation);
     return allCitationsVerified(boundCitations) ? boundCitations : null;
   }
+  if (field === "selection_method") {
+    const expected = selectionMethodSignature(value);
+    if (!expected) return null;
+    const boundCitations = relevant.filter((citation) => selectionRelationsInCitation(citation).has(expected));
+    return allCitationsVerified(boundCitations) ? boundCitations : null;
+  }
   const words = significantWords(value);
   const supportedWords = words.filter((word) => combinedEvidence.includes(word)).length;
   return words.length > 0 && supportedWords / words.length >= 0.6 ? relevant : null;
@@ -290,11 +425,22 @@ const STRONG_FIELD_ANCHORS: ReadonlyArray<readonly [string, SummaryField | "ques
   ["\\b(?:rfp|tender|solicitation)\\s+(?:title|name)\\b", "title"],
   ["\\b(?:solicitation|tender|rfp|reference)\\s*(?:number|no\\.?|id)\\b", "solicitation_number"],
   ["\\b(?:issuer|buyer|contracting authority|department|agency)\\b", "issuer"],
-  ["\\b(?:(?:solicitation|bid|tender)\\s+)?(?:closing date|closing time)|\\b(?:submission deadline|submission date|bid deadline|tender deadline|solicitation deadline)\\b", "closing_date"],
+  ["\\b(?:(?:solicitation|bid|tender)\\s+)?(?:closing date|closing time)|\\b(?:solicitation|bid|tender)\\s+close(?:s|d)?\\b|\\b(?:submission deadline|submission date|bid deadline|tender deadline|solicitation deadline)\\b", "closing_date"],
   ["\\b(?:questions?|enquir(?:y|ies)|clarifications?)\\b.{0,40}\\b(?:close|closes|closing|cut[ -]?off|deadline|due|received|submitted)\\b", "question_deadline"],
   ["\\bdeadline\\s+for\\s+(?:submitting\\s+)?(?:questions?|enquir(?:y|ies)|clarifications?)\\b", "question_deadline"],
-  ["\\bsubmission (?:method|portal|instructions?)\\b", "submission_method"]
+  ["\\b(?:q\\s*&\\s*a|question(?:s)?[- ]and[- ]answer(?:s)?)\\s+(?:close|closing|cut[ -]?off|deadline|due)\\b", "question_deadline"],
+  ["\\bsubmission (?:method|portal|instructions?)\\b", "submission_method"],
+  ["\\b(?:selection|award)(?: method| basis| criterion| criteria)?\\b", "current_selection_method"]
 ];
+
+function nextFieldLabelStart(value: string, after: number) {
+  const suffix = value.slice(after);
+  // A generic label boundary must begin after punctuation. Without that
+  // guard, components inside one structured timestamp ("At: 2:00 ... On:")
+  // would be mistaken for independent fields.
+  const match = /(?:[,;]|\.\s+)\s*[\p{L}][\p{L}\p{N}&/()' -]{0,48}:(?=\s|$)/u.exec(suffix);
+  return match?.index === undefined ? null : after + match.index;
+}
 
 function firstSentenceBoundary(value: string, start: number, maximum: number) {
   const suffix = value.slice(start, maximum);
@@ -308,7 +454,8 @@ function firstSentenceBoundary(value: string, start: number, maximum: number) {
 }
 
 function anchoredFieldSpans(field: SummaryField, quote: string): AnchoredSpan[] {
-  if (!["title", "solicitation_number", "issuer", "closing_date", "submission_method"].includes(field)) {
+  if (!["title", "solicitation_number", "issuer", "closing_date", "submission_method",
+    "current_selection_method"].includes(field)) {
     return SUMMARY_TOPIC_PATTERNS[field].test(quote)
       ? [{ full: quote, value: quote }]
       : [];
@@ -325,19 +472,32 @@ function anchoredFieldSpans(field: SummaryField, quote: string): AnchoredSpan[] 
   return anchors.flatMap((anchor, index): AnchoredSpan[] => {
     if (anchor.field !== field) return [];
     const nextAnchor = anchors.slice(index + 1).find((candidate) => candidate.start >= anchor.end);
-    const maximum = nextAnchor?.start ?? normalized.length;
+    const nextLabel = nextFieldLabelStart(normalized, anchor.end);
+    const maximum = Math.min(nextAnchor?.start ?? normalized.length, nextLabel ?? normalized.length);
     const end = firstSentenceBoundary(normalized, anchor.end, maximum);
+    const sourceSpan = normalized.slice(anchor.start, end).trim();
     const rawValue = normalized.slice(anchor.end, end)
       .replace(/^\s*(?:(?:is|are)\s+)?(?:(?:has|have)\s+been\s+)?(?:revised|changed|extended|updated)?\s*(?:to)?\s*[:#=-]?\s*/i, "")
       .replace(/[\s,.:;=-]+$/g, "")
       .trim();
     if (!rawValue) return [];
-    return [{ full: `${normalized.slice(anchor.start, anchor.end)} ${rawValue}`, value: rawValue }];
+    return [{ full: sourceSpan, value: rawValue }];
   });
 }
 
 function citationSupportsSummaryValue(field: SummaryField, value: string, citation: Citation) {
   if (!citation.verified) return false;
+  if (field === "submission_method") {
+    return citationSupportsSubmissionMethod(value, citation) &&
+      assertionTokensSupportedByCitations(value, [citation]) &&
+      proseAssertionSupportedByCitations(value, [citation]);
+  }
+  if (field === "current_selection_method") {
+    const expected = selectionMethodSignature(value);
+    return Boolean(expected && selectionRelationsInCitation(citation).has(expected) &&
+      assertionTokensSupportedByCitations(value, [citation]) &&
+      proseAssertionSupportedByCitations(value, [citation]));
+  }
   const spans = anchoredFieldSpans(field, citation.evidence_quote);
   return spans.some((span) => {
     if (field === "closing_date") {
@@ -345,7 +505,17 @@ function citationSupportsSummaryValue(field: SummaryField, value: string, citati
       const objective = [...extractAssertionTokens(span.full)];
       const distinct = (prefix: string) => objective.filter((token) => token.startsWith(prefix)).length;
       if (distinct("date:") > 1 || distinct("time:") > 1 ||
-        distinct("timezone:") > 1 || distinct("utc-offset:") > 1) return false;
+        distinct("timezone:") > 1 || distinct("utc-offset:") > 1) {
+        // A legitimate amendment may state both old and new timestamps. Only
+        // the value after an explicit target connector may support the current
+        // closing value; merely appearing elsewhere in the span is unsafe.
+        const target = span.full.match(
+          /\b(?:revised|changed|extended|updated)\b.*\b(?:to|until|through)\b\s*(.+)$/
+        )?.[1];
+        if (!target || !assertionTokensSupportedByCitations(value, [{
+          ...citation, evidence_quote: target
+        }])) return false;
+      }
     }
     const scopedCitation = { ...citation, evidence_quote: span.full };
     if (!assertionTokensSupportedByCitations(value, [scopedCitation]) ||
@@ -357,7 +527,8 @@ function citationSupportsSummaryValue(field: SummaryField, value: string, citati
 }
 
 function topicFieldBindingSupported(topic: string, value: string, citations: Citation[]) {
-  const field = (["title", "solicitation_number", "issuer", "closing_date"] as const)
+  const field = (["title", "solicitation_number", "issuer", "closing_date", "submission_method",
+    "current_selection_method"] as const)
     .find((candidate) => SUMMARY_TOPIC_PATTERNS[candidate].test(topic));
   if (field === "closing_date" &&
     deriveDeadlineFactKey(value, citations) === "deadline:questions" &&
@@ -685,6 +856,11 @@ export function materializeAnalysis(input: MaterializeInput): {
     ...requirementReconciliation.facts,
     ...evaluationReconciliation.facts
   ].filter((fact) => fact.status === "superseded");
+  const activeSourceFacts = [
+    ...claimReconciliation.facts,
+    ...requirementReconciliation.facts,
+    ...evaluationReconciliation.facts
+  ].filter((fact) => fact.status === "active");
   const risks: AnalysisResult["risks"] = riskReconciliation.facts.flatMap((fact) => {
     const draft = validRiskDrafts.find((item) => item.risk.id === fact.id)?.risk;
     if (!draft || draft.effect === "delete" || fact.status !== "active") return [];
@@ -692,7 +868,10 @@ export function materializeAnalysis(input: MaterializeInput): {
       riskSemanticallyDependsOnSupersededFact({
         ...fact,
         value: [draft.finding, draft.impact, draft.recommended_action].join(" ")
-      }, sourceFact)
+      }, sourceFact, sourceFact.factKey
+        ? activeSourceFacts.filter((candidate) => candidate.factKey === sourceFact.factKey)
+          .map((candidate) => candidate.value)
+        : [])
     );
     if (dependsOnSupersededFact) {
       unsupportedItemsRemoved += 1;
@@ -769,9 +948,11 @@ export function materializeAnalysis(input: MaterializeInput): {
   const sourceSupportsSummary = (field: keyof typeof SUMMARY_TOPIC_PATTERNS, value: string | null) => {
     if (value === null) return false;
     const normalized = normalizeEvidenceText(value);
-    if (field === "current_selection_method" && evaluationValues.selection_method &&
+    if (field === "current_selection_method") return Boolean(
+      evaluationValues.selection_method &&
       normalizeEvidenceText(evaluationValues.selection_method) === normalized &&
-      uniqueEvaluationCitations.some((citation) => citationSupportsSummaryValue(field, value, citation))) return true;
+      uniqueEvaluationCitations.some((citation) => citationSupportsSummaryValue(field, value, citation))
+    );
     if (field === "scope" && requirements.some((requirement) =>
       requirement.status === "active" && normalizeEvidenceText(requirement.text) === normalized &&
       requirement.citations.some((citation) => citationSupportsSummaryValue(field, value, citation))

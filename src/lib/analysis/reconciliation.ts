@@ -61,12 +61,20 @@ function canonicalTopicKey(fact: VersionedFact) {
 export function deriveDeadlineFactKey(value: string, citations: Citation[]): string | null {
   const classify = (input: string): "deadline:questions" | "deadline:solicitation" | null => {
     const sourceText = normalizeEvidenceText(input);
-    const questionScope = /\b(?:questions?|enquir(?:y|ies)|clarifications?|request for clarification)\b/.test(sourceText) &&
-      /\b(?:close|closes|closing|cut[ -]?off|deadline|due|received|submitted)\b/.test(sourceText);
+    const questionSubject = "(?:questions?|enquir(?:y|ies)|clarifications?|requests? for clarification|q\\s*&\\s*a|question(?:s)?[- ]and[- ]answer(?:s)?)";
+    const questionScope = new RegExp(
+      `\\b${questionSubject}\\s+(?:(?:must|shall)\\s+be\\s+|(?:is|are)\\s+)?` +
+      "(?:close(?:s|d)?|closing|cut[ -]?off|deadline|due|received|submitted)\\b"
+    ).test(sourceText) || new RegExp(
+      `\\b${questionSubject}\\s+(?:closing (?:date|time)|cut[ -]?off|deadline|due date)\\b`
+    ).test(sourceText) || new RegExp(
+      `\\b(?:closing (?:date|time)|cut[ -]?off|deadline)\\s+(?:for|to)\\s+` +
+      `(?:submitting\\s+)?${questionSubject}\\b`
+    ).test(sourceText);
     if (questionScope) return "deadline:questions";
-    const explicitClosing = /\b(?:closing date|closing time|submission deadline|bid deadline|tender deadline|solicitation deadline)\b/.test(sourceText);
-    const submissionTiming = /\b(?:bid|bids|proposal|proposals|tender|offer|offers|solicitation|submission)\b.{0,80}\b(?:close|closes|closing|deadline|due|received|submitted)\b/.test(sourceText) ||
-      /\b(?:close|closes|closing|deadline|due|received|submitted)\b.{0,80}\b(?:bid|bids|proposal|proposals|tender|offer|offers|solicitation|submission)\b/.test(sourceText);
+    const explicitClosing = /\b(?:closing date|closing time|submission deadline|submission date|bid deadline|tender deadline|solicitation deadline)\b/.test(sourceText);
+    const submissionTiming = /\b(?:solicitation|bid|bids|proposal|proposals|tender|offer|offers|submission)\s+(?:(?:must|shall)\s+be\s+|(?:is|are)\s+)?(?:received|submitted|due|close(?:s|d)?|closing)\b/.test(sourceText) ||
+      /\b(?:deadline|closing (?:date|time)|due date)\s+(?:for|to)\s+(?:submitting\s+)?(?:bids?|proposals?|tenders?|offers?|submissions?)\b/.test(sourceText);
     return explicitClosing || submissionTiming ? "deadline:solicitation" : null;
   };
   // The value and topic are model-controlled. Scope must come from one
@@ -117,6 +125,34 @@ function mutationClauses(fact: VersionedFact) {
   return evidenceClauses(fact).filter((clause) => action.test(clause));
 }
 
+const INVARIANT_LANGUAGE = /\b(?:remain(?:s|ed)?\s+unchanged|unchanged|remain(?:s|ed)?\s+in force|continu(?:e|es|ed)\s+in force|still applies?)\b/;
+
+function mutationActionScopes(fact: VersionedFact) {
+  const action = fact.effect === "delete" ? DELETE_ACTION : REPLACE_ACTION;
+  return mutationClauses(fact).flatMap((clause) => {
+    const fragments = clause
+      // Coordinated prose commonly puts a changed object next to an expressly
+      // unchanged object. Treat those as separate semantic scopes so topic
+      // words cannot be borrowed across the boundary.
+      .split(/\s*,\s*|\b(?:while|whereas|but)\b/)
+      .map((scope) => scope.trim())
+      .filter(Boolean);
+    return fragments.flatMap((scope, index) => {
+      if (!action.test(scope) || INVARIANT_LANGUAGE.test(scope)) return [];
+      const previous = fragments[index - 1];
+      // Official amendment forms sometimes express one replacement as
+      // "Delete: <object>, in its entirety Replace With: ...". Rejoin only
+      // that explicit delete/replace grammar; never rejoin arbitrary adjacent
+      // comma fields.
+      if (fact.effect === "replace" && previous && DELETE_ACTION.test(previous) &&
+        /\bin its entirety\b/.test(scope) && REPLACE_ACTION.test(scope)) {
+        return [`${previous} ${scope}`];
+      }
+      return [scope];
+    });
+  });
+}
+
 function hasMutationLanguage(fact: VersionedFact) {
   return mutationClauses(fact).length > 0;
 }
@@ -133,14 +169,18 @@ function mutationClauseSupportsTopic(target: VersionedFact, directive: Versioned
       "revise", "revised", "update", "updated"].includes(token)
   );
   if (targetTokens.length === 0) return false;
-  return mutationClauses(directive).some((clause) => {
-    const sourceTokens = new Set(topicTokens(clause));
+  const structuralTopic = targetTokens.some((token) => /^(?:[a-z]+\d+|\d+(?:\.\d+)+)$/.test(token));
+  // A model-owned one-word topic such as "insurance" is a category, not a
+  // source-grounded object identity. It cannot authorize destructive
+  // reconciliation unless it carries a structural identifier such as M3.
+  if (targetTokens.length < 2 && !structuralTopic) return false;
+  return mutationActionScopes(directive).some((scope) => {
+    const sourceTokens = new Set(topicTokens(scope));
     const shared = targetTokens.filter((token) => sourceTokens.has(token));
     const explicitStructuralToken = shared.some((token) =>
       /^(?:[a-z]+\d+|\d+(?:\.\d+)+)$/.test(token)
     );
-    // One-token topics such as "insurance" are already specific. Broader
-    // model topics must bind at least two object words unless a structural
+    // Model topics must bind at least two object words unless a structural
     // identifier such as M3 is present in the mutation clause.
     return explicitStructuralToken || shared.length >= Math.min(2, targetTokens.length);
   });
