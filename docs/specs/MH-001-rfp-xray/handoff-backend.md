@@ -667,3 +667,25 @@ cleanup/cost/latency proof, video, submission, or social publication exists.
 The release remains `NOT_READY`.
 
 The receipt-refresh heartbeat is scheduled for Sep 9 and Sep 10 at 12:00 MDT.
+
+## Revision 7 — Deployed Runtime and Scheduled Maintenance Handoff
+
+This section supersedes Revision 6 only for deployment and maintenance state.
+
+- Application commit `936041e8ca1ed626978ee8750ba640ef4975c4d9` is pushed and
+  deployed. Public read-only production smoke passed 4/4.
+- Captured deployment `dpl_EW9Bt6QLnhbMSwhEL5yY3AaJ64GE` has an exact
+  deployment-bound 300-second Workflow runtime receipt. The documentation-only
+  deployment created by this evidence update requires its own receipt.
+- The shared maintenance secret is consistent across Vercel, GitHub, and
+  Railway. Post-rotation GitHub manual dispatch succeeded.
+- The dedicated Railway `maintenance-cron` has no public domain or volume,
+  zero instances between runs, restart policy `NEVER`, and no RFP/provider
+  credentials. Three consecutive scheduled cycles produced bounded durable
+  heartbeats. Independent review: `APPROVE`, P0/P1/P2=0.
+- GitHub did not emit a `schedule` event during the observation window. It is
+  redundant only and is not claimed as the source of scheduled-delivery proof.
+
+Monid, provider-contract, production Turnstile, paid Edmonton/CER, end-to-end
+cleanup/cost/latency, citation click-through, video, submission, and
+publication gates remain open. The release remains `NOT_READY`.

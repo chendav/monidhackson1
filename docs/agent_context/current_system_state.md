@@ -4,23 +4,22 @@ Updated: 2026-09-03
 
 ## Confirmed
 
-- The repository is on `main`, connected to origin, and reviewed implementation
-  commit `dfc8be9` is local. The remaining working-tree changes are release
-  documentation/evidence; the public Vercel deployment is still the older
-  sample until the release commits are pushed.
+- The repository is on `main`, connected to origin, and reviewed application
+  commit `936041e8ca1ed626978ee8750ba640ef4975c4d9` is pushed. The remaining
+  working-tree changes refresh release documentation/evidence only.
 - The application is a single Next.js/TypeScript repository using Vercel for
   Web/API/Workflow compute, Neon for durable state, and the dedicated Railway
   `rfp-xray-private` S3-compatible Bucket for temporary private objects.
-  Railway runs no compute service and the unrelated `ontology-ai-ready` project
-  was not changed.
+  Railway also runs one no-domain maintenance Cron with zero instances between
+  invocations; it runs no RFP analysis worker. The unrelated
+  `ontology-ai-ready` project was not changed.
 - The Vercel project is configured for Node 22 and Fluid Compute. The current
   code requires a deployment-bound 300-second Workflow runtime attestation
   before source or paid work.
 - Runtime-attestation code was independently reviewed: `APPROVE`, P0=0,
-  P1=0, P2=0. There is intentionally no current receipt before a clean committed
-  deployment whose exact ID, URL, project, team, Git SHA, runtime, duration,
-  region, memory, SDK version, internal deadlines, TTL, and payload hash can be
-  bound together.
+  P1=0, P2=0. Captured deployment `dpl_EW9Bt6QLnhbMSwhEL5yY3AaJ64GE` has an
+  exact receipt binding its ID, URL, project, team, Git SHA, runtime, duration,
+  region, memory, SDK version, internal deadlines, TTL, and payload hash.
 - Provider-contract attestation code was independently reviewed: `APPROVE`,
   P0=0, P1=0, P2=0. It performs a credentialed non-paid Monid inspect and a
   non-paid OpenAI control-plane check and binds the result to deployment
@@ -44,10 +43,11 @@ Updated: 2026-09-03
   PUT/read/fence/replay/delete probe using
   `https://rfp-xray.vercel.app` as the browser Origin passed 1/1. These are
   storage component facts, not end-to-end Monid facts.
-- `CRON_SECRET` is rotated consistently across Vercel production/preview and
-  GitHub Actions. `RFP_XRAY_MAINTENANCE_ENABLED` remains deliberately false
-  until the new build is deployed; no production maintenance heartbeat is yet
-  claimed.
+- `CRON_SECRET` is rotated consistently across Vercel production/preview,
+  GitHub Actions, and Railway. GitHub maintenance is enabled and manual
+  dispatch succeeds. Railway completed three consecutive automatic cycles;
+  durable heartbeats remained fresh and independent review returned
+  `APPROVE`, P0/P1/P2=0.
 - The bidworx pricing screenshot at
   `docs/specs/MH-001-rfp-xray/release-evidence/bidworx-pricing-2026-09-03.png`
   is 714876 bytes with SHA-256
@@ -62,7 +62,7 @@ Updated: 2026-09-03
 
 ## Inferred
 
-- Vercel Fluid Compute can host this release candidate without Railway compute,
+- Vercel Fluid Compute can host this release candidate without a Railway analysis worker,
   provided the deployment-bound runtime receipt and real provider benchmarks
   pass.
 - The single-application architecture remains the lowest-coordination option;
@@ -74,10 +74,10 @@ Updated: 2026-09-03
 - Exact account-visible Monid parse/price/retention behavior, signed-URL
   compatibility, actual parse cost, and Edmonton/CER quality remain unverified.
 - Turnstile production configuration is absent.
-- No current Vercel runtime receipt or provider-contract receipt exists.
-- The new build has not been deployed, so its health, Workflow execution,
-  maintenance heartbeat, hard-kill recovery, end-to-end source cleanup timing,
-  and production citation links remain unverified.
+- The evidence-only deployment still needs its own Vercel runtime receipt; no
+  provider-contract receipt exists.
+- Live-provider Workflow execution, hard-kill recovery, end-to-end source
+  cleanup timing, and production citation links remain unverified.
 - No paid Monid work, real Edmonton/CER campaign, 90-second video, contest
   submission, or social publication has occurred.
 

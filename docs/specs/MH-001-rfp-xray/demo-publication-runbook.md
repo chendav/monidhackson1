@@ -40,8 +40,8 @@ duration.
 
 | Evidence | Required artifact | Status |
 |---|---|---|
-| Competitor price | URL, capture date, screenshot | pending |
-| Reviewed product build | Git commit and Vercel deployment URL | pending |
+| Competitor price | URL, capture date, screenshot | captured; refresh on final day |
+| Reviewed product build | Git commit and Vercel deployment URL | captured for application commit `936041e`; refresh after final evidence-only deployment |
 | Monid contract | inspect schema hash, provider/endpoint, cost unit, retention disclosure | pending |
 | Live campaign | sanitized verifier report and wallet reconciliation | pending |
 | Deletion | application-controlled source deletion receipts and timing | pending |

@@ -1,4 +1,4 @@
-# Chief Pre-Deploy Handoff
+# Chief Deployed Fail-Closed Handoff
 
 Updated: 2026-09-03.
 
@@ -10,20 +10,19 @@ and still-missing live-provider/contest evidence.
 
 ## Current release identity
 
-- Reviewed implementation commit: `dfc8be9`.
-- The remaining working-tree changes are documentation/evidence and neither
-  local release commit has been pushed yet.
-- https://rfp-xray.vercel.app still serves the older sample build. It cannot be
-  used as evidence for the current Railway, schema-v8, runtime-attestation,
-  provider-attestation, or maintenance implementation.
+- Reviewed application commit: `936041e8ca1ed626978ee8750ba640ef4975c4d9`.
+- The remaining working-tree changes refresh documentation/evidence only.
+- https://rfp-xray.vercel.app serves the current fail-closed application and
+  passed public read-only smoke 4/4. It is not live-provider ready.
 - Current release verdict: `NOT_READY`.
 
 ## Architecture decisions
 
 - Keep Web, API, and Workflow compute on Vercel, durable state on Neon, and
   short-lived private source objects in the dedicated Railway Bucket.
-- Use no Railway compute unless measured provider timing proves the Vercel
-  Fluid Compute envelope insufficient.
+- Use one short-lived Railway maintenance Cron, but no Railway Web service or
+  RFP analysis worker unless measured provider timing proves the Vercel Fluid
+  Compute envelope insufficient.
 - Require target-bound, expiring storage, runtime, and provider contracts.
 - Retain the closed-world product boundary: no tender search, embedded-link
   traversal, bid writing, data-network workflow, or unsupported bidder-fit
@@ -46,18 +45,22 @@ and still-missing live-provider/contest evidence.
 - Railway bound attestation expires 2026-09-10 04:11:53 MDT; current S3 live
   check passed 1/1 and a real Chromium production-Origin check passed 1/1.
 - Vercel is configured for Node 22 and Fluid Compute.
+- Captured production deployment `dpl_EW9Bt6QLnhbMSwhEL5yY3AaJ64GE` has a
+  current deployment-bound 300-second runtime receipt.
 - Runtime-attestation implementation: independent `APPROVE`, P0/P1/P2=0.
 - Provider-contract attestation implementation: independent `APPROVE`,
   P0/P1/P2=0.
 - Security re-review: `APPROVE`, P0=0/P1=0; both P2 recommendations are now
   implemented and tested.
-- `CRON_SECRET` was rotated consistently in Vercel production/preview and
-  GitHub Actions. GitHub maintenance deliberately remains disabled until the
-  new deployment exists.
+- `CRON_SECRET` was rotated consistently in Vercel production/preview, GitHub
+  Actions, and Railway. Railway Cron passed three automatic cycles and an
+  independent review with P0/P1/P2=0; GitHub manual dispatch works but its
+  scheduled event remains unobserved redundancy.
 
 ## Explicitly unverified
 
-- No current deployment-bound runtime receipt exists.
+- The evidence-only deployment created by this update still needs its own
+  deployment-bound runtime receipt.
 - No provider-contract receipt or provider call exists because the Monid key
   and exact provider configuration are absent.
 - Production Turnstile is absent.
@@ -75,11 +78,10 @@ that Starter is £190/month and typical usage is one tender.
 
 ## Next gates
 
-1. Commit the reviewed documentation/evidence and push both local release
-   commits; wait for the exact production build.
+1. Commit this evidence refresh and wait for the exact production build.
 2. Verify the resulting deployment is bound to the final pushed Git SHA.
 3. Create its deployment-bound runtime receipt and verify fail-closed health.
-4. Enable maintenance and verify one bounded authenticated heartbeat.
+4. Continue monitoring the independently approved Railway maintenance Cron.
 5. Obtain Monid and Turnstile configuration; create the provider receipt before
    any source or paid call.
 6. Run the budget-capped Edmonton/CER campaign and final independent deployed

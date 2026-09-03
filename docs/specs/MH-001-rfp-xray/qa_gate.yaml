@@ -37,7 +37,7 @@ regression_checks:
 review:
   required: true
   release_verdict: not_ready
-  reviewed_implementation_commit: dfc8be9
+  reviewed_implementation_commit: 936041e8ca1ed626978ee8750ba640ef4975c4d9
   reviewed_release_candidate:
     pnpm_check: 39_files_passed_3_skipped_391_tests_passed_7_skipped
     build: pass_10_steps_4_workflows_13_pages
@@ -46,9 +46,10 @@ review:
     production_audit: no_known_vulnerabilities
     full_audit: 0_high_0_critical_1_low_3_moderate_development_chain
     focused_runtime_provider_attestation_tests: 33_passed_vercel_cli_59_11_2
-  runtime_attestation: approve_p0_0_p1_0_p2_0_no_receipt_before_clean_deploy
+  runtime_attestation: approve_p0_0_p1_0_p2_0_captured_deployment_receipt_current_evidence_deploy_refresh_required
   provider_attestation: approve_p0_0_p1_0_p2_0_no_receipt_or_call_without_monid_config
   security_rereview: approve_p0_0_p1_0_both_p2_implemented_and_tested
+  maintenance_scheduler_review: approve_p0_0_p1_0_p2_0
   paid_live_verifier_component: pass-p0-0-p1-0
 max_revision_rounds: 3
 external_release_evidence:
@@ -57,13 +58,13 @@ external_release_evidence:
     landing_http_status: 200
     openapi_http_status: 200
     edmonton_sample_http_status: 200
-    observed_at: 2026-09-03T03:16:28-06:00
+    observed_at: 2026-09-03T07:17:03-06:00
     result: passed_for_sample_distribution_only
     remote_read_only_playwright: 4_passed
     live_mutations_exercised: false
     citation_click_through_exercised: false
-    build_currency: predates_reviewed_implementation_commit
-    committed_redeploy_required: true
+    build_currency: matches_reviewed_application_commit
+    evidence_only_redeploy_required: true
   deployed_health:
     expected_http_status_until_live_gates_close: 503
     observed_http_status: 503
@@ -82,8 +83,8 @@ external_release_evidence:
     evidence: release-evidence/neon-concurrency-probe.md
     result: passed
   railway_private_storage:
-    role: private_s3_storage_only
-    compute_service_created: false
+    role: private_s3_storage
+    analysis_compute_service_created: false
     signed_put_and_replay_rejection: passed
     cas_fence_and_post_fence_replay_rejection: passed
     conditional_delete_and_absence_confirmation: passed
@@ -94,6 +95,16 @@ external_release_evidence:
     chromium_production_origin_suite: 1_passed
     evidence: release-evidence/railway-storage-probe.md
     result: passed_contract_probe_only
+  railway_maintenance_cron:
+    role: short_lived_trigger_only_no_rfp_analysis
+    public_domains: 0
+    between_run_instances: 0
+    restart_policy: NEVER
+    scheduled_cycles_observed: 3
+    max_observed_completion_gap_seconds: 319
+    independent_review: approve_p0_0_p1_0_p2_0
+    evidence: release-evidence/railway-maintenance-cron.md
+    result: passed
   vercel_fluid_runtime_policy:
     node: 22.x
     fluid_compute: enabled
@@ -103,7 +114,8 @@ external_release_evidence:
     result_commit_deadline_seconds: 285
     monid_parse_concurrency: 4
     attestation_implementation_review: approve_p0_0_p1_0_p2_0
-    current_attestation_receipt: absent_until_clean_committed_deploy
+    captured_attestation_receipt: dpl_EW9Bt6QLnhbMSwhEL5yY3AaJ64GE
+    evidence_only_deploy_receipt_refresh_required: true
     real_benchmark: pending
     result: implemented_not_live_benchmarked
   paid_live_verifier:
@@ -119,13 +131,15 @@ external_release_evidence:
       - Production Turnstile is absent.
       - No provider-contract receipt or provider call exists.
       - The 300-second Fluid Compute design has not passed the required real Monid benchmark.
-      - Reviewed implementation commit dfc8be9 is local and the public deployment predates it.
       - Interactive in-app browser automation is unavailable; read-only smoke does not satisfy the deployed mutation-flow and citation-review gate.
   maintenance:
     cron_secret_rotated_consistently: true
-    github_enablement_variable: false_until_new_deployment
-    successful_production_heartbeat: not_claimed
+    github_enablement_variable: true
+    github_manual_dispatch: success
+    github_schedule_event_observed: false
+    railway_scheduled_delivery: three_cycles_passed
+    successful_production_heartbeat: true
   receipt_refresh_heartbeat: Sep_9_and_Sep_10_at_12_00_MDT
   release_verdict: not_ready
-  railway: adopted_for_private_s3_storage_only_no_compute
+  railway: private_s3_plus_short_lived_maintenance_cron_no_analysis_worker
   rule: Never convert sample-route availability, component probes, or local Reviewer PASS into a live-provider or contest-completion claim.

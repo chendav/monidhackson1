@@ -8,10 +8,11 @@ text, provider payloads, or wallet secrets.
 
 `NOT_READY_FOR_LIVE_PROVIDER_OR_CONTEST_COMPLETION`
 
-Reviewed implementation commit `dfc8be9` is local. The release commits have not
-yet been pushed, so https://rfp-xray.vercel.app still serves the older sample build.
-The public sample cannot evidence the current schema-v8, Railway,
-runtime-attestation, provider-attestation, or maintenance paths.
+Application commit `936041e8ca1ed626978ee8750ba640ef4975c4d9` is pushed and
+was deployed at evidence capture. The public alias serves the current
+fail-closed application. This evidence update will itself create a later
+documentation-only deployment, which must receive a new deployment-bound
+runtime receipt before source or paid work.
 
 ## Evidence classes
 
@@ -26,7 +27,8 @@ runtime-attestation, provider-attestation, or maintenance paths.
    and tested.
 3. **Live component probes** — Neon schema/concurrency and Railway private
    storage passed their stated scopes. These are not end-to-end Monid evidence.
-4. **Public sample** — an older static/sample product surface only.
+4. **Public sample** — current static/sample product surface only; it is not a
+   live-provider execution.
 5. **Live-provider release** — not ready and not executed.
 
 ## Current live component facts
@@ -34,19 +36,25 @@ runtime-attestation, provider-attestation, or maintenance paths.
 - Neon: 9 public tables, 8 migration rows, schema v8 marker; live concurrency
   and real CAS-loss suite passed 2/2.
 - Railway: bound attestation expires 2026-09-10 04:11:53 MDT; S3 live 1/1 and
-  real Chromium production-Origin flow 1/1.
-- Vercel settings: Node 22 and Fluid Compute. No deployment-bound runtime
-  receipt exists until the clean committed deployment is available.
+  real Chromium production-Origin flow 1/1. Its separate short-lived
+  maintenance Cron completed three consecutive five-minute cycles; Railway
+  runs no RFP analysis worker and has zero instances between cron invocations.
+- Vercel settings: Node 22 and Fluid Compute. Deployment
+  `dpl_EW9Bt6QLnhbMSwhEL5yY3AaJ64GE` had a current deployment-bound runtime
+  receipt at capture; the next evidence-only deployment requires a new one.
 - Provider contract: implementation approved, but no receipt or call exists
   because the Monid key/configuration is absent.
-- Maintenance: shared secret rotated consistently; GitHub variable remains
-  intentionally false until the new deployment.
+- Maintenance: shared secret rotated consistently across Vercel, GitHub, and
+  Railway. Railway scheduled delivery is proven for three cycles. GitHub
+  manual dispatch works, but its `schedule` event was not observed and is
+  treated only as redundancy.
 
 ## Durable artifacts
 
 - [Deployment summary](deployment-summary.md)
 - [Neon schema/concurrency probe](neon-concurrency-probe.md)
 - [Railway private-storage probe](railway-storage-probe.md)
+- [Railway maintenance Cron probe](railway-maintenance-cron.md)
 - [bidworx pricing evidence](bidworx-pricing-2026-09-03.md)
 - `bidworx-pricing-2026-09-03.png` — 714876 bytes; SHA-256
   `5a4d44ba608131cabb7770a28321d85d5552ba52fb4f86fb0b3520340b4f9b34`.

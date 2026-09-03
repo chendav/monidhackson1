@@ -68,10 +68,13 @@ described in the health and audit responses rather than hidden.
 ## Deployment
 
 The target runtime is Vercel with Vercel Workflow, a dedicated private Railway
-S3-compatible Bucket, and Neon Postgres. Railway hosts no compute service for
-the contest build. Vercel Private Blob remains a local/test compatibility
-adapter, but cannot satisfy production readiness until it has an equivalent
-target-bound, expiring safety attestation.
+S3-compatible Bucket, and Neon Postgres. Railway also runs one short-lived,
+five-minute Cron trigger for the authenticated Vercel maintenance endpoint;
+it has no public domain, no always-on replica, and does not execute RFP
+analysis. GitHub Actions retains an offset maintenance schedule as a redundant
+trigger. Vercel Private Blob remains a local/test compatibility adapter, but
+cannot satisfy production readiness until it has an equivalent target-bound,
+expiring safety attestation.
 Configure the variables documented in `.env.example`, apply the checked-in
 Drizzle migrations, run every quality gate, then deploy from `main`.
 

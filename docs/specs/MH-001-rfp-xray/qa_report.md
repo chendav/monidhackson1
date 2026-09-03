@@ -1,8 +1,10 @@
-review_scope: pre_deploy_release_candidate
+review_scope: deployed_fail_closed_release_candidate
 recorded_at: 2026-09-03
-reviewed_implementation_commit: dfc8be9
-working_tree_state: documentation_only_before_release_evidence_commit
-public_deployment_state: older_sample_build
+reviewed_implementation_commit: 936041e8ca1ed626978ee8750ba640ef4975c4d9
+working_tree_state: documentation_only_evidence_refresh
+captured_public_deployment_id: dpl_EW9Bt6QLnhbMSwhEL5yY3AaJ64GE
+captured_public_deployment_url: https://rfp-xray-oyfo3261w-chendavs-projects.vercel.app
+public_deployment_state: current_fail_closed_build
 release_verdict: NOT_READY
 
 local_verification:
@@ -45,7 +47,7 @@ independent_reviews:
     p0: 0
     p1: 0
     p2: 0
-    limitation: implementation review only; no current receipt until a clean committed deployment exists
+    limitation: current receipt is exact-deployment-bound and must be renewed after the evidence-only deployment
   provider_contract_attestation:
     verdict: APPROVE
     p0: 0
@@ -57,6 +59,12 @@ independent_reviews:
     p0: 0
     p1: 0
     p2_follow_up: both recommendations implemented and tested after review
+  maintenance_scheduler:
+    verdict: APPROVE
+    p0: 0
+    p1: 0
+    p2: 0
+    evidence: three Railway scheduled cycles independently matched to three Vercel production HTTP 200 invocations; instances exited and health stayed fresh
 
 live_component_evidence:
   neon:
@@ -74,15 +82,30 @@ live_component_evidence:
     s3_live_tests: 1_passed
     chromium_production_origin_tests: 1_passed
     browser_origin: https://rfp-xray.vercel.app
-    railway_compute_service: none
+    railway_analysis_compute_service: none
     evidence: release-evidence/railway-storage-probe.md
+  railway_maintenance_cron:
+    result: pass_three_consecutive_cycles
+    public_domains: 0
+    between_run_instances: 0
+    restart_policy: NEVER
+    image_digest: sha256:58adaa4e8dca9c988bae2aba4ab3434a0bb2da16bbe3f92dec39ec7785166777
+    completed_at_utc:
+      - 2026-09-03T13:19:01.814Z
+      - 2026-09-03T13:24:20.469Z
+      - 2026-09-03T13:29:19.452Z
+    duration_ms: [112, 75, 60]
+    evidence: release-evidence/railway-maintenance-cron.md
 
 release_configuration:
   vercel_node: 22.x
   vercel_fluid_compute: enabled
-  cron_secret_rotated_in_vercel_production_preview_and_github: true
-  github_maintenance_enabled: false
-  github_maintenance_enablement_reason: wait_for_new_committed_deployment
+  cron_secret_rotated_in_vercel_production_preview_github_and_railway: true
+  github_maintenance_enabled: true
+  github_manual_dispatch_after_rotation: success_run_33760198137
+  github_schedule_event_observed: false
+  railway_cron_scheduled_delivery_observed: true_three_cycles
+  captured_runtime_receipt: dpl_EW9Bt6QLnhbMSwhEL5yY3AaJ64GE
   receipt_refresh_heartbeat: Sep_9_and_Sep_10_at_12_00_MDT
 
 price_evidence:
@@ -96,9 +119,8 @@ price_evidence:
     - Typical usage is shown as one tender.
 
 open_release_gates:
-  - Commit the reviewed documentation/evidence and push both local release commits; the public deployment is older.
-  - Inspect the resulting production deployment and store a deployment-bound runtime receipt.
-  - Enable GitHub maintenance only after the new deployment, then verify a bounded production heartbeat.
+  - Commit this documentation/evidence refresh, inspect its production deployment, and store that exact deployment's runtime receipt.
+  - Continue monitoring Railway Cron; do not count GitHub workflow_dispatch as scheduled-delivery evidence.
   - Obtain the Monid key and exact configuration and store a current provider-contract receipt before any source or paid call.
   - Configure production Turnstile and verify the deployed guest mutation lifecycle.
   - Run the budget-capped Edmonton ten-run benchmark and complete CER package campaign.
@@ -108,11 +130,11 @@ open_release_gates:
 
 limitations:
   - No paid Monid or other live provider call has occurred.
-  - No runtime or provider-contract receipt currently exists.
+  - A runtime receipt exists only for the captured deployment; no provider-contract receipt exists.
   - Chrome and in-app interactive browser control are unavailable.
   - Turnstile is absent.
   - The real Edmonton/CER campaign, video, submission, and social publication have not occurred.
   - Component checks do not prove end-to-end production readiness.
-  - The public sample must not be represented as the current release candidate.
+  - The public sample is current but must not be represented as a live-provider execution.
 
-next_gate: Push and deploy the reviewed release commits, then create the exact deployment-bound runtime receipt while all live-provider gates remain fail-closed.
+next_gate: Deploy this evidence-only commit and renew the exact runtime receipt, then obtain Monid and Turnstile configuration while all live-provider gates remain fail-closed.

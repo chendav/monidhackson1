@@ -2,11 +2,11 @@
 
 - Task ID: MH-001
 - Title: RFP X-Ray contest MVP
-- Status: Pre-deploy release candidate; live-provider and contest gates remain open
+- Status: Deployed fail-closed release candidate; live-provider and contest gates remain open
 - Chief owner: chief
 - Updated: 2026-09-03
-- Reviewed implementation commit: `dfc8be9`; documentation/evidence changes are
-  being finalized for the same release push.
+- Reviewed application commit: `936041e8ca1ed626978ee8750ba640ef4975c4d9`;
+  current changes refresh deployment and scheduler evidence only.
 
 ## Outcome
 
@@ -18,8 +18,9 @@ reconciliation, grounded Q&A, page citations, cleanup proof, and per-run cost.
 ## Scope boundary
 
 In scope are the Next.js/TypeScript Web and API, Vercel Workflow, Neon state,
-Railway private object storage, Monid parsing, OpenAI structured extraction,
-Edmonton and CER evidence, cleanup/cost controls, and independent review.
+Railway private object storage and short-lived maintenance Cron, Monid parsing,
+OpenAI structured extraction, Edmonton and CER evidence, cleanup/cost controls,
+and independent review.
 Tender search, bid writing, team collaboration, CRM, SSO, billing, bidder-fit
 predictions, and long-term tender storage remain out of scope.
 
@@ -42,8 +43,9 @@ predictions, and long-term tender storage remain out of scope.
   origin `https://rfp-xray.vercel.app` passed 1/1.
 - Vercel project configuration is Node 22 with Fluid Compute enabled. The
   deployment-bound 300-second Workflow runtime-attestation implementation was
-  independently approved with P0/P1/P2=0. No current runtime receipt can exist
-  until the clean committed deployment is available.
+  independently approved with P0/P1/P2=0. Captured deployment
+  `dpl_EW9Bt6QLnhbMSwhEL5yY3AaJ64GE` has a current receipt; the evidence-only
+  deployment created by this update must receive its own receipt.
 - Provider-contract attestation was independently approved with P0/P1/P2=0.
   No provider receipt or provider call exists because the Monid key and exact
   provider configuration are absent.
@@ -51,19 +53,20 @@ predictions, and long-term tender storage remain out of scope.
   tests pass after dependency overrides.
 - The final security re-review returned `APPROVE`, P0=0 and P1=0; both P2
   recommendations were implemented and tested.
-- `CRON_SECRET` was rotated consistently in Vercel production/preview and
-  GitHub Actions. The GitHub maintenance variable deliberately remains `false`
-  until the new deployment is live.
+- `CRON_SECRET` was rotated consistently in Vercel production/preview, GitHub
+  Actions, and Railway. Railway Cron completed three consecutive scheduled
+  cycles with zero between-run instances; independent review returned
+  `APPROVE`, P0/P1/P2=0. GitHub manual dispatch works, but its schedule event
+  remains unobserved and is treated as redundancy.
 - A sanitized bidworx price capture records Starter at £190/month with typical
   usage of one tender. It is price evidence only.
 
 ## Evidence boundary
 
-The public deployment at https://rfp-xray.vercel.app still serves the older
-sample build because reviewed implementation commit `dfc8be9` has not yet been
-pushed. Its sample endpoints must not be
-used as evidence for the new storage, runtime, provider-attestation, or
-maintenance path.
+The public deployment at https://rfp-xray.vercel.app serves the reviewed
+fail-closed application and passed remote smoke 4/4. It must not be described
+as live-provider ready: health remains 503 because Monid, Turnstile, and the
+provider-contract receipt are absent.
 
 No paid Monid call, real Edmonton/CER campaign, provider-retention proof,
 end-to-end production cleanup receipt, production citation click-through,
@@ -73,10 +76,9 @@ release verdict therefore remains `NOT_READY`.
 
 ## Immediate next action
 
-Commit the reviewed documentation/evidence and push the two local release
-commits, allow the new Vercel production deployment, then create the
-deployment-bound runtime receipt and recheck fail-closed health. Enable GitHub
-maintenance only after that deployment and one successful bounded heartbeat.
+Commit this evidence refresh, allow its Vercel production deployment, then
+create the new deployment-bound runtime receipt and recheck fail-closed health.
+Continue monitoring the independently approved Railway maintenance Cron.
 Obtain the Monid and Turnstile credentials before any provider call or public
 mutation. Run the budget-capped Edmonton/CER campaign and independent deployed
 citation review only after every preflight gate passes.

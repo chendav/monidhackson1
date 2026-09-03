@@ -4,18 +4,20 @@ Updated: 2026-09-03.
 
 ## Release identity and verdict
 
-- Reviewed implementation commit: `dfc8be9`.
-- Working tree at capture: documentation/evidence only, before its release
-  commit and push.
+- Reviewed application commit: `936041e8ca1ed626978ee8750ba640ef4975c4d9`.
+- Working tree at capture: documentation/evidence update only; application
+  source is unchanged.
 - Public URL: https://rfp-xray.vercel.app.
-- Public build: older sample that predates current release hardening.
+- Captured production deployment: `dpl_EW9Bt6QLnhbMSwhEL5yY3AaJ64GE`
+  (`https://rfp-xray-oyfo3261w-chendavs-projects.vercel.app`).
 - Verdict: `NOT_READY`.
 
-The older landing, OpenAPI, Edmonton sample, and fail-closed health observations
-remain reachability evidence only. They do not prove that the current build is
-deployed. Chrome and in-app interactive browser control are unavailable.
+The landing, OpenAPI, Edmonton sample, runtime receipt, maintenance heartbeat,
+and fail-closed health were rechecked against the captured deployment. They
+remain component/reachability evidence only. Chrome and in-app interactive
+browser control are unavailable.
 
-## Current pre-deploy checks
+## Current checks
 
 | Check | Result |
 |---|---|
@@ -31,9 +33,10 @@ deployed. Chrome and in-app interactive browser control are unavailable.
 
 | Scope | Verdict | Boundary |
 |---|---|---|
-| Deployment-bound runtime attestation | `APPROVE`, P0/P1/P2=0 | No current receipt until a clean committed deployment exists. |
+| Deployment-bound runtime attestation | `APPROVE`, P0/P1/P2=0 | Current for captured deployment; refresh after this evidence-only commit deploys. |
 | Deployment-bound provider contract | `APPROVE`, P0/P1/P2=0 | No receipt/call because Monid key and exact provider configuration are absent. |
 | Security re-review | `APPROVE`, P0=0/P1=0 | Both P2 recommendations were implemented and tested afterward. |
+| Maintenance scheduler | `APPROVE`, P0/P1/P2=0 | Railway proved three scheduled cycles; GitHub schedule remains unobserved redundancy. |
 
 ## Infrastructure component evidence
 
@@ -49,21 +52,24 @@ version 8, and marker `rfp-xray-schema-v8`. The live concurrency suite passed
 The target-bound storage attestation expires 2026-09-10 04:11:53 MDT. The
 current S3 live test passed 1/1 and a real Chromium
 PUT/read/fence/replay/delete probe with
-`https://rfp-xray.vercel.app` as the Origin passed 1/1. Railway remains
-storage-only; no Railway compute service exists. See
-[railway-storage-probe.md](railway-storage-probe.md).
+`https://rfp-xray.vercel.app` as the Origin passed 1/1. Railway also hosts one
+short-lived maintenance Cron trigger with no public domain and zero instances
+between runs; it does not process RFPs. See
+[railway-storage-probe.md](railway-storage-probe.md) and
+[railway-maintenance-cron.md](railway-maintenance-cron.md).
 
 ### Vercel runtime and maintenance
 
-The Vercel project is configured for Node 22 and Fluid Compute. Current code
-requires a deployment-bound attestation of the exact 300-second Workflow route
-capability and associated deployment facts. The implementation is approved,
-but a current receipt cannot be issued before the new committed deployment.
+The Vercel project is configured for Node 22 and Fluid Compute. Captured
+deployment `dpl_EW9Bt6QLnhbMSwhEL5yY3AaJ64GE` had a current attestation of the
+300-second Workflow route capability. The receipt is deployment-bound and must
+be refreshed after this documentation-only release.
 
-`CRON_SECRET` was rotated consistently in Vercel production/preview and GitHub
-Actions. The GitHub maintenance variable remains intentionally false until the
-new deployment. No successful production maintenance heartbeat is currently
-claimed.
+`CRON_SECRET` was rotated consistently in Vercel production/preview, GitHub
+Actions, and Railway. GitHub manual run `33760198137` succeeded after rotation.
+Railway Cron then produced three consecutive bounded production heartbeats at
+13:19, 13:24, and 13:29 UTC. No GitHub `event=schedule` run was observed, so it
+is retained as redundancy rather than claimed as proven scheduled delivery.
 
 ## Price evidence
 

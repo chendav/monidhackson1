@@ -4,9 +4,12 @@
 
 Observed: 2026-09-03 04:11 MDT (`UTC-06:00`).
 
-Scope: the dedicated `rfp-xray` Railway project and its private S3-compatible
-Bucket. No Railway compute service was created, and the unrelated
-`ontology-ai-ready` project was not modified.
+Scope at capture: the dedicated `rfp-xray` Railway project and its private
+S3-compatible Bucket. No compute service existed during this storage probe,
+and the unrelated `ontology-ai-ready` project was not modified. A later,
+separately reviewed short-lived maintenance Cron is documented in
+[railway-maintenance-cron.md](railway-maintenance-cron.md); it does not change
+the storage attestation scope.
 
 The checked-in probe generated a target-bound safety attestation after checking
 the endpoint, region, bucket, URL style, exact CORS policy, absent versioning
@@ -39,8 +42,8 @@ production readiness closed.
 
 The browser probe exercised the Railway CORS/object contract from a local test
 page whose browser Origin was explicitly set to the production site origin. It
-does not prove that the older public deployment contains or invokes the current
-upload UI or server code.
+does not by itself prove that the deployed upload UI or server pipeline invokes
+the same contract.
 
 ## Expiry and refresh
 
