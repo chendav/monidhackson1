@@ -12,7 +12,7 @@ exclude_paths: []
 edits_allowed: true
 acceptance: [AC-1, AC-4, AC-7]
 handoff: handoff-chief.md
-status: active
+status: completed
 ```
 
 ## T2 Backend and AI pipeline
@@ -27,7 +27,7 @@ exclude_paths: [src/app/page.tsx, src/components/**, src/app/globals.css, tests/
 edits_allowed: true
 acceptance: [AC-1, AC-2, AC-3, AC-4, AC-5, AC-6, AC-7, AC-9]
 handoff: handoff-backend.md
-status: pending
+status: active
 ```
 
 ## T3 Frontend working surface
@@ -42,7 +42,7 @@ exclude_paths: [src/app/api/**, src/lib/**, src/db/**, drizzle/**]
 edits_allowed: true
 acceptance: [AC-8, AC-10]
 handoff: handoff-frontend.md
-status: pending
+status: active
 ```
 
 ## QA1 Independent review

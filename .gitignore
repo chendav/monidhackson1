@@ -1,0 +1,36 @@
+# dependencies
+/node_modules/
+/.pnp
+.pnp.*
+
+# Next.js
+/.next/
+/out/
+
+# test and coverage output
+/coverage/
+/playwright-report/
+/test-results/
+
+# local runtime data
+/.data/
+/tmp/
+
+# secrets
+.env
+.env.*
+!.env.example
+
+# Vercel
+.vercel
+
+# OS and editors
+.DS_Store
+Thumbs.db
+*.swp
+*.tsbuildinfo
+
+# logs
+npm-debug.log*
+pnpm-debug.log*
+/.swc
