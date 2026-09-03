@@ -1,0 +1,46 @@
+{
+  "verified_at": "2026-09-02",
+  "hash_algorithm": "sha256",
+  "documents": [
+    {
+      "id": "edmonton-100022184-a",
+      "role": "base",
+      "url": "https://canadabuys.canada.ca/sites/default/files/webform/tender_notice/6123/100022184a---rfp.pdf",
+      "sha256": "2a769c87c80d5e958b0c99d0bd0107b34cfbeddb9bb0c15c2f2b3dc609adc9c6",
+      "bytes": 1726637,
+      "physical_pages": 55
+    },
+    {
+      "id": "cer-84084-26-0009-a-base",
+      "role": "base",
+      "url": "https://canadabuys.canada.ca/sites/default/files/webform/tender_notice/102701/84084-26-0009-a-rfp-macroeconomic-projection-services.pdf",
+      "sha256": "894b876fdfdacb2aec0571f4cf2f29be08ebc2380c6e3251bb48885f69d31bfb",
+      "bytes": 1236581,
+      "physical_pages": 58
+    },
+    {
+      "id": "cer-84084-26-0009-a-amendment-001",
+      "role": "amendment",
+      "url": "https://canadabuys.canada.ca/sites/default/files/webform/tender_notice/102701/84084-26-0009-a-rfp-amendment-01-macroeconomic-projections-services.pdf",
+      "sha256": "ec135a6ddf7a22120530bef89612cfedc7f007c64cf313f2b8de46d143027cfc",
+      "bytes": 256840,
+      "physical_pages": 6
+    },
+    {
+      "id": "cer-84084-26-0009-a-amendment-002",
+      "role": "amendment",
+      "url": "https://canadabuys.canada.ca/sites/default/files/webform/tender_notice/102701/84084-26-0009-a-rfp-amendment-02-macroeconomic-projections-services_0_0.pdf",
+      "sha256": "300a06081b195ea28f858feb20bd6780f596ceefc638495c4fdd63a5edea352c",
+      "bytes": 166796,
+      "physical_pages": 2
+    },
+    {
+      "id": "cer-84084-26-0009-a-amendment-003",
+      "role": "amendment",
+      "url": "https://canadabuys.canada.ca/sites/default/files/webform/tender_notice/102701/84084-26-0009-a-rfp-amendment-03-macroeconomic-projections.pdf",
+      "sha256": "98f6299df44edaab9e8ec834b476d88358d5af75923646b5fb190e709be1204f",
+      "bytes": 308561,
+      "physical_pages": 9
+    }
+  ]
+}
