@@ -35,9 +35,14 @@ the parser comparison.
 | Form-page preservation | 10 | Pages 48–55 are not dropped as post-body noise |
 | Quote recoverability | 10 | Golden evidence quotes can be uniquely recovered on their physical page |
 
-Score is the weighted percentage of deterministic assertions passed. OCR is
-scored in a separate scanned-fixture test and does not improve the native-PDF
-score merely by being enabled.
+Score is the weighted percentage of deterministic assertions passed. The local
+page-index regression keeps an image-only page addressable with empty text and
+separately verifies dedicated encrypted-PDF and corrupt-PDF failures. A second
+materialization regression proves that Monid/OCR-only text which cannot be
+matched to the native physical-page index is withheld, leaves the evaluation
+field null, and keeps the run incomplete. OCR quality and
+physical-page alignment still require the credentialed Monid candidate and do
+not improve the native-PDF score merely by being enabled.
 
 ## Operational measurements
 
@@ -65,8 +70,19 @@ Record without source text:
   cost settlement, or reliable alignment is a failed candidate rather than a
   partial success.
 
-## Evidence status
+## Evidence status — 2026-09-03
 
-The local deterministic suite can run without credentials. The Monid column
-remains `not_run` until a credentialed `discover → inspect → run` probe is
-available. No winner is declared before both columns use the same source hash.
+The credentialed Monid candidate ran against the official Edmonton bytes. It
+retained the target mandatory, award, security, annex, and table semantics in a
+144,275-byte Markdown artifact, but emitted no trustworthy physical-page
+signals. A separate signed-URL run returned byte-identical Markdown and proved
+that Context.dev can read a five-minute Railway URL. Each successful parse cost
+USD 0.0009; the signed-URL path captured the artifact and confirmed source
+deletion in 8.140 seconds.
+
+Decision: use Monid as the normalization candidate required by the competition,
+then bind every claim back to the independent PDF.js physical-page index. Monid
+does not win the citation-truth role. OCR-only text that cannot be bound to a
+physical source page remains `needs_review`. See
+`release-evidence/monid-contract-spike-2026-09-03.md` for sanitized receipts and
+the seven-day provider-retention limitation.

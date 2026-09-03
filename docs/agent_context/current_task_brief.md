@@ -5,8 +5,8 @@
 - Status: Deployed fail-closed release candidate; live-provider and contest gates remain open
 - Chief owner: chief
 - Updated: 2026-09-03
-- Reviewed application commit: `936041e8ca1ed626978ee8750ba640ef4975c4d9`;
-  current changes refresh deployment and scheduler evidence only.
+- Reviewed application commit: `f1b09e3d0b7f3f6570e61b1a0faeb72b2b85d455`;
+  pushed to `origin/main`, deployed, and independently re-reviewed.
 
 ## Outcome
 
@@ -24,40 +24,53 @@ and independent review.
 Tender search, bid writing, team collaboration, CRM, SSO, billing, bidder-fit
 predictions, and long-term tender storage remain out of scope.
 
-## Current pre-deploy evidence
+## Current release evidence
 
-- `pnpm check`: PASS, 39 test files passed and 3 skipped; 391 tests passed and
-  7 explicitly skipped.
-- Production build: PASS, emitting 10 Workflow steps, 4 workflows, and 13
+- `pnpm check`: PASS, 44 test files passed and 4 skipped; 421 tests passed and
+  10 explicitly skipped. The live-only skips include the deliberate paid
+  Monid/Railway contract probe, which passed 1/1 when explicitly enabled, and
+  the new Neon cleanup-retry and analysis-dispatch CAS race probes, which now
+  pass 4/4 against production schema v9.
+- Production build: PASS, emitting 8 Workflow steps, 4 workflows, and 13
   application pages.
 - Local Playwright: 14 passed and 2 explicit live-environment skips.
 - Official fixture audit: 3/3 passed.
 - Production dependency audit: no known vulnerabilities. The full audit has no
   high/critical findings; four lower-severity development-chain findings remain
   (1 low, 3 moderate) after scoped overrides.
-- Neon: 9 public tables, 8 migration-ledger rows, schema marker
-  `rfp-xray-schema-v8`; live concurrency/CAS probe passed 2/2, including a real
-  compare-and-swap loss.
+- Neon: 9 public tables, 9 migration-ledger rows, schema marker
+  `rfp-xray-schema-v9`; live concurrency/CAS probe passed 4/4, including real
+  16-way cleanup-retry and analysis-dispatch claim races.
 - Railway storage: bound attestation valid until 2026-09-10 04:11:53 MDT; live
   S3 probe passed 1/1 and real Chromium storage probe with the production
   origin `https://rfp-xray.vercel.app` passed 1/1.
 - Vercel project configuration is Node 22 with Fluid Compute enabled. The
   deployment-bound 300-second Workflow runtime-attestation implementation was
-  independently approved with P0/P1/P2=0. Captured deployment
-  `dpl_EW9Bt6QLnhbMSwhEL5yY3AaJ64GE` has a current receipt; the evidence-only
-  deployment created by this update must receive its own receipt.
+  independently approved with P0/P1/P2=0. Production deployment
+  `dpl_md5xRevqZNJiDYG4Z6mtjWF4JCQd` is READY and has its own current receipt,
+  bound to commit `f1b09e3d0b7f3f6570e61b1a0faeb72b2b85d455`.
 - Provider-contract attestation was independently approved with P0/P1/P2=0.
-  No provider receipt or provider call exists because the Monid key and exact
-  provider configuration are absent.
+  The intended Monid workspace is authenticated, exact `context.dev /parse`
+  configuration is stored in Vercel, and two credentialed Edmonton parses cost
+  USD 0.0009 each. One used a five-minute Railway signed URL and confirmed
+  application-controlled source deletion in 8.140 seconds. A deployment-bound
+  provider receipt still needs the exact candidate deployment and a locally
+  usable OpenAI credential.
 - The pinned Vercel CLI remains 59.11.2; 33 focused runtime/provider attestation
   tests pass after dependency overrides.
 - The final security re-review returned `APPROVE`, P0=0 and P1=0; both P2
   recommendations were implemented and tested.
+- The permanent analysis-Workflow dispatch claim now covers claim, start, and
+  settlement ACK loss without blind redispatch. The final independent review
+  approved the current working tree with P0=0, P1=0, and P2=0.
+- The strict five-document reserve is USD 1.412123 and includes 24 generated
+  function invocations. It is a conservative estimate, not a provider receipt.
 - `CRON_SECRET` was rotated consistently in Vercel production/preview, GitHub
-  Actions, and Railway. Railway Cron completed three consecutive scheduled
-  cycles with zero between-run instances; independent review returned
-  `APPROVE`, P0/P1/P2=0. GitHub manual dispatch works, but its schedule event
-  remains unobserved and is treated as redundancy.
+  Actions, and Railway. Railway Cron completed seven consecutive scheduled
+  cycles across more than 30 minutes with zero between-run instances;
+  independent review returned `APPROVE`, P0/P1/P2=0. GitHub manual dispatch
+  works, but its schedule event remains unobserved and is treated as
+  redundancy.
 - A sanitized bidworx price capture records Starter at £190/month with typical
   usage of one tender. It is price evidence only.
 
@@ -65,23 +78,29 @@ predictions, and long-term tender storage remain out of scope.
 
 The public deployment at https://rfp-xray.vercel.app serves the reviewed
 fail-closed application and passed remote smoke 4/4. It must not be described
-as live-provider ready: health remains 503 because Monid, Turnstile, and the
-provider-contract receipt are absent.
+as live-provider ready: health remains 503 because production Turnstile and
+the exact-deployment provider-contract receipt are absent, and this candidate
+has not been migrated, deployed, or attested.
 
-No paid Monid call, real Edmonton/CER campaign, provider-retention proof,
-end-to-end production cleanup receipt, production citation click-through,
-final video, contest submission, or social publication has occurred. Turnstile
-is absent, and Chrome/in-app interactive browser control is unavailable. The
+The contract spike is not the final campaign. It also proved that Context.dev
+ZDR is unavailable for this workspace and reported a seven-day upstream
+artifact expiry; that limitation is now disclosed before submission and in the
+audit view. No complete Edmonton/CER production campaign, deployment-bound
+provider receipt, production citation click-through, final video, contest
+submission, or five-platform social publication has occurred. Turnstile is
+absent, and Chrome/in-app interactive browser control is unavailable. The
 release verdict therefore remains `NOT_READY`.
 
 ## Immediate next action
 
-Commit this evidence refresh, allow its Vercel production deployment, then
-create the new deployment-bound runtime receipt and recheck fail-closed health.
-Continue monitoring the independently approved Railway maintenance Cron.
-Obtain the Monid and Turnstile credentials before any provider call or public
-mutation. Run the budget-capped Edmonton/CER campaign and independent deployed
-citation review only after every preflight gate passes.
+Commit and deploy the approved schema-v9 candidate, then issue fresh runtime
+and provider-contract
+attestations for that exact deployment. Configure production Turnstile before
+any public mutation. After every preflight gate passes, run the budget-capped
+Edmonton/CER campaigns and click at least 12 production citations. The final
+video, contest submission, and five social publications remain open. Continue
+monitoring the independently approved Railway maintenance Cron without adding
+another compute runtime.
 
 The S3, runtime, and provider receipt refresh heartbeat is scheduled for
 2026-09-09 and 2026-09-10 at 12:00 MDT.

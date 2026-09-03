@@ -1,92 +1,106 @@
-# Chief Deployed Fail-Closed Handoff
+# Chief Handoff — Monid Contract Spike Passed, Release Still Fail-Closed
 
 Updated: 2026-09-03.
 
-## Assignment
+## Outcome
 
-Deliver a conservative RFP X-Ray release candidate and preserve an auditable
-boundary between local implementation, live component probes, the public sample,
-and still-missing live-provider/contest evidence.
+The credentialed Monid contract spike is complete. RFP X-Ray can send a
+five-minute Railway signed source URL through Monid `context.dev /parse`,
+capture the returned Markdown, settle the real provider cost, delete its source
+object, and confirm absence. The tested path completed cleanup in 8.140 seconds
+and cost USD 0.0009. A direct official-URL parse produced byte-identical
+Markdown at the same cost.
 
-## Current release identity
+This is component evidence, not the full production campaign. Production stays
+`NOT_READY` until Turnstile, the deployment-bound Monid/OpenAI receipt, live
+Workflow runs, final citation review, and contest/publication gates pass.
 
-- Reviewed application commit: `936041e8ca1ed626978ee8750ba640ef4975c4d9`.
-- The remaining working-tree changes refresh documentation/evidence only.
-- https://rfp-xray.vercel.app serves the current fail-closed application and
-  passed public read-only smoke 4/4. It is not live-provider ready.
-- Current release verdict: `NOT_READY`.
+## Release identity
 
-## Architecture decisions
+- Reviewed/deployed baseline commit:
+  `f1b09e3d0b7f3f6570e61b1a0faeb72b2b85d455`.
+- Baseline deployment: `dpl_md5xRevqZNJiDYG4Z6mtjWF4JCQd` at
+  https://rfp-xray-pgrtupsau-chendavs-projects.vercel.app.
+- Public alias: https://rfp-xray.vercel.app.
+- Current working tree adds evidence-linked citations, truthful cost
+  completeness, adversarial PDF/OCR checks, the live Monid/Railway probe, and
+  the account-specific retention disclosure. It is tested but not yet committed
+  or deployed.
 
-- Keep Web, API, and Workflow compute on Vercel, durable state on Neon, and
-  short-lived private source objects in the dedicated Railway Bucket.
-- Use one short-lived Railway maintenance Cron, but no Railway Web service or
-  RFP analysis worker unless measured provider timing proves the Vercel Fluid
-  Compute envelope insufficient.
-- Require target-bound, expiring storage, runtime, and provider contracts.
-- Retain the closed-world product boundary: no tender search, embedded-link
-  traversal, bid writing, data-network workflow, or unsupported bidder-fit
-  prediction.
-- Citation truth comes from the local source SHA/page/quote verifier, not from a
-  model-authored page number or a Monid artifact alone.
+## Credential and provider state
 
-## Verified pre-deploy evidence
+- The authorized Monid API key is present in `D:\monidhackson\.env.local`,
+  matches the authorized clipboard value, and is ignored by Git.
+- The same key is active in the Monid local credential store and stored as a
+  Vercel Sensitive Secret for production, preview, and development.
+- Exact non-secret `context.dev /parse` adapter paths, canonical inspect hash,
+  cost unit, and artifact allowlist are stored for all three Vercel targets.
+- The raw canonical inspect SHA-256 is
+  `551283ef6526c09f276f4c2d82015168e083cdc348063521db1172c683384476`.
+- The deployment-bound provider receipt remains open because it must bind the
+  next exact deployment and also execute the OpenAI control-plane check with a
+  locally usable credential.
 
-- `pnpm check`: 39 files passed/3 skipped, 391 tests passed/7 skipped.
-- Production build: PASS, 10 Workflow steps, 4 workflows, 13 pages.
-- Local E2E: 14 passed/2 explicit live skips.
-- Official fixture audit: 3/3.
-- Production dependency audit: no known vulnerabilities; the full audit has
-  zero high/critical findings and 1 low/3 moderate development-chain findings.
-- Vercel CLI is pinned at 59.11.2; 33 focused runtime/provider attestation tests
-  pass after scoped dependency overrides.
-- Neon schema v8: 9 public tables, 8 migration rows, marker
-  `rfp-xray-schema-v8`; live concurrency and real CAS-loss checks passed 2/2.
-- Railway bound attestation expires 2026-09-10 04:11:53 MDT; current S3 live
-  check passed 1/1 and a real Chromium production-Origin check passed 1/1.
-- Vercel is configured for Node 22 and Fluid Compute.
-- Captured production deployment `dpl_EW9Bt6QLnhbMSwhEL5yY3AaJ64GE` has a
-  current deployment-bound 300-second runtime receipt.
-- Runtime-attestation implementation: independent `APPROVE`, P0/P1/P2=0.
-- Provider-contract attestation implementation: independent `APPROVE`,
-  P0/P1/P2=0.
-- Security re-review: `APPROVE`, P0=0/P1=0; both P2 recommendations are now
-  implemented and tested.
-- `CRON_SECRET` was rotated consistently in Vercel production/preview, GitHub
-  Actions, and Railway. Railway Cron passed three automatic cycles and an
-  independent review with P0/P1/P2=0; GitHub manual dispatch works but its
-  scheduled event remains unobserved redundancy.
+Never print, commit, or copy the Key into evidence. Vercel `env pull` masks
+Sensitive Secrets and is not a way to recover them locally.
 
-## Explicitly unverified
+## Retention and citation decision
 
-- The evidence-only deployment created by this update still needs its own
-  deployment-bound runtime receipt.
-- No provider-contract receipt or provider call exists because the Monid key
-  and exact provider configuration are absent.
-- Production Turnstile is absent.
-- Chrome and in-app interactive browser control are unavailable.
-- No paid Monid call, real Edmonton/CER campaign, live cleanup/cost/latency
-  receipt, 12-citation production review, video, submission, or social
-  publication has occurred.
+Context.dev returned `ZDR_NOT_ENABLED` at zero cost when ZDR was requested. A
+successful parse reported an upstream artifact expiry seven days after
+completion; no provider early-delete API is known. The candidate therefore:
 
-## Price evidence
+- discloses unavailable ZDR and seven-day upstream retention before submission;
+- repeats the disclosure in Audit & Cost and health metadata;
+- promises cleanup only for app-controlled copies;
+- warns users not to submit confidential material unless the retention is
+  acceptable.
 
-The official bidworx pricing screenshot is 714876 bytes, SHA-256
-`5a4d44ba608131cabb7770a28321d85d5552ba52fb4f86fb0b3520340b4f9b34`,
-captured at `2026-09-03T11:46:40.5885646Z`. It supports only the visible claims
-that Starter is £190/month and typical usage is one tender.
+The normalized Markdown preserved useful RFP semantics but no trustworthy
+physical-page signals. PDF.js remains the only page-number authority. Monid/
+OCR facts that cannot bind to the native physical index are withheld.
+
+## Verification
+
+- `pnpm check`: 44 files passed/4 skipped, 421 tests passed/10 skipped.
+- Production build: PASS, 8 Workflow steps, 4 workflows, 13 pages.
+- Local Playwright: 14 passed/2 explicit live skips.
+- Official PDF fixture audit: 3/3.
+- Opt-in paid Monid/Railway live integration: 1/1 PASS.
+- Baseline production read-only smoke: 4/4 PASS.
+- Neon schema/concurrency and Railway storage/Cron evidence remain valid within
+  their recorded receipt windows.
+
+The analysis-dispatch ACK-loss fence is implemented and its focused claim,
+start, settlement, replay, maintenance, and concurrency regressions pass. The
+current candidate received final independent `APPROVE` with P0=0, P1=0, and
+P2=0. The conservative five-document full reserve is
+USD 1.412123 and includes 24 generated function invocations; this is an
+estimate, not a provider receipt.
+
+## Architecture boundary
+
+- Vercel: Web, API, and durable Workflow compute.
+- Neon: durable application state and budget ledger.
+- Railway: private S3-compatible temporary storage plus one short-lived,
+  no-domain maintenance Cron; no analysis worker.
+- Monid/context.dev: normalization input, not citation truth.
+- OpenAI: bounded structured extraction and closed-document Q&A.
+
+Tender search, bid writing, team/CRM workflow, billing, bidder-fit prediction,
+and long-term source storage remain out of scope.
 
 ## Next gates
 
-1. Commit this evidence refresh and wait for the exact production build.
-2. Verify the resulting deployment is bound to the final pushed Git SHA.
-3. Create its deployment-bound runtime receipt and verify fail-closed health.
-4. Continue monitoring the independently approved Railway maintenance Cron.
-5. Obtain Monid and Turnstile configuration; create the provider receipt before
-   any source or paid call.
-6. Run the budget-capped Edmonton/CER campaign and final independent deployed
-   citation review.
-7. Only then record the video, submit, and publish.
+1. Commit and push this schema-v9 candidate; wait for CI and the new exact Vercel deployment.
+2. Issue that deployment's runtime receipt and repeat public read-only smoke.
+3. Make the OpenAI credential locally available without exposing it, then issue
+   the exact deployment-bound provider receipt.
+4. Configure production Turnstile and verify real guest mutations.
+5. Run the capped ten-run Edmonton benchmark and four-document CER campaign.
+6. Complete an independent production review of at least 12 high-risk links.
+7. Record the truthful under-90-second video, register, submit, and publish on
+   all five required social platforms.
 
-The release heartbeat will refresh the S3/runtime/provider receipts on Sep 9
-and Sep 10 at 12:00 MDT.
+Refresh S3/runtime/provider receipts on September 9 and September 10 at 12:00
+MDT. Roll back to the last fail-closed build if any release gate regresses.

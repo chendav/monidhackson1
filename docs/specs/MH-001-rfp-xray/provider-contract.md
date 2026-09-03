@@ -1,6 +1,6 @@
 # Provider Contract Baseline
 
-Verified: 2026-09-02. This file records implementation constraints, not secrets.
+Verified: 2026-09-03. This file records implementation constraints, not secrets.
 
 ## Monid
 
@@ -17,17 +17,20 @@ Verified: 2026-09-02. This file records implementation constraints, not secrets.
 
 ## Context.dev parse through Monid
 
-- Provider/endpoint are configuration values confirmed by credentialed inspect.
+- Credentialed discovery and inspect selected verified/stable provider
+  `context.dev` and endpoint `/parse`.
 - Expected parse input is normalized inside the adapter and never leaks into the
   core domain: `file_url`, `extension`, `ocr`, `includeLinks:false`,
   `includeImages:false`, `shortenBase64Images:true`, `useMainContentOnly:false`.
-- Public documentation states a 25MB input limit and returns a temporary
+- The credentialed contract reports a 25MB input limit and returns a temporary
   Markdown download URL. Download and validate the bytes immediately.
 - Reserve 4,500 micro-USD when OCR is requested; terminal Monid cost is the
   authoritative settlement value.
-- No public Monid run DELETE, run-retention TTL, or parsed-artifact early-delete
-  API has been verified. Do not claim provider deletion or ZDR without a live
-  account-visible proof.
+- Credentialed execution proved that ZDR is not enabled for this workspace. A
+  successful parse reported an upstream parsed-file expiry of seven days and a
+  short-lived Monid download URL. No provider early-delete API was found. Claim
+  only confirmed deletion of application-controlled copies and show the
+  seven-day disclosure before submission.
 - Do not use Monid SFS in the primary path because SFS objects do not auto-delete.
 
 ## Evidence boundary
@@ -40,14 +43,17 @@ Verified: 2026-09-02. This file records implementation constraints, not secrets.
 - Source and temporary parse artifacts under application control are purged only
   after evidence verification; READY requires confirmed purge receipts.
 
-## Credentialed gates still required
+## Credentialed gate results
 
-1. Inspect the exact context.dev parse schema, price, and optional ZDR field.
-2. Prove Context.dev can fetch a five-minute Railway S3 signed GET URL. The
-   storage replay/CAS/deletion contract is already verified independently; the
-   remaining gate is Monid's ability to fetch the signed object.
-3. Compare Edmonton parsing against local PDF.js page coverage and golden facts.
-4. Record actual cost and provider retention disclosure without exposing inputs.
+1. PASS — exact inspect schema, response paths, optional ZDR field, and prices
+   are pinned by SHA-256.
+2. PASS — Context.dev fetched a five-minute Railway signed GET URL; capture,
+   conditional deletion, and absence confirmation completed in 8.140 seconds.
+3. PASS WITH LIMITATION — Edmonton semantic content was useful, but Monid
+   emitted no trustworthy physical-page boundaries. PDF.js remains citation
+   truth.
+4. PASS WITH LIMITATION — two successful runs cost USD 0.0009 each; upstream
+   retention is observed at seven days because ZDR is unavailable.
 
 ## Current attestation status — 2026-09-03
 
@@ -57,12 +63,18 @@ non-paid Monid inspect response and a non-paid OpenAI control-plane check to the
 exact deployed release identity and a short TTL before source or paid work can
 start.
 
-This is an implementation-review result only. No attestation receipt and no
-provider call exist because the Monid API key and exact provider configuration
-are absent. Production Turnstile is also absent. The release remains
-`NOT_READY`, and no Edmonton/CER parse, cost, retention, deletion, or latency
-claim may be made from this file.
+Credentialed Monid discovery, inspect, ZDR capability testing, one public-URL
+parse, and one Railway signed-URL parse have now run. The exact evidence is in
+`release-evidence/monid-contract-spike-2026-09-03.md`. The application-controlled
+source deletion gate passed; provider early deletion did not, and the UI must
+disclose the observed seven-day provider expiry.
+
+This does not replace the deployment-bound provider-contract receipt because
+that receipt must also bind the exact production Git SHA/runtime deployment and
+the OpenAI control-plane check. Production Turnstile is also absent. The
+release remains `NOT_READY` and no end-to-end Edmonton/CER completion claim may
+be made from this file.
 
 The S3/runtime/provider receipt refresh heartbeat is scheduled for Sep 9 and
-Sep 10 at 12:00 MDT. A refresh can succeed only after the required deployment
-and provider credentials exist.
+Sep 10 at 12:00 MDT. A provider refresh still needs the exact deployment and a
+locally usable OpenAI credential in addition to the now-configured Monid key.

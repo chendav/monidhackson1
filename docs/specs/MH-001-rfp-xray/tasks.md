@@ -92,30 +92,38 @@ exclude_paths: []
 edits_allowed: true
 acceptance: [AC-1, AC-3, AC-5, AC-6, AC-8, AC-9, AC-10]
 handoff: qa_report.md
-status: deployed-fail-closed-monid-turnstile-open
+status: deployed-fail-closed-monid-spike-passed-turnstile-open
 confirmed_progress:
   - Public sample deployment is reachable at https://rfp-xray.vercel.app.
   - Landing, OpenAPI, and Edmonton sample returned HTTP 200 on 2026-09-03.
   - Health returned 503 not_ready, preserving the production fail-closed gate.
   - Remote read-only Playwright deployment smoke passed 4/4 without mutations or paid calls.
-  - Active Neon reports nine public tables, eight migration rows, schema v8 marker; live concurrency including a real CAS-loss passed 2/2.
+  - Active Neon reports nine public tables, nine migration rows, schema v9 marker; live concurrency including both 16-way dispatch-claim races passed 4/4.
   - Dedicated Railway private Bucket has a bound attestation through 2026-09-10 04:11:53 MDT; current S3 live and real Chromium production-Origin probes each passed 1/1.
   - Railway provides private S3-compatible storage plus one no-domain, zero-idle-instance maintenance Cron; it runs no RFP analysis worker.
   - Vercel project settings are Node 22 with Fluid Compute enabled; deployment-bound runtime attestation code is independently approved P0/P1/P2=0.
-  - Provider-contract attestation code is independently approved P0/P1/P2=0, but no receipt/call exists without the Monid key and exact configuration.
+  - Provider-contract attestation code is independently approved P0/P1/P2=0; the Monid side is configured and live-probed, while the exact deployment/OpenAI-bound receipt remains open.
   - Security re-review returned APPROVE P0=0/P1=0; both P2 recommendations are implemented and tested.
-  - Current regression gate is 39 files/391 tests passed with 3 files/7 tests skipped; build 10 steps/4 workflows/13 pages; local E2E 14/2; fixtures 3/3.
+  - Current regression gate is 44 files/421 tests passed with 4 files/10 tests skipped; build 8 steps/4 workflows/13 pages; local E2E 14/2; fixtures 3/3. The opt-in paid Monid/Railway probe separately passed 1/1; the live Neon suite passed 4/4 on schema v9.
   - Production dependency audit has no known vulnerabilities; full audit has zero high/critical findings with one low and three moderate development-chain findings.
   - The paid live verifier exists and received an independent PASS with P0=0/P1=0; its paid path has never been executed.
-  - Application commit 936041e8ca1ed626978ee8750ba640ef4975c4d9 is pushed, deployed, and passed remote read-only smoke 4/4.
-  - Captured Vercel deployment dpl_EW9Bt6QLnhbMSwhEL5yY3AaJ64GE has a deployment-bound 300-second runtime receipt.
-  - Railway Cron completed three consecutive scheduled maintenance cycles; independent review APPROVE P0/P1/P2=0 closed the scheduler-evidence P1.
+  - Application commit f1b09e3d0b7f3f6570e61b1a0faeb72b2b85d455 is pushed, deployed, and passed remote read-only smoke 4/4.
+  - Captured Vercel deployment dpl_md5xRevqZNJiDYG4Z6mtjWF4JCQd has a deployment-bound 300-second runtime receipt.
+  - Railway Cron completed seven consecutive scheduled maintenance cycles across more than 30 minutes; independent review APPROVE P0/P1/P2=0 closed the scheduler-evidence P1.
+  - The analysis Workflow ACK-loss fence is implemented, focused-tested, and independently approved with P0=0, P1=0, and P2=0.
+  - The generated-function envelope is 24 invocations and the conservative five-document full reserve is USD 1.412123; this is not a live provider receipt.
+  - Schema-v9 migration is applied to production and the new live CAS probes passed 4/4.
+  - The intended Monid workspace is authenticated and the exact context.dev /parse configuration is stored as Vercel environment values/secrets.
+  - Credentialed discover/inspect pinned the canonical schema hash; two Edmonton parses succeeded at USD 0.0009 each.
+  - Context.dev fetched a five-minute Railway signed URL, returned byte-identical Markdown, and application-controlled cleanup/absence was confirmed in 8.140 seconds.
+  - Context.dev ZDR is unavailable for this workspace and its response reported a seven-day upstream artifact expiry; the candidate now discloses this before submission and in Audit & Cost.
+  - Monid emitted no physical-page boundary signals, so the PDF.js index remains the only citation-page authority.
 open_blockers:
-  - This evidence-only commit requires a new Vercel deployment-bound runtime receipt after push.
-  - Vercel Fluid Compute is bounded at 300 seconds with 105/150/285-second deadlines and Monid concurrency 4, but still requires a real Monid benchmark.
-  - Monid CLI has no active API key, so the paid contract spike and real cost/retention evidence cannot run.
-  - No provider-contract receipt or provider call exists.
+  - This candidate requires a new Vercel deployment-bound runtime receipt after push.
+  - Vercel Fluid Compute is bounded at 300 seconds with 105/150/285-second deadlines and Monid concurrency 4; one parse passed, but the ten-run Edmonton/CER campaign remains required.
+  - No deployment-bound provider-contract receipt exists because the exact candidate deployment and locally usable OpenAI control-plane credential are still required.
   - Production Turnstile is absent, so guest live mutations cannot be released.
+  - The new exact deployment and attestations, paid Edmonton/CER campaigns, 12 production citation clicks, final video, contest submission, and five social publications remain open.
   - Interactive in-app browser automation is unavailable; no full live mutation flow or production citation click-through evidence is captured.
 evidence:
   - release-evidence/railway-storage-probe.md
@@ -123,6 +131,7 @@ evidence:
   - release-evidence/neon-concurrency-probe.md
   - release-evidence/deployment-summary.md
   - release-evidence/bidworx-pricing-2026-09-03.md
+  - release-evidence/monid-contract-spike-2026-09-03.md
 scheduled_refresh: S3/runtime/provider receipts on Sep 9 and Sep 10 at 12:00 MDT
 truth_boundary: The public sample, private-storage contract probe, and Neon probes are partial release evidence only. They do not establish deployed end-to-end source cleanup, Monid readiness, provider retention, latency, cost, video, submission, or publication completion.
 ```

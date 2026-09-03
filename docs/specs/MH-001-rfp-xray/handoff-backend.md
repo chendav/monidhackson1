@@ -649,7 +649,8 @@ historical implementation record.
 ### Current regression gate
 
 - `pnpm check`: PASS, 39 files passed/3 skipped and 391 tests passed/7 skipped.
-- `pnpm build`: PASS, 10 Workflow steps, 4 workflows, 13 pages.
+- Historical Revision 6 build: PASS; its generated-route count is superseded
+  by the current evidence below.
 - Local Playwright: PASS, 14 passed/2 explicit live skips.
 - Official fixture audit: PASS, 3/3.
 - Production dependency audit: PASS, no known vulnerabilities.
@@ -683,9 +684,44 @@ This section supersedes Revision 6 only for deployment and maintenance state.
   zero instances between runs, restart policy `NEVER`, and no RFP/provider
   credentials. Three consecutive scheduled cycles produced bounded durable
   heartbeats. Independent review: `APPROVE`, P0/P1/P2=0.
+
+## Revision 8 — Credentialed Monid Contract Spike
+
+This section supersedes older statements that the Monid key/configuration or
+all paid-provider evidence is absent.
+
+- The authorized Key is present in the ignored local environment, active in
+  the Monid credential store, and stored as a Vercel Sensitive Secret for all
+  deployment targets. Exact non-secret adapter configuration is also stored.
+- Credentialed `discover → inspect` pinned `context.dev /parse`, its response
+  paths, normal cost USD 0.0009, OCR maximum USD 0.0045, and canonical inspect
+  SHA-256
+  `551283ef6526c09f276f4c2d82015168e083cdc348063521db1172c683384476`.
+- Two Edmonton parses succeeded at USD 0.0009 each. The Railway five-minute
+  signed-URL probe captured the artifact and confirmed source deletion/absence
+  in 8.140 seconds.
+- ZDR is unavailable for this Context.dev workspace. Its response reported a
+  seven-day upstream artifact expiry and no early-delete API is known. The
+  candidate discloses this before submission, in Audit & Cost, and in health.
+- The normalized Markdown contained no trustworthy physical-page boundaries.
+  PDF.js remains citation truth; unbound Monid/OCR facts are withheld.
+- Current candidate checks: 421 tests passed/10 skipped across 44 passed/4
+  skipped files; build PASS with 8 steps/4 workflows/13 pages; Playwright 14/2;
+  official fixtures 3/3; opt-in
+  paid Monid/Railway probe 1/1.
+- The analysis-dispatch claim/start/settlement ACK-loss fence is implemented,
+  focused-tested, and independently approved with P0=0, P1=0, and P2=0.
+- Production schema v9 is applied and its live Neon suite passed 4/4. The
+  conservative five-document full reserve is USD 1.412123 and
+  includes 24 generated function invocations; this is not a usage receipt.
+- Still open: candidate commit and new deploy, exact deployment-bound runtime and
+  Monid/OpenAI provider receipts, Turnstile, ten-run Edmonton plus CER
+  campaign, at least 12 production citation clicks, video, registration,
+  submission, and five social publications. Release remains `NOT_READY`.
 - GitHub did not emit a `schedule` event during the observation window. It is
   redundant only and is not claimed as the source of scheduled-delivery proof.
 
-Monid, provider-contract, production Turnstile, paid Edmonton/CER, end-to-end
-cleanup/cost/latency, citation click-through, video, submission, and
+The new exact deployment and
+attestations, production Turnstile, paid Edmonton/CER, end-to-end
+cleanup/cost/latency, citation click-through, video, submission, and five
 publication gates remain open. The release remains `NOT_READY`.

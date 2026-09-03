@@ -1,22 +1,22 @@
-review_scope: deployed_fail_closed_release_candidate
+review_scope: retention_cost_citation_monid_contract_and_analysis_dispatch_candidate
 recorded_at: 2026-09-03
-reviewed_implementation_commit: 936041e8ca1ed626978ee8750ba640ef4975c4d9
-working_tree_state: documentation_only_evidence_refresh
-captured_public_deployment_id: dpl_EW9Bt6QLnhbMSwhEL5yY3AaJ64GE
-captured_public_deployment_url: https://rfp-xray-oyfo3261w-chendavs-projects.vercel.app
-public_deployment_state: current_fail_closed_build
+reviewed_baseline_commit: f1b09e3d0b7f3f6570e61b1a0faeb72b2b85d455
+candidate_state: working_tree_approved_commit_migration_and_deploy_pending
+captured_public_deployment_id: dpl_md5xRevqZNJiDYG4Z6mtjWF4JCQd
+captured_public_deployment_url: https://rfp-xray-pgrtupsau-chendavs-projects.vercel.app
+public_deployment_state: baseline_fail_closed_build
 release_verdict: NOT_READY
 
 local_verification:
   pnpm_check:
     result: pass
-    test_files_passed: 39
-    test_files_skipped: 3
-    tests_passed: 391
-    tests_skipped: 7
+    test_files_passed: 44
+    test_files_skipped: 4
+    tests_passed: 421
+    tests_skipped: 10
   production_build:
     result: pass
-    workflow_steps: 10
+    workflow_steps: 8
     workflows: 4
     application_pages: 13
   local_playwright:
@@ -27,54 +27,63 @@ local_verification:
   official_fixture_audit:
     result: pass
     passed: 3
-  production_dependency_audit:
+  monid_railway_signed_url_live_probe:
     result: pass
-    known_vulnerabilities: 0
-  full_dependency_audit:
-    high: 0
-    critical: 0
-    low: 1
-    moderate: 3
-    scope_of_remaining_findings: development_chain
-  focused_runtime_provider_attestation_tests:
-    result: pass
-    passed: 33
-    pinned_vercel_cli: 59.11.2
+    passed: 1
+    default_suite_behavior: skipped_without_explicit_paid_opt_in
+    source: official_edmonton_sha_fixed_pdf
 
 independent_reviews:
+  baseline_release:
+    verdict: APPROVE
+    p0: 0
+    p1: 0
+    p2: 0
+    limitation: applies_to_f1b09e3_baseline_not_current_working_tree
   runtime_attestation:
     verdict: APPROVE
     p0: 0
     p1: 0
     p2: 0
-    limitation: current receipt is exact-deployment-bound and must be renewed after the evidence-only deployment
-  provider_contract_attestation:
+    limitation: current receipt binds the baseline deployment and must be renewed after candidate deployment
+  provider_contract_attestation_implementation:
     verdict: APPROVE
     p0: 0
     p1: 0
     p2: 0
-    limitation: implementation review only; no receipt or provider call because the Monid key and exact configuration are absent
+    limitation: exact candidate deployment and OpenAI-bound receipt remain pending
   security_rereview:
     verdict: APPROVE
     p0: 0
     p1: 0
-    p2_follow_up: both recommendations implemented and tested after review
+    p2_follow_up: both recommendations implemented and tested
   maintenance_scheduler:
     verdict: APPROVE
     p0: 0
     p1: 0
     p2: 0
-    evidence: three Railway scheduled cycles independently matched to three Vercel production HTTP 200 invocations; instances exited and health stayed fresh
+    evidence: seven Railway cycles across more than 30 minutes with zero between-run instances
+  current_candidate:
+    verdict: APPROVE
+    prior_verdict: APPROVE_P0_0_P1_0_P2_0
+    delta: infrastructure_cost_envelope_analysis_dispatch_ack_loss_fence_and_current_evidence_sync
+    p0: 0
+    p1: 0
+    p2: 0
+    evidence: 44_files_421_tests_passed_4_files_10_tests_skipped_build_8_steps_4_workflows_13_pages_playwright_14_passed_2_live_skipped
 
 live_component_evidence:
   neon:
     result: pass
     public_tables: 9
-    migration_rows: 8
-    schema_version: 8
-    schema_marker: rfp-xray-schema-v8
-    live_concurrency_tests: 2_passed
+    migration_rows: 9
+    schema_version: 9
+    schema_marker: rfp-xray-schema-v9
+    live_concurrency_tests: 4_passed
     real_cas_loss_tested: true
+    candidate_schema_version: 9
+    candidate_migration_prepared: true
+    candidate_migration_applied_to_production: true
     evidence: release-evidence/neon-concurrency-probe.md
   railway_private_storage:
     result: pass
@@ -85,28 +94,44 @@ live_component_evidence:
     railway_analysis_compute_service: none
     evidence: release-evidence/railway-storage-probe.md
   railway_maintenance_cron:
-    result: pass_three_consecutive_cycles
+    result: pass_seven_consecutive_cycles
+    observation_window_minutes: greater_than_30
     public_domains: 0
     between_run_instances: 0
     restart_policy: NEVER
-    image_digest: sha256:58adaa4e8dca9c988bae2aba4ab3434a0bb2da16bbe3f92dec39ec7785166777
-    completed_at_utc:
-      - 2026-09-03T13:19:01.814Z
-      - 2026-09-03T13:24:20.469Z
-      - 2026-09-03T13:29:19.452Z
-    duration_ms: [112, 75, 60]
     evidence: release-evidence/railway-maintenance-cron.md
+  monid_contract_spike:
+    result: pass_with_retention_limitation
+    provider: context.dev
+    endpoint: /parse
+    canonical_inspect_sha256: 551283ef6526c09f276f4c2d82015168e083cdc348063521db1172c683384476
+    successful_paid_parses: 2
+    charge_each_usd: 0.0009
+    failed_zdr_probe_charge_usd: 0
+    signed_url_ttl_seconds: 300
+    signed_url_cleanup_total_ms: 8140
+    output_bytes: 144275
+    output_sha256: 6e8260b80df216fc0b3b8c1a87ed9c87ba1603bdcae8b82c57e82ad58b36ec56
+    physical_page_boundaries_present: false
+    citation_truth: pdfjs_physical_page_index
+    zdr_enabled: false
+    upstream_artifact_expiry_observed_days: 7
+    provider_early_delete_verified: false
+    evidence: release-evidence/monid-contract-spike-2026-09-03.md
 
 release_configuration:
   vercel_node: 22.x
   vercel_fluid_compute: enabled
-  cron_secret_rotated_in_vercel_production_preview_github_and_railway: true
-  github_maintenance_enabled: true
-  github_manual_dispatch_after_rotation: success_run_33760198137
-  github_schedule_event_observed: false
-  railway_cron_scheduled_delivery_observed: true_three_cycles
-  captured_runtime_receipt: dpl_EW9Bt6QLnhbMSwhEL5yY3AaJ64GE
+  monid_key_local_env_present_and_git_ignored: true
+  monid_key_local_cli_store_active: true
+  monid_key_vercel_sensitive_secret_targets: [production, preview, development]
+  monid_exact_adapter_configuration_vercel_targets: [production, preview, development]
+  production_turnstile_configured: false
+  captured_runtime_receipt: dpl_md5xRevqZNJiDYG4Z6mtjWF4JCQd
   receipt_refresh_heartbeat: Sep_9_and_Sep_10_at_12_00_MDT
+  generated_function_invocation_envelope: 24
+  five_document_full_reserve_usd: 1.412123
+  cost_status: estimated_not_provider_receipt
 
 price_evidence:
   screenshot: release-evidence/bidworx-pricing-2026-09-03.png
@@ -119,22 +144,22 @@ price_evidence:
     - Typical usage is shown as one tender.
 
 open_release_gates:
-  - Commit this documentation/evidence refresh, inspect its production deployment, and store that exact deployment's runtime receipt.
-  - Continue monitoring Railway Cron; do not count GitHub workflow_dispatch as scheduled-delivery evidence.
-  - Obtain the Monid key and exact configuration and store a current provider-contract receipt before any source or paid call.
+  - Commit and push the candidate, inspect its new production deployment, and issue that exact deployment's runtime receipt.
+  - Create the deployment-bound provider receipt using Monid inspect plus the OpenAI control-plane check.
   - Configure production Turnstile and verify the deployed guest mutation lifecycle.
-  - Run the budget-capped Edmonton ten-run benchmark and complete CER package campaign.
+  - Run the budget-capped Edmonton ten-run benchmark and complete the four-document CER campaign.
   - Verify end-to-end Workflow recovery, cleanup timing, cost, latency, and every required citation.
   - Complete an independent deployed review of at least 12 high-risk citations.
-  - Record the final video and complete the contest submission and five social publications.
+  - Record the final video and complete registration, contest submission, and five social publications.
 
 limitations:
-  - No paid Monid or other live provider call has occurred.
-  - A runtime receipt exists only for the captured deployment; no provider-contract receipt exists.
+  - The two paid Monid parses are contract-spike evidence, not the final campaign.
+  - No provider receipt binds the candidate deployment and OpenAI control plane.
   - Chrome and in-app interactive browser control are unavailable.
-  - Turnstile is absent.
+  - Production Turnstile is absent.
+  - Context.dev ZDR is unavailable and upstream artifact expiry was observed at seven days.
   - The real Edmonton/CER campaign, video, submission, and social publication have not occurred.
   - Component checks do not prove end-to-end production readiness.
-  - The public sample is current but must not be represented as a live-provider execution.
+  - The public sample must not be represented as live-provider execution.
 
-next_gate: Deploy this evidence-only commit and renew the exact runtime receipt, then obtain Monid and Turnstile configuration while all live-provider gates remain fail-closed.
+next_gate: Commit, deploy, and attest the exact schema-v9 candidate while production remains fail-closed.

@@ -9,15 +9,16 @@ no tender text or credential was written into this evidence.
 
 | Invariant | Result |
 |---|---|
-| Migration ledger rows | 8 |
+| Migration ledger rows | 9 |
 | Public application tables | 9 |
-| Required schema version | 8 |
-| Schema marker | `rfp-xray-schema-v8` |
+| Required schema version | 9 |
+| Schema marker | `rfp-xray-schema-v9` |
 | Idempotent migration rerun | PASS |
 
-The added durable state includes maintenance heartbeat and generic release
-attestations. Production readiness verifies the exact schema marker and fails
-closed on missing, unreachable, fallback, or mismatched state.
+The added durable state includes permanent cleanup-retry and analysis-dispatch
+claims, maintenance heartbeat, and generic release attestations. Production
+readiness verifies the exact schema marker and fails closed on missing,
+unreachable, fallback, or mismatched state.
 
 ## Live concurrency checks
 
@@ -25,10 +26,15 @@ closed on missing, unreachable, fallback, or mismatched state.
 |---|---|
 | Application admission/lease/budget contention | PASS |
 | Real release-attestation compare-and-swap loss | PASS |
-| Total | 2/2 passed |
+| 16-way cleanup-retry dispatch claim | PASS |
+| 16-way analysis Workflow dispatch claim | PASS |
+| Total | 4/4 passed |
 
-The second check exercises a real loser in a concurrent compare-and-swap, not a
-mocked or inferred conflict.
+The checks exercise real losers in concurrent compare-and-swap operations, not
+mocked or inferred conflicts. The first attempted post-migration invocation
+stopped before database work because locally pulled Vercel secrets were redacted
+placeholders; the successful rerun retained the real database URL and used only
+test-scoped compliant placeholders for unrelated configuration fields.
 
 ## Credential chronology
 
@@ -39,7 +45,7 @@ value is present in the repository or this evidence packet.
 
 ## Evidence boundary
 
-This proves the current schema-v8 shape and the stated application-level live
+This proves the current schema-v9 shape and the stated application-level live
 concurrency/CAS behavior. It does not prove the new Vercel build is deployed,
 that a runtime/provider attestation receipt exists, or that maintenance,
 Workflow recovery, paid providers, source cleanup, cost, latency, or citations
