@@ -11,6 +11,7 @@ import {
   recordAuthorityManifestIntegrity,
   recordAuthorityReceiptWithinCapacity,
   resolveSemanticSpan,
+  selectorAuthenticatedPresentationValue,
   unresolvedRecordAuthority,
   verifiedRecordAuthorityManifestDigest,
   verifyRecordAuthorities
@@ -243,6 +244,61 @@ function verifyBundle(options: {
     ledger: state.ledger,
     submission: state.submission,
     documents: [state.source]
+  });
+  return { authority, state };
+}
+
+function verifyPresentationBundle(options: {
+  pdfText: string;
+  monidText: string;
+  analysis: DraftAnalysis;
+  selections: Record<string, string>;
+}) {
+  const state = artifact([options.pdfText]);
+  const sourceMap = buildDocumentSourceMap([{
+    source_fragment_id: "fragment",
+    document_sha256: sha,
+    chunk_id: null,
+    text: options.monidText
+  }], [state.source]);
+  const records = [
+    ...options.analysis.claims.map((record, ordinal) => ({ kind: "c" as const, ordinal, record })),
+    ...options.analysis.requirements.map((record, ordinal) => ({ kind: "q" as const, ordinal, record })),
+    ...options.analysis.risks.map((record, ordinal) => ({ kind: "r" as const, ordinal, record })),
+    ...options.analysis.evaluation.rules.map((record, ordinal) => ({ kind: "e" as const, ordinal, record }))
+  ];
+  const rows = records.map(({ kind, ordinal, record }) => {
+    const selection = options.selections[`${kind}:${ordinal}`];
+    if (!selection) throw new Error(`missing selection for ${kind}:${ordinal}`);
+    const start = options.monidText.indexOf(selection);
+    if (start < 0 || options.monidText.lastIndexOf(selection) !== start) {
+      throw new Error(`selection is not unique for ${kind}:${ordinal}`);
+    }
+    const resolved = resolveSemanticSpan(sourceMap, {
+      source_fragment_id: "fragment",
+      start_utf16: start,
+      length_utf16: selection.length
+    }, [state.source]);
+    if (!resolved || record.citations.length !== 1 ||
+      resolved.evidence_quote !== record.citations[0]!.evidence_quote) {
+      throw new Error(`selection did not resolve for ${kind}:${ordinal}`);
+    }
+    return [kind, ordinal, "n", [{ citation_ordinal: 0, ...resolved.binding }]];
+  });
+  const authority = verifyRecordAuthorities({
+    batches: [{
+      binding: state.binding,
+      draft: options.analysis,
+      authority: RecordAuthorityEnvelopeSchema.parse({
+        v: RECORD_AUTHORITY_ENVELOPE_VERSION,
+        r: rows
+      }),
+      sourceMap
+    }],
+    ledger: state.ledger,
+    submission: state.submission,
+    documents: [state.source],
+    mergedDraft: options.analysis
   });
   return { authority, state };
 }
@@ -2004,6 +2060,7 @@ describe("T16 deterministic Monid-to-PDF.js source binding", () => {
     });
 
     const mutations = [
+      (binding: typeof resolved.binding) => { binding.pdf_page_1based += 1; },
       (binding: typeof resolved.binding) => { binding.page_text_sha256 = "0".repeat(64); },
       (binding: typeof resolved.binding) => {
         binding.source_representation_sha256 = "0".repeat(64);
@@ -2185,5 +2242,263 @@ describe("T17 selector-scoped physical alignment", () => {
       start_utf16: mutatedContext.indexOf(clause),
       length_utf16: clause.length
     }, [source])).toBeNull();
+  });
+});
+
+describe("T21 selector-authenticated presentation materialization", () => {
+  it("derives a positive strong-emphasis projection from the authenticated selector context", () => {
+    const pdfText = "Reference: VALUE";
+    const monidText = "Reference: **VALUE**";
+    const analysis = draft({ claims: [{
+      claim_id: "contextual-positive", topic: "opaque", claim_text: "**VALUE**",
+      claim_type: "source", confidence: 1, document_sha256: sha, amendment_number: null,
+      effect: "add", citations: [citation(pdfText)], supersedes_claim_ids: []
+    }] });
+    const { authority } = verifyPresentationBundle({
+      pdfText, monidText, analysis, selections: { "c:0": monidText }
+    });
+    expect(selectorAuthenticatedPresentationValue(
+      authority, "c", "contextual-positive", "claim_text", "**VALUE**"
+    )).toBe("VALUE");
+  });
+
+  it.each([
+    ["intraword", "Reference: x**VALUE**y"],
+    ["backtick-code", "Reference: `**VALUE**`"]
+  ])("preserves literal strong markers in %s selector context", (label, sourceText) => {
+    const analysis = draft({ claims: [{
+      claim_id: label, topic: "opaque", claim_text: "**VALUE**", claim_type: "source",
+      confidence: 1, document_sha256: sha, amendment_number: null, effect: "add",
+      citations: [citation(sourceText)], supersedes_claim_ids: []
+    }] });
+    const { authority } = verifyPresentationBundle({
+      pdfText: sourceText, monidText: sourceText, analysis, selections: { "c:0": sourceText }
+    });
+    expect(authority.records[0]?.publication).toBe("verified");
+    expect(selectorAuthenticatedPresentationValue(
+      authority, "c", label, "claim_text", "**VALUE**"
+    )).toBeNull();
+  });
+
+  it("fails closed when the raw field repeats inside one authenticated selector", () => {
+    const pdfText = "Reference: VALUE and VALUE";
+    const monidText = "Reference: **VALUE** and **VALUE**";
+    const analysis = draft({ claims: [{
+      claim_id: "repeated-context", topic: "opaque", claim_text: "**VALUE**",
+      claim_type: "source", confidence: 1, document_sha256: sha, amendment_number: null,
+      effect: "add", citations: [citation(pdfText)], supersedes_claim_ids: []
+    }] });
+    const { authority } = verifyPresentationBundle({
+      pdfText, monidText, analysis, selections: { "c:0": monidText }
+    });
+    expect(selectorAuthenticatedPresentationValue(
+      authority, "c", "repeated-context", "claim_text", "**VALUE**"
+    )).toBeNull();
+  });
+
+  it("projects typed fields in memory, preserves raw PDF evidence, and publishes non-Claim records without summary-topic routing", () => {
+    const pdfClauses = [
+      "Solicitation No.: RFP-12345",
+      "The Bidder must provide three references.",
+      "Late delivery may delay acceptance.",
+      "Technical weighting is 70%."
+    ];
+    const monidClauses = [
+      "Solicitation No.: **RFP-12345**",
+      "The Bidder **must provide three references**.",
+      "**Late delivery** may delay acceptance.",
+      "Technical weighting is **70%**."
+    ];
+    const analysis = draft({
+      claims: [{
+        claim_id: "number", topic: "solicitation number", claim_text: "**RFP-12345**",
+        claim_type: "source", confidence: 1, document_sha256: sha, amendment_number: null,
+        effect: "add", citations: [citation(pdfClauses[0]!)], supersedes_claim_ids: []
+      }, {
+        claim_id: "misrouted-claim", topic: "solicitation number",
+        claim_text: "The Bidder **must provide three references**.", claim_type: "source",
+        confidence: 1, document_sha256: sha, amendment_number: null, effect: "add",
+        citations: [citation(pdfClauses[1]!)], supersedes_claim_ids: []
+      }],
+      requirements: [{
+        id: "references", topic: "solicitation number", category: "mandatory",
+        text: "The Bidder **must provide three references**.", evidence_needed: null,
+        consequence: null, document_sha256: sha, amendment_number: null, effect: "add",
+        citations: [citation(pdfClauses[1]!)]
+      }],
+      risks: [{
+        id: "delivery-risk", topic: "solicitation number", severity: "medium",
+        category: "delivery", finding: "**Late delivery** may delay acceptance.",
+        impact: pdfClauses[2]!, recommended_action: pdfClauses[2]!, document_sha256: sha,
+        amendment_number: null, effect: "add", citations: [citation(pdfClauses[2]!)]
+      }],
+      evaluation: { rules: [{
+        id: "technical", topic: "evaluation", field: "technical_weight", value: "**70%**",
+        document_sha256: sha, amendment_number: null, effect: "add",
+        citations: [citation(pdfClauses[3]!)]
+      }] }
+    });
+    const { authority, state } = verifyPresentationBundle({
+      pdfText: pdfClauses.join("\n"),
+      monidText: monidClauses.join("\n"),
+      analysis,
+      selections: {
+        "c:0": monidClauses[0]!, "c:1": monidClauses[1]!, "q:0": monidClauses[1]!,
+        "r:0": monidClauses[2]!, "e:0": monidClauses[3]!
+      }
+    });
+
+    expect(authority.records.every((record) => record.publication === "verified")).toBe(true);
+    expect(JSON.stringify(authority)).not.toContain("**");
+    expect(selectorAuthenticatedPresentationValue(
+      authority, "c", "number", "claim_text", "**RFP-12345**"
+    )).toBe("RFP-12345");
+    const materialized = materializeAnalysis({
+      draft: analysis,
+      documents: [state.source],
+      manifests: [manifest(1)],
+      costs: [],
+      submissionAdjudication: state.submission,
+      recordAuthority: authority,
+      expiresAt: new Date("2026-09-04T00:00:00.000Z")
+    }).result;
+
+    expect(materialized.claims.find((claim) => claim.claim_id === "number")?.claim_text)
+      .toBe("RFP-12345");
+    expect(materialized.claims.find((claim) => claim.claim_id === "number")?.citations[0]?.evidence_quote)
+      .toBe(pdfClauses[0]);
+    expect(materialized.claims.some((claim) => claim.claim_id === "misrouted-claim")).toBe(false);
+    expect(materialized.requirements.find((item) => item.id === "references")?.text)
+      .toBe(pdfClauses[1]);
+    expect(materialized.risks.find((item) => item.id === "delivery-risk")?.finding)
+      .toBe(pdfClauses[2]);
+    expect(materialized.evaluation.technical_weight).toBe(70);
+    expect(materialized.requirements.filter((item) => item.status === "active").length)
+      .toBeGreaterThanOrEqual(1);
+    expect([
+      materialized.evaluation.mandatory_gate,
+      materialized.evaluation.rated_threshold,
+      materialized.evaluation.technical_weight,
+      materialized.evaluation.financial_weight,
+      materialized.evaluation.selection_method
+    ].filter((value) => value !== null).length)
+      .toBeGreaterThanOrEqual(1);
+  });
+
+  it("fails closed when the ephemeral sidecar is absent or its receipt is cloned or mutated", () => {
+    const pdfText = "Solicitation No.: RFP-12345";
+    const monidText = "Solicitation No.: **RFP-12345**";
+    const analysis = draft({ claims: [{
+      claim_id: "number", topic: "solicitation number", claim_text: "**RFP-12345**",
+      claim_type: "source", confidence: 1, document_sha256: sha, amendment_number: null,
+      effect: "add", citations: [citation(pdfText)], supersedes_claim_ids: []
+    }] });
+    const { authority } = verifyPresentationBundle({
+      pdfText, monidText, analysis, selections: { "c:0": monidText }
+    });
+    const clone = structuredClone(authority);
+    expect(recordAuthorityManifestIntegrity(clone)).toBe(true);
+    expect(selectorAuthenticatedPresentationValue(
+      clone, "c", "number", "claim_text", "**RFP-12345**"
+    )).toBeNull();
+    expect(selectorAuthenticatedPresentationValue(
+      authority, "c", "number", "claim_text", "**RFP-12346**"
+    )).toBeNull();
+    const originalCanonicalDigest = authority.records[0]!.canonical_record_digest;
+    authority.records[0]!.canonical_record_digest = "0".repeat(64);
+    expect(selectorAuthenticatedPresentationValue(
+      authority, "c", "number", "claim_text", "**RFP-12345**"
+    )).toBeNull();
+    authority.records[0]!.canonical_record_digest = originalCanonicalDigest;
+    const originalEvidenceHash = authority.origins[0]!.citation_bindings[0]!.evidence_quote_sha256;
+    authority.origins[0]!.citation_bindings[0]!.evidence_quote_sha256 = "0".repeat(64);
+    expect(selectorAuthenticatedPresentationValue(
+      authority, "c", "number", "claim_text", "**RFP-12345**"
+    )).toBeNull();
+    authority.origins[0]!.citation_bindings[0]!.evidence_quote_sha256 = originalEvidenceHash;
+    const originalVersion = authority.version;
+    authority.version = 2;
+    expect(selectorAuthenticatedPresentationValue(
+      authority, "c", "number", "claim_text", "**RFP-12345**"
+    )).toBeNull();
+    authority.version = originalVersion;
+    expect(selectorAuthenticatedPresentationValue(
+      authority, "c", "number", "evaluation_value", "**RFP-12345**"
+    )).toBeNull();
+  });
+
+  it("keeps evaluation role binding strict and rejects swapped 70/30 values", () => {
+    const pdfText = "Technical weighting is 70% and financial weighting is 30%.";
+    const monidText = "Technical weighting is **70%** and financial weighting is **30%**.";
+    const analysis = draft({ evaluation: { rules: [{
+      id: "technical", topic: "evaluation", field: "technical_weight", value: "**30%**",
+      document_sha256: sha, amendment_number: null, effect: "add", citations: [citation(pdfText)]
+    }] } });
+    const { authority, state } = verifyPresentationBundle({
+      pdfText, monidText, analysis, selections: { "e:0": monidText }
+    });
+    const materialized = materializeAnalysis({
+      draft: analysis, documents: [state.source], manifests: [manifest(1)], costs: [],
+      submissionAdjudication: state.submission, recordAuthority: authority,
+      expiresAt: new Date("2026-09-04T00:00:00.000Z")
+    }).result;
+    expect(materialized.evaluation.technical_weight).toBeNull();
+  });
+
+  it.each([
+    ["digit", "**2055**", "The projection horizon is 2050.", "The projection horizon is **2050**."],
+    ["denominator", "**50/100**", "The minimum score is 50/94.", "The minimum score is **50/94**."],
+    ["date-time-timezone", "**September 15, 2026 at 14:00 EST**",
+      "Closing is September 15, 2026 at 14:00 MDT.",
+      "Closing is **September 15, 2026 at 14:00 MDT**."],
+    ["selection-phrase", "**lowest evaluated price**",
+      "The highest combined rating will be selected.",
+      "The **highest combined rating** will be selected."],
+    ["negation", "Bidders **must not submit** a bond.",
+      "Bidders must submit a bond.", "Bidders **must submit** a bond."],
+    ["optional", "Bidders **must submit** a bond.",
+      "Bidders may submit a bond.", "Bidders **may submit** a bond."],
+    ["blank", "**0**", "Amount: ______", "Amount: ______"],
+    ["identifier", "file_name_", "filename", "**filename**"],
+    ["list-marker", "- value", "value", "**value**"],
+    ["nested-delimiter", "****value****", "value", "**value**"],
+    ["long-delimiter", "________value________", "value", "**value**"]
+  ])("does not use presentation projection to repair a %s mutation", (
+    label, modelValue, pdfText, monidText
+  ) => {
+    const analysis = draft({ claims: [{
+      claim_id: label, topic: "opaque", claim_text: modelValue, claim_type: "source",
+      confidence: 1, document_sha256: sha, amendment_number: null, effect: "add",
+      citations: [citation(pdfText)], supersedes_claim_ids: []
+    }] });
+    const { authority } = verifyPresentationBundle({
+      pdfText, monidText, analysis, selections: { "c:0": monidText }
+    });
+    expect(authority.records[0]?.publication).toBe("verified");
+    expect(selectorAuthenticatedPresentationValue(
+      authority, "c", label, "claim_text", modelValue
+    )).toBeNull();
+  });
+
+  it("does not let a valid presentation projection erase a source condition", () => {
+    const pdfText = "Bidders must submit a bond if requested.";
+    const monidText = "Bidders **must submit a bond** if requested.";
+    const analysis = draft({ claims: [{
+      claim_id: "conditional", topic: "opaque", claim_text: "Bidders **must submit a bond**",
+      claim_type: "source", confidence: 1, document_sha256: sha, amendment_number: null,
+      effect: "add", citations: [citation(pdfText)], supersedes_claim_ids: []
+    }] });
+    const { authority, state } = verifyPresentationBundle({
+      pdfText, monidText, analysis, selections: { "c:0": monidText }
+    });
+    expect(selectorAuthenticatedPresentationValue(
+      authority, "c", "conditional", "claim_text", "Bidders **must submit a bond**"
+    )).toBe("Bidders must submit a bond");
+    const result = materializeAnalysis({
+      draft: analysis, documents: [state.source], manifests: [manifest(1)], costs: [],
+      submissionAdjudication: state.submission, recordAuthority: authority,
+      expiresAt: new Date("2026-09-04T00:00:00.000Z")
+    }).result;
+    expect(result.claims.some((claim) => claim.claim_id === "conditional")).toBe(false);
   });
 });

@@ -647,3 +647,34 @@ revision_round: 1
 verdict: PASS
 findings: { P0: 0, P1: 0, P2: 0 }
 ```
+
+## T21 Selector-authenticated presentation materialization
+
+```yaml
+id: T21
+owner_profile: backend
+objective: Let exact-bound records validate through the same narrow presentation projection used for source alignment and remove summary-field coupling from non-Claim records, without adding model calls or weakening objective evidence gates.
+depends_on: [QA18]
+include_paths: [src/lib/analysis/record-authority.ts, src/lib/analysis/materialize.ts, src/lib/providers/openai.ts, tests/unit/**, tests/golden/**, docs/specs/MH-001-rfp-xray/**, docs/agent_context/**]
+exclude_paths: [src/app/**, src/components/**, drizzle/**, videos/**]
+edits_allowed: true
+acceptance: [AC-2, AC-4, AC-5, AC-6, AC-9, AC-10]
+status: completed_handoff
+```
+
+## QA19 T21 independent materialization review
+
+```yaml
+id: QA19
+owner_profile: reviewer
+objective: Falsify projection provenance, typed role/scalar safety, raw public citation preservation, non-Claim taxonomy isolation, blank prices, numeric conflicts, polarity, and amendment lineage.
+depends_on: [T21]
+include_paths: [src/lib/analysis/record-authority.ts, src/lib/analysis/materialize.ts, src/lib/providers/openai.ts, tests/unit/**, tests/golden/**]
+exclude_paths: []
+edits_allowed: false
+acceptance: [AC-2, AC-4, AC-5, AC-6, AC-9, AC-10, AC-11]
+status: completed_pass
+revision_round: 2
+verdict: PASS
+findings: { P0: 0, P1: 0, P2: 0 }
+```

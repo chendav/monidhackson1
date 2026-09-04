@@ -3813,3 +3813,54 @@ Exact local evidence:
 
 No full suite, build, network/provider/paid call, deployment, credential
 access, commit, or push occurred.
+
+## T21 — Selector-authenticated presentation materialization
+
+Status: `completed_handoff_revision_2`; implementation evidence only, pending
+independent QA19 approval.
+
+- Exact selector-bound records may use a process-local presentation projection
+  for deterministic typed validation. The projection is derived at one unique
+  field offset in the full selector context and paired to that selector's
+  citation ordinal and exact PDF.js evidence slice.
+- The full selector/source bodies and projection sidecar are held only in a
+  `WeakMap` keyed by the exact verified manifest. They are absent from the
+  authority receipt, persistence, and logs. A validated projected field value
+  may enter the public result, while public evidence remains the exact PDF.js
+  quote. Cloned, mutated, recovered, ambiguous, unbound, or discarded records
+  fail closed.
+- Requirement and Risk topics are taxonomy only and no longer route those
+  records through summary-field validation. Claims remain strictly routed;
+  Evaluation retains explicit scalar, denominator, role, 70/30, and selection
+  method checks.
+- No fuzzy matching, digit repair, broad normalization, conflict winner,
+  provider call, or retry was added.
+- QA19 revision 1 found and closed a contextual provenance defect: standalone
+  field parsing could erase literal intraword markers. Projection now uses the
+  complete selector context; intraword, backtick, and repeated-field cases fail
+  closed.
+- QA19 also identified a stale Edmonton audit expectation left behind when
+  commit `64a1100` added deliberate 500-UTF16 fragment overlap. The test, not
+  the production planner, was updated to the current four-batch plan and now
+  assigns representative records to the source map that exactly resolves them.
+
+Changed implementation/test paths:
+
+- `src/lib/analysis/record-authority.ts`
+- `src/lib/analysis/materialize.ts`
+- `tests/unit/record-authority.test.ts`
+- `tests/golden/official-fixture-audit.test.ts`
+
+Exact local evidence:
+
+- Focused T21 suite: PASS, 5 files and 324 tests.
+- Official fixture audit with `RFP_XRAY_FIXTURE_DIR` set to the frozen local
+  source directory: PASS, 3/3 tests.
+- OpenAI adapter suite: PASS, 54/54 tests.
+- Edmonton packing is four inputs of `[94849, 95663, 94127, 93341]` bytes;
+  control-plane bounds total 23697, output floors total 24889, and the minimum
+  paid batch window is 88 seconds. All remain inside existing limits.
+- Scoped ESLint, `tsc --noEmit`, and `git diff --check`: PASS.
+
+No network/provider/paid call, deployment, credential access, commit, or push
+occurred during T21 implementation.

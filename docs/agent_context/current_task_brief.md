@@ -1,5 +1,35 @@
 # Current Task Brief
 
+## Authoritative release continuation — T21
+
+This section supersedes T20 and older current-state text below.
+
+- QA19 Revision 2 passed with P0=0/P1=0 after closing contextual projection
+  provenance and stale Edmonton packing-fixture findings. The next gate is an
+  atomic candidate commit and immutable deployment, not more extraction tuning.
+- T20 commit `55c2e04cc2e71252513d90db4e5e066fcb8b5e43` is deployed as
+  `dpl_EK7UXxWdvC6BbuMqCm7EbSz7Pkvg`; runtime/provider attestations, exact
+  health, public smoke 4/4, and saved-fixture regression 10/10 passed.
+- Its single authorized shuffled CER run ended `partial` after 217,413 ms and
+  USD 1.187588 conservative cost. All four Monid parses, five OpenAI batches,
+  and controlled source cleanup succeeded. No retry occurred.
+- T20 materially improved record authority: verified publication rose from
+  43/195 to 101/186, source-unlocated fell from 106 to 59, and relation-gap
+  fell from 41 to 16. Materialization nevertheless removed every model record,
+  leaving zero requirements and zero evaluation fields.
+- Offline falsification proves selector-bound Markdown presentation can pass
+  physical authority while typed solicitation/evaluation values fail later
+  deterministic presentation/field comparisons. A second semantic model call
+  is rejected as unnecessary and unable to repair this deterministic bug.
+- T21 implements only selector-authenticated, ephemeral presentation
+  projection plus removal of summary-field routing from non-Claim records.
+  Public evidence remains the byte-exact PDF.js quote. No fuzzy matching,
+  number repair, extra provider call, retry, or persisted source body is in
+  scope.
+- The release automation remains PAUSED. No paid run is authorized before T21
+  implementation, full local gates, independent QA19 PASS, immutable deploy,
+  fresh attestations, and health/smoke.
+
 ## Authoritative release continuation — T20
 
 This section supersedes T19 and older current-state text below.

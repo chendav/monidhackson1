@@ -69,6 +69,15 @@ export type RecordSourceBinding =
   | "relation_conflict";
 export type RecordSemanticCrosscheck = "consistent" | "disagrees" | "unknown";
 export type RecordPublication = "verified" | "discarded";
+export type RecordPresentationField =
+  | "claim_text"
+  | "requirement_text"
+  | "requirement_evidence_needed"
+  | "requirement_consequence"
+  | "risk_finding"
+  | "risk_impact"
+  | "risk_recommended_action"
+  | "evaluation_value";
 export type RecordAuthorityEnvelope = z.infer<typeof RecordAuthorityEnvelopeSchema>;
 export type RecordAuthorityPhysicalBinding = z.infer<typeof RecordAuthorityPhysicalBindingSchema>;
 
@@ -189,6 +198,32 @@ export interface VerifiedRecordAuthorityManifest {
   origins: VerifiedOriginRecordAuthority[];
   records: JoinedRecordAuthority[];
 }
+
+interface AuthenticatedPresentationField {
+  raw_sha256: string;
+  projected_sha256: string;
+  projected_value: string;
+}
+
+interface AuthenticatedPresentationRecord {
+  alignment_version: typeof RECORD_SOURCE_ALIGNMENT_VERSION;
+  canonical_record_digest: string;
+  authority_binding_digest: string;
+  fields: Partial<Record<RecordPresentationField, AuthenticatedPresentationField>>;
+}
+
+interface AuthenticatedPresentationSidecar {
+  manifest_digest: string;
+  records: Map<string, AuthenticatedPresentationRecord>;
+}
+
+// Deliberately process-local and weakly held. Full selector/source bodies and
+// the sidecar must not enter the authority receipt, persistence, or logs. A
+// validated projected field value may intentionally enter the public result.
+const authenticatedPresentationSidecars = new WeakMap<
+  VerifiedRecordAuthorityManifest,
+  AuthenticatedPresentationSidecar
+>();
 
 export const RECORD_AUTHORITY_PUBLICATION_REASON_KEYS = [
   "verified",
@@ -431,6 +466,12 @@ interface OriginRecord {
   reason: string | null;
   wholeBidChannels: Set<SubmissionChannelSignature>;
   citationBindings: RecordAuthorityCitationBinding[];
+  /** Ephemeral authenticated selector bodies; never copied into the receipt. */
+  selectedSourceSpans: Array<{
+    citationOrdinal: number;
+    sourceText: string;
+    evidenceQuote: string;
+  }>;
 }
 
 export function recordsIn(draft: DraftAnalysis): Array<{
@@ -683,6 +724,164 @@ function alignmentUnits(
   while (units[0]?.value === " ") units.shift();
   while (units.at(-1)?.value === " ") units.pop();
   return units;
+}
+
+function contextualPresentationProjection(selectorSource: string, rawValue: string) {
+  const occurrences = everyMatch(selectorSource, rawValue);
+  if (occurrences.length !== 1) return null;
+  const fieldStart = occurrences[0]!;
+  const fieldEnd = fieldStart + rawValue.length;
+  const selectorUnits = alignmentUnits(selectorSource, {
+    markdown: true,
+    pdfPage1Based: null
+  });
+  const intersecting = selectorUnits.filter((unit) =>
+    unit.rawStart < fieldEnd && unit.rawEnd > fieldStart
+  );
+  if (intersecting.some((unit) => unit.value !== " " &&
+    (unit.rawStart < fieldStart || unit.rawEnd > fieldEnd))) return null;
+  const fieldUnits = selectorUnits.filter((unit) =>
+    unit.rawStart >= fieldStart && unit.rawEnd <= fieldEnd
+  );
+  while (fieldUnits[0]?.value === " ") fieldUnits.shift();
+  while (fieldUnits.at(-1)?.value === " ") fieldUnits.pop();
+  return fieldUnits.length > 0 ? fieldUnits.map((unit) => unit.value).join("") : null;
+}
+
+function presentationFields(
+  kind: RecordKind,
+  record: ModelRecord
+): Array<[RecordPresentationField, string]> {
+  if (kind === "c") {
+    return [["claim_text", (record as DraftAnalysis["claims"][number]).claim_text]];
+  }
+  if (kind === "q") {
+    const requirement = record as DraftAnalysis["requirements"][number];
+    const fields: Array<[RecordPresentationField, string]> = [
+      ["requirement_text", requirement.text]
+    ];
+    if (requirement.evidence_needed) {
+      fields.push(["requirement_evidence_needed", requirement.evidence_needed]);
+    }
+    if (requirement.consequence) {
+      fields.push(["requirement_consequence", requirement.consequence]);
+    }
+    return fields;
+  }
+  if (kind === "r") {
+    const risk = record as DraftAnalysis["risks"][number];
+    return [
+      ["risk_finding", risk.finding],
+      ["risk_impact", risk.impact],
+      ["risk_recommended_action", risk.recommended_action]
+    ];
+  }
+  return [["evaluation_value", (record as DraftAnalysis["evaluation"]["rules"][number]).value]];
+}
+
+function authorityBindingDigest(
+  manifest: VerifiedRecordAuthorityManifest,
+  record: JoinedRecordAuthority
+) {
+  const origins = record.contributing_origin_record_keys.map((key) =>
+    manifest.origins.find((origin) => origin.origin_record_key === key)
+  );
+  if (origins.some((origin) => !origin)) return null;
+  return sha256Hex(stableJson(origins.map((origin) => ({
+    origin_record_key: origin!.origin_record_key,
+    canonical_record_digest: origin!.canonical_record_digest,
+    publication: origin!.publication,
+    citation_bindings: origin!.citation_bindings
+  }))));
+}
+
+function attachAuthenticatedPresentationSidecar(
+  manifest: VerifiedRecordAuthorityManifest,
+  groups: ReadonlyMap<string, OriginRecord[]>
+) {
+  if (!recordAuthorityManifestIntegrity(manifest)) return;
+  const records = new Map<string, AuthenticatedPresentationRecord>();
+  for (const record of manifest.records) {
+    if (record.publication !== "verified") continue;
+    const group = groups.get(`${record.kind}:${record.merged_record_id}`);
+    const bindingDigest = authorityBindingDigest(manifest, record);
+    if (!group || !bindingDigest || group.length === 0 ||
+      group.some((origin) => origin.publication !== "verified")) continue;
+    const representative = group[0]!.record;
+    const fields: Partial<Record<RecordPresentationField, AuthenticatedPresentationField>> = {};
+    for (const [field, rawValue] of presentationFields(record.kind, representative)) {
+      const projections = group.map((origin) => {
+        if (!presentationFields(origin.kind, origin.record).some(
+          ([candidateField, candidateValue]) =>
+            candidateField === field && candidateValue === rawValue
+        )) return null;
+        const paired = origin.selectedSourceSpans.flatMap((selection) => {
+          const selectedCitation = citations(origin.record)[selection.citationOrdinal];
+          if (!selectedCitation || selectedCitation.evidence_quote !== selection.evidenceQuote) {
+            return [];
+          }
+          const projected = contextualPresentationProjection(selection.sourceText, rawValue);
+          if (!projected || projected === rawValue) return [];
+          const exactPdfValue = alignmentUnits(selection.evidenceQuote, {
+            markdown: false,
+            pdfPage1Based: null
+          }).map((unit) => unit.value).join("");
+          return exactPdfValue.includes(projected) ? [projected] : [];
+        });
+        return paired.length === 1 ? paired[0]! : null;
+      });
+      if (projections.some((projection) => projection === null)) continue;
+      const uniqueProjections = new Set(projections as string[]);
+      if (uniqueProjections.size !== 1) continue;
+      const projectedValue = [...uniqueProjections][0]!;
+      fields[field] = {
+        raw_sha256: sha256Hex(rawValue),
+        projected_sha256: sha256Hex(projectedValue),
+        projected_value: projectedValue
+      };
+    }
+    if (Object.keys(fields).length === 0) continue;
+    records.set(`${record.kind}:${record.merged_record_id}`, {
+      alignment_version: RECORD_SOURCE_ALIGNMENT_VERSION,
+      canonical_record_digest: record.canonical_record_digest,
+      authority_binding_digest: bindingDigest,
+      fields
+    });
+  }
+  authenticatedPresentationSidecars.set(manifest, {
+    manifest_digest: manifest.record_manifest_digest,
+    records
+  });
+}
+
+/**
+ * Returns only a process-local projection authenticated by the exact selector,
+ * physical-page binding, canonical record, receipt digest, and transform
+ * version. A cloned, persisted, mutated, or independently constructed receipt
+ * has no sidecar and therefore fails closed.
+ */
+export function selectorAuthenticatedPresentationValue(
+  manifest: VerifiedRecordAuthorityManifest,
+  kind: RecordKind,
+  recordId: string,
+  field: RecordPresentationField,
+  rawValue: string
+) {
+  const sidecar = authenticatedPresentationSidecars.get(manifest);
+  if (!sidecar || sidecar.manifest_digest !== manifest.record_manifest_digest ||
+    manifest.version !== RECORD_AUTHORITY_VERSION || !manifest.complete) return null;
+  const authority = manifest.records.find((record) =>
+    record.kind === kind && record.merged_record_id === recordId
+  );
+  const projection = sidecar.records.get(`${kind}:${recordId}`);
+  if (!authority || authority.publication !== "verified" || !projection ||
+    projection.alignment_version !== RECORD_SOURCE_ALIGNMENT_VERSION ||
+    projection.canonical_record_digest !== authority.canonical_record_digest ||
+    projection.authority_binding_digest !== authorityBindingDigest(manifest, authority)) return null;
+  const candidate = projection.fields[field];
+  if (!candidate || candidate.raw_sha256 !== sha256Hex(rawValue) ||
+    candidate.projected_sha256 !== sha256Hex(candidate.projected_value)) return null;
+  return candidate.projected_value;
 }
 
 function everyMatch(value: string, needle: string) {
@@ -993,6 +1192,7 @@ export function verifyRecordAuthorities(input: {
       let semanticCrosscheck: RecordSemanticCrosscheck = "unknown";
       const wholeBidChannels = new Set<SubmissionChannelSignature>();
       const citationBindings: RecordAuthorityCitationBinding[] = [];
+      const selectedSourceSpans: OriginRecord["selectedSourceSpans"] = [];
       if (!reason) {
         if (citations(record).length === 0) reason = "missing_exact_citation";
         if (!reason && (physicalBindings?.length !== citations(record).length ||
@@ -1047,6 +1247,15 @@ export function verifyRecordAuthorities(input: {
             reason = "invalid_private_source_binding";
             break;
           }
+          const sourceFragment = batch.sourceMap!.fragments.get(binding!.source_fragment_id)!;
+          selectedSourceSpans.push({
+            citationOrdinal,
+            sourceText: sourceFragment.source_text.slice(
+              binding!.selector_start_utf16,
+              binding!.selector_end_utf16
+            ),
+            evidenceQuote: citation.evidence_quote
+          });
           const start = binding!.evidence_start_utf16;
           const end = binding!.evidence_end_utf16;
           const midpoint = start + Math.floor((end - start - 1) / 2);
@@ -1161,7 +1370,8 @@ export function verifyRecordAuthorities(input: {
         publication,
         reason,
         wholeBidChannels,
-        citationBindings
+        citationBindings,
+        selectedSourceSpans
       });
       if (reason) discardedReasons.push(reason);
       if (semanticCrosscheck === "disagrees") submissionVetoReasons.push(reason ?? "semantic_disagreement");
@@ -1273,9 +1483,11 @@ export function verifyRecordAuthorities(input: {
     records: safeJoined
   };
   const sealed = sealRecordAuthorityManifest(manifestWithoutDigest);
-  return recordAuthorityReceiptWithinCapacity(sealed.receipt_byte_length)
-    ? sealed
-    : unresolvedRecordAuthority("record_authority_receipt_capacity");
+  if (!recordAuthorityReceiptWithinCapacity(sealed.receipt_byte_length)) {
+    return unresolvedRecordAuthority("record_authority_receipt_capacity");
+  }
+  attachAuthenticatedPresentationSidecar(sealed, joinedGroups);
+  return sealed;
 }
 
 export function unresolvedRecordAuthority(reason: string): VerifiedRecordAuthorityManifest {

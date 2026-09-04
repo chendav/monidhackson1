@@ -1,5 +1,28 @@
 # Current System State
 
+## 2026-09-04 T21 authoritative release state
+
+- QA19 Revision 2 is PASS with P0=0 and P1=0. The fixture-free full suite
+  passed 828 tests with 12 designed skips; official PDF audit passed 3/3;
+  focused QA passed 244/244; live-verifier passed 24/24; production build,
+  lint, and typecheck passed.
+- Current `HEAD`/`origin/main` and production are exact at
+  `55c2e04cc2e71252513d90db4e5e066fcb8b5e43`; deployment is
+  `dpl_EK7UXxWdvC6BbuMqCm7EbSz7Pkvg`.
+- The one T20 CER proof is terminal `partial`, cleanup-confirmed, retained, and
+  non-retryable. Sanitized identity SHA-256 is
+  `74e70c79bbe2870b16e1dad868b294a67150f1bec44f972a97b48d58b1bf5cf8`.
+- Record authority is integrity-complete: 101 verified, 85 discarded, 59
+  unlocated, six coverage gaps, 16 relation gaps, and four relation conflicts.
+  Submission adjudication covered all 75 pages and 25 fragments, verifying
+  112/116 candidates; four ownership mismatches remain.
+- Despite 101 verified records, public materialization emitted no active
+  requirements or evaluation fields. T21 is a deterministic validation repair,
+  not a parser, model, infrastructure, or search change.
+- The T21 candidate is approved but not yet committed or deployed. No paid
+  provider proof occurs before immutable deployment, fresh attestations, and
+  health/smoke.
+
 ## 2026-09-04 T20 authoritative release state
 
 - Production deployment `dpl_8b19zqRuYxcEAkJPoW33UyxZtsLC` at base commit

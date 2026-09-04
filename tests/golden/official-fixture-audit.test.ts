@@ -42,6 +42,7 @@ import { buildPdfPageIndex, normalizeEvidenceText, type PdfPageIndex } from "@/l
 import { discoverSubmissionCandidateLedger } from "@/lib/analysis/submission-channel";
 import { getConfig } from "@/lib/config";
 import {
+  OPENAI_MIN_PAID_BATCH_WINDOW_MS,
   mergeDrafts,
   prepareExtractionPlan,
   privateExtractionFormatForBatch,
@@ -279,27 +280,34 @@ describe("optional official-PDF local audit (PDFs are never committed)", () => {
       citation_document: sourceDocument
     }], modelPlanConfig());
     expect(extractionPlan.packingComplete).toBe(true);
-    expect(extractionPlan.inputs).toHaveLength(3);
+    expect(extractionPlan.inputs.map((input) => new TextEncoder().encode(input).byteLength))
+      .toEqual([94_849, 95_663, 94_127, 93_341]);
     expect(extractionPlan.inputs.every((input) =>
-      new TextEncoder().encode(input).byteLength <= 140_000
+      new TextEncoder().encode(input).byteLength < 140_000
     )).toBe(true);
+    expect(extractionPlan.bindings.map((binding) => binding.ordered_candidate_ids.length))
+      .toEqual([24, 20, 22, 19]);
     expect(extractionPlan.bindings.flatMap((binding) => binding.ordered_candidate_ids).toSorted())
       .toEqual(submissionLedger.candidates.map((candidate) => candidate.candidate_id).toSorted());
-    expect(extractionPlan.controlPlaneOutputUpperBoundBytes).toEqual([6700, 7592, 9222]);
+    expect(extractionPlan.controlPlaneOutputUpperBoundBytes).toEqual([6_081, 4_999, 6_577, 6_040]);
     expect(extractionPlan.controlPlaneOutputUpperBoundBytes.reduce((sum, bytes) => sum + bytes, 0))
-      .toBe(23_514);
+      .toBe(23_697);
+    expect(extractionPlan.minimumOutputTokenFloors).toEqual([6_379, 5_297, 6_875, 6_338]);
+    expect(extractionPlan.minimumOutputTokenFloors.reduce((sum, floor) => sum + floor, 0))
+      .toBe(24_889);
+    expect(extractionPlan.minimumOutputTokenFloors.reduce((sum, floor) => sum + floor, 0))
+      .toBeLessThan(50_000);
+    expect(extractionPlan.inputs.length * OPENAI_MIN_PAID_BATCH_WINDOW_MS).toBe(88_000);
     expect(extractionPlan.controlPlaneOutputPreflightInputs.every((item) =>
       (JSON.parse(item) as { submission_adjudication: { v: number } }).submission_adjudication.v === 5 &&
       !("record_authority" in JSON.parse(item))
     )).toBe(true);
     expect(Math.min(...extractionPlan.controlPlaneOutputUpperBoundBytes.map((bytes) =>
       Math.floor(50_000 / extractionPlan.inputs.length) - bytes
-    ))).toBe(7_444);
+    ))).toBe(5_923);
     expect(50_000 - extractionPlan.controlPlaneOutputUpperBoundBytes.reduce((sum, bytes) => sum + bytes, 0))
-      .toBe(26_486);
-    expect(dynamicFormatMeasurements(extractionPlan).every((bytes, index) =>
-      bytes <= [39_037, 35_676, 43_521][index]!
-    )).toBe(true);
+      .toBe(26_303);
+    expect(dynamicFormatMeasurements(extractionPlan).every((bytes) => bytes < 140_000)).toBe(true);
     const emptyAuthorityReceipt = verifyRecordAuthorities({
       batches: extractionPlan.bindings.map((binding, index) => ({
         binding,
@@ -318,8 +326,7 @@ describe("optional official-PDF local audit (PDFs are never committed)", () => {
     expect(emptyAuthorityReceipt.receipt_byte_length).toBe(166);
     expect(MAX_RECORD_AUTHORITY_RECEIPT_BYTES - emptyAuthorityReceipt.receipt_byte_length)
       .toBe(261_978);
-    const representativeDrafts: DraftAnalysis[] = [
-      emptyDraft({ claims: [{
+    const representativeEmail: DraftAnalysis["claims"][number] = {
         claim_id: "representative-email",
         topic: "whole-bid submission method",
         claim_text: submissionClause,
@@ -335,31 +342,59 @@ describe("optional official-PDF local audit (PDFs are never committed)", () => {
           section: "2.1.4"
         }],
         supersedes_claim_ids: []
-      }] }),
-      emptyDraft({ requirements: [representativeRequirement({
+      };
+    const representativeRequirements = [representativeRequirement({
         id: "representative-selection",
         topic: "basis of selection",
         category: "financial",
         quote: "The responsive bid with the lowest evaluated price will be recommended for award of\na contract.",
         documentSha256: EDMONTON_SHA256,
         amendmentNumber: null
-      })] }),
-      emptyDraft({ requirements: [representativeRequirement({
+      }), representativeRequirement({
         id: "representative-security",
         topic: "contract security",
         category: "security",
         quote: "The Contractor must, at all times during the performance of the Contract, hold a valid Designated Organization\nScreening (DOS)",
         documentSha256: EDMONTON_SHA256,
         amendmentNumber: null
-      })] })
+      })];
+    const representativeDrafts = extractionPlan.sourceMaps.map(() => emptyDraft());
+    const representativeRecords = [
+      {
+        kind: "c" as const, id: representativeEmail.claim_id,
+        record: representativeEmail, quote: submissionClause
+      },
+      ...representativeRequirements.map((record) => ({
+        kind: "q" as const, id: record.id, record, quote: record.text
+      }))
     ];
+    for (const item of representativeRecords) {
+      const sourceMapIndex = extractionPlan.sourceMaps.findIndex((sourceMap) =>
+        index.pages.some((page) => selectorsForEvidenceRepresentation(sourceMap, {
+          document_sha256: EDMONTON_SHA256,
+          pdf_page_1based: page.pdfPage1Based,
+          evidence_quote: item.quote
+        }, [sourceDocument]).length > 0)
+      );
+      expect(sourceMapIndex, `representative source map for ${item.id}`)
+        .toBeGreaterThanOrEqual(0);
+      if (item.kind === "c") representativeDrafts[sourceMapIndex]!.claims.push(item.record);
+      else representativeDrafts[sourceMapIndex]!.requirements.push(item.record);
+    }
     const representativeReceipt = verifyRecordAuthorities({
       batches: extractionPlan.bindings.map((binding, index) => ({
         binding,
         draft: representativeDrafts[index]!,
         authority: boundAuthority(
           representativeDrafts[index]!,
-          [[index === 0 ? "c" : "q", 0, index === 0 ? "s" : "n"]],
+          [
+            ...representativeDrafts[index]!.claims.map((_record, ordinal) => [
+              "c", ordinal, "s"
+            ] as ["c", number, "s"]),
+            ...representativeDrafts[index]!.requirements.map((_record, ordinal) => [
+              "q", ordinal, "n"
+            ] as ["q", number, "n"])
+          ],
           binding,
           extractionPlan.sourceMaps[index]!,
           [sourceDocument]

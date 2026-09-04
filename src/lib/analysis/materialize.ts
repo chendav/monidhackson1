@@ -8,7 +8,9 @@ import {
 import type { DraftAnalysis } from "@/lib/analysis/draft";
 import {
   recordAuthorityManifestMatchesDraft,
+  selectorAuthenticatedPresentationValue,
   type JoinedRecordAuthority,
+  type RecordPresentationField,
   type VerifiedRecordAuthorityManifest
 } from "@/lib/analysis/record-authority";
 import { hasCompleteInfrastructureCostCoverage } from "@/lib/cost-estimates";
@@ -940,6 +942,14 @@ export function materializeAnalysis(input: MaterializeInput): {
   ));
   const authorityFor = (kind: RecordAuthorityKind, id: string) =>
     materializedModelAuthorityForRecord(authorityByRecord, recoveredIdsByKind, kind, id);
+  const projectedValue = (
+    kind: RecordAuthorityKind,
+    id: string,
+    field: RecordPresentationField,
+    rawValue: string
+  ) => recordAuthorityIntegrity && input.recordAuthority && !recoveredIdsByKind[kind].has(id)
+    ? selectorAuthenticatedPresentationValue(input.recordAuthority, kind, id, field, rawValue) ?? rawValue
+    : rawValue;
   const authoritativeModelRecord = (kind: RecordAuthorityKind, id: string) => {
     if (!recordAuthorityEnforced) return true;
     const authority = authorityFor(kind, id);
@@ -1123,7 +1133,10 @@ export function materializeAnalysis(input: MaterializeInput): {
   const reviewClaims: AnalysisResult["claims"] = [];
   let unknownClaimCount = 0;
   for (const draftClaim of draftClaims) {
-    const claim = canonicalizeTypedSourceClaim(draftClaim);
+    const claim = canonicalizeTypedSourceClaim({
+      ...draftClaim,
+      claim_text: projectedValue("c", draftClaim.claim_id, "claim_text", draftClaim.claim_text)
+    });
     if (duplicateClaimIds.has(claim.claim_id)) {
       unsupportedItemsRemoved += 1;
       truthReviewItems += 1;
@@ -1329,7 +1342,25 @@ export function materializeAnalysis(input: MaterializeInput): {
   }> = [];
   const reviewRequirements: AnalysisResult["requirements"] = [];
   const nonAuthoritativeSubmissionRequirementIds = new Set<string>();
-  for (const requirement of draftRequirements) {
+  for (const draftRequirement of draftRequirements) {
+    const requirement = {
+      ...draftRequirement,
+      text: projectedValue(
+        "q", draftRequirement.id, "requirement_text", draftRequirement.text
+      ),
+      evidence_needed: draftRequirement.evidence_needed === null
+        ? null
+        : projectedValue(
+            "q", draftRequirement.id, "requirement_evidence_needed",
+            draftRequirement.evidence_needed
+          ),
+      consequence: draftRequirement.consequence === null
+        ? null
+        : projectedValue(
+            "q", draftRequirement.id, "requirement_consequence",
+            draftRequirement.consequence
+          )
+    };
     if (duplicateRequirementIds.has(requirement.id)) {
       unsupportedItemsRemoved += 1;
       truthReviewItems += 1;
@@ -1388,7 +1419,6 @@ export function materializeAnalysis(input: MaterializeInput): {
       citationsMatchDocument(matchingCitations, requirement.document_sha256) &&
       assertionTokensSupportedByCitations(requirement.text, matchingCitations) &&
       proseAssertionSupportedByCitations(requirement.text, matchingCitations) &&
-      topicFieldBindingSupported(requirement.topic, requirement.text, matchingCitations) &&
       (requirement.effect === "delete" || requirement.category !== "mandatory" || sourceMarksMandatory));
     if (!supported) {
       unsupportedItemsRemoved += 1;
@@ -1606,7 +1636,11 @@ export function materializeAnalysis(input: MaterializeInput): {
     rule: DraftAnalysis["evaluation"]["rules"][number]; citations: Citation[];
     document: MaterializeInput["documents"][number];
   }> = [];
-  for (const rule of draftEvaluationRules) {
+  for (const draftRule of draftEvaluationRules) {
+    const rule = {
+      ...draftRule,
+      value: projectedValue("e", draftRule.id, "evaluation_value", draftRule.value)
+    };
     if (duplicateEvaluationIds.has(rule.id)) {
       unsupportedItemsRemoved += 1;
       truthReviewItems += 1;
@@ -1718,7 +1752,15 @@ export function materializeAnalysis(input: MaterializeInput): {
     risk: DraftAnalysis["risks"][number]; citations: Citation[];
     document: MaterializeInput["documents"][number];
   }> = [];
-  for (const risk of input.draft.risks) {
+  for (const draftRisk of input.draft.risks) {
+    const risk = {
+      ...draftRisk,
+      finding: projectedValue("r", draftRisk.id, "risk_finding", draftRisk.finding),
+      impact: projectedValue("r", draftRisk.id, "risk_impact", draftRisk.impact),
+      recommended_action: projectedValue(
+        "r", draftRisk.id, "risk_recommended_action", draftRisk.recommended_action
+      )
+    };
     if (duplicateRiskIds.has(risk.id)) {
       unsupportedItemsRemoved += 1;
       truthReviewItems += 1;
@@ -1745,7 +1787,6 @@ export function materializeAnalysis(input: MaterializeInput): {
     const supported = Boolean(document && matchingCitations.length > 0 &&
       citationsMatchDocument(matchingCitations, risk.document_sha256) &&
       proseAssertionSupportedByCitations(risk.finding, matchingCitations) &&
-      topicFieldBindingSupported(risk.topic, risk.finding, matchingCitations) &&
       assertionTokensSupportedByCitations(
         `${risk.finding} ${risk.impact} ${risk.recommended_action}`,
         matchingCitations

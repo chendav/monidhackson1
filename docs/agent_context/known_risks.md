@@ -2,6 +2,25 @@
 
 Updated: 2026-09-04
 
+## T21 deterministic materialization risks
+
+- A presentation projection must never become public evidence or a general
+  Markdown sanitizer. It is valid only for an exact, unique, single-page,
+  SHA-bound selector and must use the same versioned allowlist as physical
+  alignment.
+- Blank price underscores, list/sign markers, identifiers, nested/long
+  delimiters, digits, decimals, percentages, denominators, dates, time zones,
+  negation, exclusivity, and amendment effects must remain literal and
+  fail-closed.
+- Requirement and Risk topics are taxonomy only. Removing their accidental
+  summary routing must not let them populate summary fields or bypass their
+  category, risk-lineage, scalar, polarity, or amendment checks.
+- The retained production audit does not reveal the exact reason for all 59
+  unlocated selectors. T21 may improve typed materialization but cannot claim
+  to recover unbound evidence.
+- No additional paid CER attempt is permitted until a new reviewed immutable
+  candidate exists; the prior T20 attempt is terminal and non-retryable.
+
 ## T20 authority-repair risks
 
 - The T20 local repair is independently accepted but has not yet proved that
