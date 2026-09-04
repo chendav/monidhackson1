@@ -239,3 +239,33 @@ that precedence rule.
 
 No deployment or paid run is authorized until the bounded local experiment and
 full regression gates pass and independent QA9 returns `PASS` with P0=0/P1=0.
+
+## T12 Addendum — Context is not authority
+
+The controlled T11 production run proved the prior structural correction:
+`quote_too_long=0` and `low_confidence=0`, and server-recovered selection stayed
+active. It also falsified the assumption that overlapping context windows can
+serve as independent authority units: the remaining 21 candidate failures were
+one offset mismatch, fourteen semantic uncertainties, and six cross-window
+overlap disagreements, with all 55 pages and 16 source fragments covered.
+
+Chief disposition: ACCEPT a canonical-core redesign; REJECT overlap voting,
+choosing a preferred window, weakening uncertainty, or adding a channel
+lexicon. Every page is partitioned into mutually exclusive half-open owned
+cores. Each core receives bounded left/right halo only for interpretation, and
+a relation belongs to exactly one core by a deterministic midpoint rule. The
+provider-private wire must explicitly mark each core's coverage complete or
+uncertain; uncertainty remains fail-closed. Ledger and wire versions must bump
+because ownership is part of candidate identity.
+
+The smallest experiment proves gapless one-owner page coverage, a unique owner
+for a 500-unit relation at each boundary, rejection of non-owner relations,
+relative/absolute offset safety, clear Email and unfamiliar SecureDrop cases,
+and empty administrative cores. The T11 run also contained two mixed canonical
+record relevances, but the redacted audit cannot prove whether they represent
+disjoint source occurrences. Chief therefore rejects relaxing that veto in T12;
+mixed remains fail-closed until a separately reviewed physical-occurrence model
+can falsify the unsafe counterexample.
+
+No deployment or paid run is authorized until this experiment, the full local
+gate, and independent QA10 pass with P0=0/P1=0.

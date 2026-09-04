@@ -92,7 +92,8 @@ cost. The product is document-only and does not search for tenders.
 
 ## Immediate Next Action
 
-Implement T11 provider wire v3 and recovered-selection precedence, run the
-bounded falsification matrix and full local gates, then obtain independent QA9.
-Only after QA9 PASS may the Chief deploy and authorize one controlled Edmonton
+Implement T12 canonical ownership cores with halo-only context and explicit core
+coverage while preserving mixed-record fail-closed behavior; run the
+falsification matrix and full local gates, then obtain independent QA10. Only
+after QA10 PASS may the Chief deploy and authorize another controlled Edmonton
 pilot. A full golden pass is required before the CER campaign.

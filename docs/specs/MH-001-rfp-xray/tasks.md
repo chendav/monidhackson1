@@ -313,6 +313,36 @@ handoff: qa_report.md
 status: completed_pass
 ```
 
+## T12 Canonical ownership-core submission ledger
+
+```yaml
+id: T12
+owner_profile: backend
+objective: Separate overlapping source context from non-overlapping semantic authority so every page position and relation has exactly one canonical owner, while preserving unfamiliar-channel and mixed-record fail-closed behavior.
+depends_on: [QA9]
+include_paths: [src/lib/providers/openai.ts, src/lib/analysis/submission-channel.ts, src/lib/analysis/record-authority.ts, src/lib/analysis/materialize.ts, src/lib/runs/submission-adjudication-audit.ts, tests/**, docs/specs/MH-001-rfp-xray/**]
+exclude_paths: [src/app/**, src/components/**, drizzle/**]
+edits_allowed: true
+acceptance: [AC-2, AC-4, AC-5, AC-9, AC-10]
+handoff: handoff-backend.md
+status: in_progress
+```
+
+## QA10 T12 canonical-core review
+
+```yaml
+id: QA10
+owner_profile: reviewer
+objective: Independently falsify complete non-overlapping core ownership, halo context, unique relation ownership, explicit coverage uncertainty, unfamiliar-channel handling, preserved mixed-record vetoes, and unchanged budgets and retries.
+depends_on: [T12]
+include_paths: [src/lib/providers/openai.ts, src/lib/analysis/submission-channel.ts, src/lib/analysis/record-authority.ts, src/lib/analysis/materialize.ts, src/lib/runs/submission-adjudication-audit.ts, tests/**]
+exclude_paths: []
+edits_allowed: false
+acceptance: [AC-2, AC-4, AC-5, AC-9, AC-10, AC-11]
+handoff: qa_report.md
+status: blocked_on_T12
+```
+
 ## T8 Publication/submission authority separation
 
 ```yaml

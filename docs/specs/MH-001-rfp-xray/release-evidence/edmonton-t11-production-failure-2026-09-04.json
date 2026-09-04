@@ -1,0 +1,77 @@
+{
+  "evidence_version": 1,
+  "observed_at": "2026-09-04",
+  "deployment_id": "dpl_59tDmjQMAuChSVASTy8RcWoKrf5o",
+  "git_commit_sha": "a3d7556ce2529ed7c838c0c318e564949bc862db",
+  "terminal_state": "ready",
+  "cleanup_confirmed": true,
+  "release_gate": "CORE_ACCURACY_GATE_FAILED",
+  "cost_micro_usd": {
+    "monid_actual": 3600,
+    "estimated": 1070768,
+    "known_total": 1074368,
+    "includes_failed_attempts": false
+  },
+  "public_result": {
+    "pages_total": 55,
+    "critical_claims": 38,
+    "critical_claims_cited": 38,
+    "citations_verified": 40,
+    "unsupported_items_removed": 68,
+    "mandatory_gate": true,
+    "submission_method": null,
+    "selection_method": "Lowest evaluated price",
+    "closing_date": null,
+    "search_events": 0,
+    "follow_embedded_link_events": 0
+  },
+  "submission_adjudication_audit": {
+    "version": 1,
+    "complete": false,
+    "resolution_status": "unresolved",
+    "expected_candidate_count": 81,
+    "verified_candidate_count": 60,
+    "expected_page_count": 55,
+    "covered_page_count": 55,
+    "expected_source_fragment_count": 16,
+    "verified_source_fragment_count": 16,
+    "expected_batch_count": 4,
+    "verified_batch_count": 0,
+    "unresolved_batch_count": 4,
+    "nonzero_unresolved_reason_counts": {
+      "offset_mismatch": 1,
+      "semantic_uncertainty": 14,
+      "overlap_disagreement": 6
+    }
+  },
+  "record_authority_audit": {
+    "version": 4,
+    "receipt_byte_length": 104557,
+    "receipt_limit_bytes": 262144,
+    "record_count": 86,
+    "complete": false,
+    "integrity_complete": true,
+    "package_veto": true,
+    "relevance": {
+      "s": 33,
+      "n": 51,
+      "u": 0,
+      "mixed": 2,
+      "missing": 0
+    },
+    "submission_veto_reason": {
+      "exact_submission_coverage_gap": 9,
+      "exact_submission_relation_gap": 11,
+      "exact_submission_relation_conflict": 0,
+      "exact_non_submission_overlap": 0,
+      "exact_semantic_uncertainty": 0,
+      "exact_relevance_disagreement": 2
+    }
+  },
+  "deployment_attestations": {
+    "runtime_payload_sha256": "3ab305f0160ade6f7d233ba69535a73d098a312de6dbc3373acf333b398771b8",
+    "provider_payload_sha256": "cb24876f18738bbf27c2ab6e9917bccdbf1de0fdcd08cab316153d7b6d93a6a2",
+    "monid_inspect_sha256": "37422033a3604c09dab4794b3ab8cb79998cb3b654394c2fdff56c4957f0d714"
+  },
+  "diagnosis_boundary": "T11 structurally eliminated overlong and low-confidence relation delivery failures and preserved the recovered selection method. The remaining submission failure is fully bounded to one offset mismatch, fourteen semantic-uncertainty decisions, and six overlap disagreements. No source text, raw run ID, page offsets, provider output, signed URL, or credential is stored here."
+}
