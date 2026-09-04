@@ -18,7 +18,7 @@ export const RECORD_SOURCE_ALIGNMENT_VERSION = "issued-origin-pdfjs-selector-utf
 export const MAX_RECORD_AUTHORITY_RECORDS_PER_BATCH = 2_600;
 export const MAX_MODEL_CITATIONS_PER_ANNOTATED_RECORD = 3;
 export const MAX_EXACT_OCCURRENCES_PER_CITATION = 8;
-export const MAX_RECORD_AUTHORITY_RECEIPT_BYTES = 262_144;
+export const MAX_RECORD_AUTHORITY_RECEIPT_BYTES = 524_288;
 
 const RecordAuthorityPhysicalBindingSchema = z.object({
   citation_ordinal: z.number().int().nonnegative().max(MAX_MODEL_CITATIONS_PER_ANNOTATED_RECORD - 1),

@@ -1,0 +1,12 @@
+task_id: MH-002
+chief_profile: chief
+implementers:
+  - profile: chief
+    tasks: [T1]
+  - profile: reframing
+    tasks: [T2]
+reviewer:
+  profile: reviewer
+  independent_from: [chief, reframing]
+parallel_groups:
+  - [T1, T2]

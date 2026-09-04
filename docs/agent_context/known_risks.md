@@ -1,6 +1,31 @@
 # Known Risks
 
+## MH-002 current risks
+
+- B-1: A snapshot could be mistaken for a release. Label it pre-refactor and
+  retain incomplete CER, Q&A, T27 review and release-pin limitations. Owner: chief.
+- B-2: Git publication could expose credentials, raw PDFs or cached responses.
+  Inspect staged paths and scan candidate text; keep .env*, .data and live
+  CodeGraph databases ignored. Owner: chief; open until pre-push check.
+- B-3: Replacing heuristics could simply move the same complexity into prompts.
+  Propose a minimal evidence model, field-local uncertainty, and a small
+  falsification experiment before migration. Owner: reframing/chief.
+- B-4: Full document Q&A conflicts with immediate text deletion. Plan an explicit
+  consent/retention decision; do not silently change production privacy policy.
+- B-5: Static graph edges are navigation evidence, not complete runtime proof.
+  Check important findings in source and state unsupported-file limits.
+
 Updated: 2026-09-04
+
+T26 confirmed a deterministic metadata-capacity failure: the256KiB authority
+receipt guard discards the whole manifest for the75-page package. Before any
+change measure actual pre-cap size and inspect persisted audit/API bounds.
+Do not remove the capacity guard, forge completeness or alter cached model facts.
+Measured receipt269326bytes; proposed cap524288. Existing auditv1-v4 share the
+old literal constant, so changing only that constant would break stored audit
+reads. Freeze legacy limits and version new auditsv5. Full manifest stays ephemeral.
+The standalone audit reader separately hardcodes versions/caps and must be
+updated in the same change, with historical compatibility tests.
 
 ## T25 remaining acceptance boundary
 
@@ -13,6 +38,9 @@ explicit costs/provenance and replay mode; never mutate original cached v7 data.
 T26 uses direct official HTTPS Monid inputs verified against pinned local bytes;
 this has a documented check/use gap and does not prove signed-upload cleanup.
 Its four per-source Monid locks and one model-package lock prevent paid replay.
+The direct official input was unavailable (HTTP403, no paid dispatch). T26 now
+uses a reviewed signed-source fallback; a failed delete must stop model work,
+and ignored per-object recovery controls must remain until deletion is verified.
 
 ## T25 current evidence-ownership defect
 

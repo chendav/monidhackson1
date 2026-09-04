@@ -10,13 +10,14 @@ import {
 } from "@/lib/analysis/record-authority";
 
 const CounterSchema = z.number().int().nonnegative().max(10_000);
-export const RECORD_AUTHORITY_AUDIT_VERSION = 4 as const;
+const LEGACY_RECORD_AUTHORITY_RECEIPT_BYTES = 262_144;
+export const RECORD_AUTHORITY_AUDIT_VERSION = 5 as const;
 const LegacyRecordAuthorityAuditSchema = z.object({
   version: z.union([z.literal(1), z.literal(2)]),
   manifest_digest: z.string().regex(/^[a-f0-9]{64}$/),
   receipt_byte_length: z.number().int().nonnegative()
-    .max(MAX_RECORD_AUTHORITY_RECEIPT_BYTES),
-  receipt_limit_bytes: z.literal(MAX_RECORD_AUTHORITY_RECEIPT_BYTES),
+    .max(LEGACY_RECORD_AUTHORITY_RECEIPT_BYTES),
+  receipt_limit_bytes: z.literal(LEGACY_RECORD_AUTHORITY_RECEIPT_BYTES),
   record_count: z.number().int().nonnegative(),
   complete: z.boolean(),
   recorded_at: z.string().datetime({ offset: true })
@@ -29,8 +30,8 @@ const fixedCounterObject = <T extends readonly string[]>(keys: T) => z.object(
 const Version3RecordAuthorityAuditSchema = z.object({
     version: z.literal(3),
     manifest_digest: z.string().regex(/^[a-f0-9]{64}$/),
-    receipt_byte_length: z.number().int().nonnegative().max(MAX_RECORD_AUTHORITY_RECEIPT_BYTES),
-    receipt_limit_bytes: z.literal(MAX_RECORD_AUTHORITY_RECEIPT_BYTES),
+    receipt_byte_length: z.number().int().nonnegative().max(LEGACY_RECORD_AUTHORITY_RECEIPT_BYTES),
+    receipt_limit_bytes: z.literal(LEGACY_RECORD_AUTHORITY_RECEIPT_BYTES),
     record_count: z.number().int().nonnegative().max(10_000),
     complete: z.boolean(),
     recorded_at: z.string().datetime({ offset: true }),
@@ -60,11 +61,14 @@ const Version3RecordAuthorityAuditSchema = z.object({
     }
   });
 
-const CurrentRecordAuthorityAuditSchema = z.object({
-    version: z.literal(RECORD_AUTHORITY_AUDIT_VERSION),
+const currentRecordAuthorityAuditSchema = <Version extends 4 | 5, Limit extends number>(
+  version: Version,
+  receiptLimitBytes: Limit
+) => z.object({
+    version: z.literal(version),
     manifest_digest: z.string().regex(/^[a-f0-9]{64}$/),
-    receipt_byte_length: z.number().int().nonnegative().max(MAX_RECORD_AUTHORITY_RECEIPT_BYTES),
-    receipt_limit_bytes: z.literal(MAX_RECORD_AUTHORITY_RECEIPT_BYTES),
+    receipt_byte_length: z.number().int().nonnegative().max(receiptLimitBytes),
+    receipt_limit_bytes: z.literal(receiptLimitBytes),
     record_count: z.number().int().nonnegative().max(10_000),
     complete: z.boolean(),
     integrity_complete: z.boolean(),
@@ -99,9 +103,19 @@ const CurrentRecordAuthorityAuditSchema = z.object({
     }
   });
 
+const Version4RecordAuthorityAuditSchema = currentRecordAuthorityAuditSchema(
+  4,
+  LEGACY_RECORD_AUTHORITY_RECEIPT_BYTES
+);
+const CurrentRecordAuthorityAuditSchema = currentRecordAuthorityAuditSchema(
+  RECORD_AUTHORITY_AUDIT_VERSION,
+  MAX_RECORD_AUTHORITY_RECEIPT_BYTES
+);
+
 export const RecordAuthorityAuditSchema = z.union([
   LegacyRecordAuthorityAuditSchema,
   Version3RecordAuthorityAuditSchema,
+  Version4RecordAuthorityAuditSchema,
   CurrentRecordAuthorityAuditSchema
 ]);
 

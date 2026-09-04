@@ -190,16 +190,16 @@ describe("record authority pipeline audit", () => {
 
     expect(completed.cleanupConfirmed).toBe(true);
     expect(completed.recordAuthorityAudit).toMatchObject({
-      version: 4,
+      version: 5,
       manifest_digest: actualReceiptDigest,
       receipt_byte_length: actualReceiptBytes,
-      receipt_limit_bytes: 262_144,
+      receipt_limit_bytes: 524_288,
       record_count: actualRecordCount,
       complete: true
     });
-    expect(completed.recordAuthorityAudit?.version === 4 &&
+    expect(completed.recordAuthorityAudit?.version === 5 &&
       completed.recordAuthorityAudit.counters.publication.verified).toBeGreaterThan(0);
-    if (completed.recordAuthorityAudit?.version !== 4) throw new Error("expected_v4_audit");
+    if (completed.recordAuthorityAudit?.version !== 5) throw new Error("expected_v5_audit");
     const counters = completed.recordAuthorityAudit.counters;
     expect(Object.values(counters.relevance).reduce((sum, count) => sum + count, 0))
       .toBe(actualRecordCount);
@@ -275,7 +275,7 @@ describe("record authority pipeline audit", () => {
     expect(completed.recordAuthorityAudit).toMatchObject({
       complete: false,
       record_count: 0,
-      receipt_limit_bytes: 262_144
+      receipt_limit_bytes: 524_288
     });
     expect(completed.result?.summary.submission_method).toBeNull();
   });

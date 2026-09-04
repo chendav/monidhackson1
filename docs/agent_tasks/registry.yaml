@@ -1,5 +1,11 @@
 version: 1
 tasks:
+  - id: MH-002
+    title: Indexed baseline and LLM-only core redesign plan
+    status: active
+    spec_dir: docs/specs/MH-002-llm-core-reframe
+    chief: chief
+    opened: 2026-09-04
   - id: MH-001
     title: RFP X-Ray contest MVP
     status: active

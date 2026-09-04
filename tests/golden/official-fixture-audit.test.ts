@@ -325,7 +325,7 @@ describe("optional official-PDF local audit (PDFs are never committed)", () => {
     expect(emptyAuthorityReceipt).toMatchObject({ complete: true, package_veto: false });
     expect(emptyAuthorityReceipt.receipt_byte_length).toBe(166);
     expect(MAX_RECORD_AUTHORITY_RECEIPT_BYTES - emptyAuthorityReceipt.receipt_byte_length)
-      .toBe(261_978);
+      .toBe(524_122);
     const representativeEmail: DraftAnalysis["claims"][number] = {
         claim_id: "representative-email",
         topic: "whole-bid submission method",
@@ -409,7 +409,7 @@ describe("optional official-PDF local audit (PDFs are never committed)", () => {
     expect(representativeReceipt).toMatchObject({ complete: true, package_veto: false });
     expect(representativeReceipt.receipt_byte_length).toBe(4_123);
     expect(MAX_RECORD_AUTHORITY_RECEIPT_BYTES - representativeReceipt.receipt_byte_length)
-      .toBe(258_021);
+      .toBe(520_165);
 
     const recoveredEvaluation = recoverBasisOfSelectionEvaluationAnchors(
       emptyDraft(),
@@ -594,7 +594,7 @@ describe("optional official-PDF local audit (PDFs are never committed)", () => {
     expect(50_000 - extractionPlan.controlPlaneOutputUpperBoundBytes.reduce((sum, bytes) => sum + bytes, 0))
       .toBe(15_559);
     expect(dynamicFormatMeasurements(extractionPlan)).toEqual([
-      38_139, 35_901, 30_300, 34_780, 30_298
+      37_047, 34_809, 29_208, 33_688, 29_206
     ]);
     const submissionAdjudication = verifiedFixtureSubmissionAdjudication(
       candidateDocuments,
@@ -618,7 +618,7 @@ describe("optional official-PDF local audit (PDFs are never committed)", () => {
     expect(emptyAuthorityReceipt).toMatchObject({ complete: true, package_veto: false });
     expect(emptyAuthorityReceipt.receipt_byte_length).toBe(166);
     expect(MAX_RECORD_AUTHORITY_RECEIPT_BYTES - emptyAuthorityReceipt.receipt_byte_length)
-      .toBe(261_978);
+      .toBe(524_122);
     const representativeQuotes = [
       {
         id: "representative-cer-mandatory", topic: "mandatory evaluation", category: "mandatory" as const,
@@ -706,7 +706,7 @@ describe("optional official-PDF local audit (PDFs are never committed)", () => {
     expect(representativeReceipt).toMatchObject({ complete: true, package_veto: false });
     expect(representativeReceipt.receipt_byte_length).toBe(6_429);
     expect(MAX_RECORD_AUTHORITY_RECEIPT_BYTES - representativeReceipt.receipt_byte_length)
-      .toBe(255_715);
+      .toBe(517_859);
 
     expect(base.pages[8].normalizedText).toContain("fails to meet all mandatory solicitation requirements non-compliant");
     expect(base.pages[10].normalizedText).toContain("minimum of fifty (50) points");

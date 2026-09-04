@@ -1,0 +1,19 @@
+task_id: MH-002
+acceptance_checks:
+  - id: AC-1
+    command_or_method: CodeGraph status, indexed source inventory, source-backed call path
+    required: true
+  - id: AC-2
+    command_or_method: staged hygiene checks, git log and ls-remote SHA comparison
+    required: true
+  - id: AC-3
+    command_or_method: independent source-backed plan and reframing review
+    required: true
+  - id: AC-4
+    command_or_method: independent Reviewer verdict with explicit scope boundary
+    required: true
+regression_checks: []
+review:
+  required: true
+  verdict: pending
+max_revision_rounds: 3

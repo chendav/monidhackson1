@@ -1,5 +1,34 @@
 # Current Task Brief
 
+## Active request — MH-002 baseline and LLM-only redesign plan
+
+The user paused product implementation and paid tests, then authorized CodeGraph
+indexing, a Git baseline commit/push, and an improvement plan. This section
+supersedes all historical continuation instructions below. Do not resume MH-001
+fixes, deployments, provider calls, or publication. Root owns index/Git/plan;
+a bounded read-only reframing worker advises, followed by independent review.
+Acceptance and current progress: `docs/specs/MH-002-llm-core-reframe/`.
+Required direction: LLM-only document semantics; deterministic code only for
+provenance, structure, calculations, access, lifecycle, and accounting.
+
+## Current real CER finding — receipt capacity, not quote guessing
+
+T26 captured all4 genuine Monid artifacts and all5 genuine v8 model batches.
+Model168503input/41149output tokens (estimateUSD0.311548), MonidactualUSD0.0036.
+The saved result is empty because verifyRecordAuthorities replaced its manifest
+with unresolvedRecordAuthority(record_authority_receipt_capacity):256KiB limit.
+There are216candidate records and188true physical receipts. Do NOT rerun paid
+providers. Next: measure the pre-capacity serialized receipt from offline replay,
+inspect every downstream bound, and test a bounded capacity/representation fix.
+No source-semantic gate relaxation is justified by this size failure.
+Offline capacity experiment measured269326bytes and restored156verified records,
+32requirements and correct50/94+70/30 evaluation without new calls. T27 proposes
+bounded524288 cap plus historical audit compatibility (v5 new/v1-v4 preserved).
+See t27-reframing.md; independent hypothesis review before implementation.
+Reviewer accepts the capacity hypothesis with one scope correction: include
+audit CLI/direct tests, preserving old caps and accepting v5 explicitly. Chief
+accepts corrected scope; authority_fix implements, independent review next.
+
 ## Current next action — T25 implementation review
 
 T25 is implemented and independently PASS (P0/P1=0), with 152 focused tests. Root's actual
@@ -12,6 +41,9 @@ to isolated diagnostic work. Reuse retained sources/responses before any new cal
 
 Checkpoint the reviewed citation milestone. T26 prepares a real CER/Monid cache capture so any later defect can be
 replayed locally; do not return to uncached full production retries.
+Official source HTTP403 occurred before any paid T26 dispatch. Use pinned cached
+PDFs through existing private signed-source storage, with finally deletion and
+Head404 receipts; independent Reviewer checks this bounded delta before capture.
 
 ## Authoritative continuation — T25 batch evidence ownership
 

@@ -1,0 +1,101 @@
+{
+  "evidence_class": "local_signed_source_component_not_production_workflow",
+  "documents": [
+    {
+      "source_sha256": "300a06081b195ea28f858feb20bd6780f596ceefc638495c4fdd63a5edea352c",
+      "markdown_sha256": "c761543a61a8ca022ea54c91e66b0f93beef70daa7b1b6ff0945fc337e17a2a1",
+      "markdown_bytes": 2347,
+      "monid_run_id_sha256": "d77f59b64dd9aecf484595f57d06d8720788392ace492f861159f68e6893bace",
+      "cost_amount": 0.0009,
+      "cost_currency": "USD",
+      "cost_value_unit": "currency_major",
+      "cost_provenance": {
+        "kind": "credentialed_inspect",
+        "inspect_schema_sha256": "cd7e2198180d872f11e0d5c328c7c312bdff79d2f5b0b0121021f5248725e7fa",
+        "value_path": "cost.value",
+        "currency_path": "cost.currency",
+        "value_unit": "currency_major",
+        "source_value": 0.0009,
+        "source_currency": "USD"
+      },
+      "elapsed_ms": 5027,
+      "cleanup_confirmed": true,
+      "captured_to_delete_ms": 403
+    },
+    {
+      "source_sha256": "894b876fdfdacb2aec0571f4cf2f29be08ebc2380c6e3251bb48885f69d31bfb",
+      "markdown_sha256": "b091777c9899f7c68a822c7216b789a41125a46aea6595ef547534a5b5ce1d55",
+      "markdown_bytes": 180248,
+      "monid_run_id_sha256": "2cb703c665d65606e88c2fda609eb14f0bd16b3811e90caa435d5400bd0debde",
+      "cost_amount": 0.0009,
+      "cost_currency": "USD",
+      "cost_value_unit": "currency_major",
+      "cost_provenance": {
+        "kind": "credentialed_inspect",
+        "inspect_schema_sha256": "cd7e2198180d872f11e0d5c328c7c312bdff79d2f5b0b0121021f5248725e7fa",
+        "value_path": "cost.value",
+        "currency_path": "cost.currency",
+        "value_unit": "currency_major",
+        "source_value": 0.0009,
+        "source_currency": "USD"
+      },
+      "elapsed_ms": 12713,
+      "cleanup_confirmed": true,
+      "captured_to_delete_ms": 345
+    },
+    {
+      "source_sha256": "98f6299df44edaab9e8ec834b476d88358d5af75923646b5fb190e709be1204f",
+      "markdown_sha256": "f574fc1848b40f7fd4f4c96cd5ae7421a6f6619108e3de636072befd17977dc1",
+      "markdown_bytes": 22422,
+      "monid_run_id_sha256": "ee3a29596c64fe136ba8715d9fb51476d78aac9b94807736411107e3b9e251a8",
+      "cost_amount": 0.0009,
+      "cost_currency": "USD",
+      "cost_value_unit": "currency_major",
+      "cost_provenance": {
+        "kind": "credentialed_inspect",
+        "inspect_schema_sha256": "cd7e2198180d872f11e0d5c328c7c312bdff79d2f5b0b0121021f5248725e7fa",
+        "value_path": "cost.value",
+        "currency_path": "cost.currency",
+        "value_unit": "currency_major",
+        "source_value": 0.0009,
+        "source_currency": "USD"
+      },
+      "elapsed_ms": 5606,
+      "cleanup_confirmed": true,
+      "captured_to_delete_ms": 375
+    },
+    {
+      "source_sha256": "ec135a6ddf7a22120530bef89612cfedc7f007c64cf313f2b8de46d143027cfc",
+      "markdown_sha256": "1aaa59c66e6e0d6c357ba02478fae37a0ed9bfa53120cdb5b8d524f46b0a4007",
+      "markdown_bytes": 10165,
+      "monid_run_id_sha256": "3643bb5f5061832ee29d6653d55d00ad0d78e7f0ffb595b118d941f09e250a9f",
+      "cost_amount": 0.0009,
+      "cost_currency": "USD",
+      "cost_value_unit": "currency_major",
+      "cost_provenance": {
+        "kind": "credentialed_inspect",
+        "inspect_schema_sha256": "cd7e2198180d872f11e0d5c328c7c312bdff79d2f5b0b0121021f5248725e7fa",
+        "value_path": "cost.value",
+        "currency_path": "cost.currency",
+        "value_unit": "currency_major",
+        "source_value": 0.0009,
+        "source_currency": "USD"
+      },
+      "elapsed_ms": 5036,
+      "cleanup_confirmed": true,
+      "captured_to_delete_ms": 367
+    }
+  ],
+  "monid_actual_micro_usd": 3600,
+  "all_sources_deleted": true,
+  "local_public_pdfs_and_markdown_retained": true,
+  "provider_artifact_urls_retained": false,
+  "provider_raw_terminal_bodies_retained": false,
+  "model_capture_status": "completed_five_batches_local_acceptance_failed_receipt_capacity",
+  "model_input_tokens": 168503,
+  "model_output_tokens": 41149,
+  "model_estimated_micro_usd": 311550,
+  "component_total_actual_plus_estimated_micro_usd": 315150,
+  "model_cost_is_estimated_not_provider_invoice": true,
+  "production_acceptance": false
+}

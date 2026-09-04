@@ -1,11 +1,32 @@
 # QA Regressions
 
+## MH-002 verification boundary
+
+This task verifies CodeGraph freshness, source-backed architectural findings,
+Git publication hygiene, and plan completeness only. No paid/full-document tests
+or product refactor. Existing T27 test results are historical evidence; a Git
+checkpoint does not certify T27 or product readiness. Plan regression cases must
+retain exact citations, unknown blank prices, mandatory-vs-contract distinctions,
+amendment order/replacement/conflicts, non-submission Q&A independence, novel
+phrasing and unrelated-document tests. Saved provider responses test replay,
+not quality of a changed prompt/model. Independent plan review is required.
+
 Updated: 2026-09-04
+
+T26 realCER:216draft records/188located receipts are all suppressed by
+record_authority_receipt_capacity. Reproduce from immutable cached model data
+and measure pre-cap serialized bytes; no new full paid call is needed.
+T27 proposed regression:269326-byte valid receipt must fit524288; cap+1 still
+fails closed; old v1-v4 audits remain readable, new v5 reports the new cap.
+Test the standalone audit reader as well as app-side schemas; neither may
+reject valid historical rows or accept mismatched version/cap combinations.
 
 T25 final review PASS (P0/P1=0); alignment version v4 accurately identifies
 issued-origin physical binding. Focused152/152; full846/12 designed skips,
 typecheck/lint/build PASS. T26 keeps real Monid/model capture and replay separate
 from production cleanup/READY evidence; original provider caches are immutable.
+T26 signed-source fallback must confirm each UUID probe object deleted before
+model work and may not mislabel local cleanup as production Workflow evidence.
 
 | ID | Fragile behavior | Required check | Last result |
 |---|---|---|---|

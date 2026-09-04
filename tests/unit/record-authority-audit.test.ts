@@ -55,7 +55,7 @@ describe("record authority audit persistence", () => {
       "version"
     ]);
     expect(audit).toMatchObject({
-      version: 4,
+      version: 5,
       manifest_digest: manifest.record_manifest_digest,
       receipt_byte_length: manifest.receipt_byte_length,
       receipt_limit_bytes: MAX_RECORD_AUTHORITY_RECEIPT_BYTES,
@@ -65,7 +65,7 @@ describe("record authority audit persistence", () => {
       package_veto: false,
       recorded_at: "2026-09-04T12:01:00.000Z"
     });
-    expect(audit.version === 4 && audit.counters).toEqual({
+    expect(audit.version === 5 && audit.counters).toEqual({
       relevance: { s: 0, n: 0, u: 0, mixed: 0, missing: 0 },
       source_binding: { unlocated: 0, exact_bound: 0, coverage_gap: 0,
         relation_gap: 0, relation_conflict: 0 },
@@ -92,7 +92,7 @@ describe("record authority audit persistence", () => {
       ...audit,
       source_url: "https://private.invalid/tender.pdf"
     })).toThrow();
-    if (audit.version !== 4) throw new Error("expected_v4_audit");
+    if (audit.version !== 5) throw new Error("expected_v5_audit");
     const inconsistent = structuredClone(audit);
     inconsistent.counters.relevance.s = 1;
     expect(RecordAuthorityAuditSchema.safeParse(inconsistent).success).toBe(false);
@@ -114,13 +114,13 @@ describe("record authority audit persistence", () => {
       record_manifest_digest: "1".repeat(64)
     }, new Date("2026-09-04T12:02:00Z"));
     expect(legacy).toMatchObject({
-      version: 4, complete: false, integrity_complete: false,
+      version: 5, complete: false, integrity_complete: false,
       package_veto: false, record_count: 0
     });
     const legacyAudit = {
       manifest_digest: audit.manifest_digest,
       receipt_byte_length: audit.receipt_byte_length,
-      receipt_limit_bytes: audit.receipt_limit_bytes,
+      receipt_limit_bytes: 262_144,
       record_count: audit.record_count,
       complete: audit.complete,
       recorded_at: audit.recorded_at
@@ -129,6 +129,10 @@ describe("record authority audit persistence", () => {
       ...legacyAudit,
       version: 1
     }).version).toBe(1);
+    expect(formatRecordAuthorityAudit(runId, {
+      ...legacyAudit,
+      version: 2
+    }).version).toBe(2);
     const historicalV3 = {
       version: 3,
       ...legacyAudit,
@@ -148,6 +152,24 @@ describe("record authority audit persistence", () => {
       }
     };
     expect(formatRecordAuthorityAudit(runId, historicalV3).version).toBe(3);
+    const historicalV4 = {
+      ...audit,
+      version: 4,
+      receipt_byte_length: 262_144,
+      receipt_limit_bytes: 262_144
+    };
+    expect(RecordAuthorityAuditSchema.safeParse(historicalV4).success).toBe(true);
+    expect(formatRecordAuthorityAudit(runId, historicalV4).version).toBe(4);
+    const oversizedV4 = { ...historicalV4, receipt_byte_length: 262_145 };
+    expect(RecordAuthorityAuditSchema.safeParse(oversizedV4).success).toBe(false);
+    expect(() => formatRecordAuthorityAudit(runId, oversizedV4)).toThrow();
+    const highByteV5 = { ...audit, receipt_byte_length: 269_326 };
+    expect(RecordAuthorityAuditSchema.safeParse(highByteV5).success).toBe(true);
+    expect(formatRecordAuthorityAudit(runId, highByteV5)).toMatchObject({
+      version: 5,
+      receipt_byte_length: 269_326,
+      receipt_limit_bytes: 524_288
+    });
     expect(JSON.stringify(formatRecordAuthorityAudit(runId, historicalV3)))
       .not.toContain(runId);
   });

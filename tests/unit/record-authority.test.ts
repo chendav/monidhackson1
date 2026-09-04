@@ -1065,7 +1065,7 @@ describe("T7 record-bound semantic authority", () => {
     expect(merged.claims[0]?.claim_id).toBe("a-model-id");
     const audit = createRecordAuthorityAudit(result);
     expect(audit).toMatchObject({
-      version: 4,
+      version: 5,
       complete: false,
       integrity_complete: true,
       package_veto: true,
@@ -1157,7 +1157,7 @@ describe("T7 record-bound semantic authority", () => {
     });
   });
 
-  it("enforces the 262144-byte receipt boundary without truncation", () => {
+  it("enforces the 524288-byte receipt boundary without truncation", () => {
     expect(recordAuthorityReceiptWithinCapacity(MAX_RECORD_AUTHORITY_RECEIPT_BYTES)).toBe(true);
     expect(recordAuthorityReceiptWithinCapacity(MAX_RECORD_AUTHORITY_RECEIPT_BYTES + 1)).toBe(false);
   });

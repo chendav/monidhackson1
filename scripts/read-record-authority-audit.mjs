@@ -3,17 +3,18 @@ import { pathToFileURL } from "node:url";
 import { neon } from "@neondatabase/serverless";
 import { z } from "zod";
 
-const RECEIPT_LIMIT_BYTES = 262_144;
+const LEGACY_RECEIPT_LIMIT_BYTES = 262_144;
+const CURRENT_RECEIPT_LIMIT_BYTES = 524_288;
 
 const CounterSchema = z.number().int().nonnegative().max(10_000);
-const commonFields = {
+const commonFields = (receiptLimitBytes) => ({
   manifest_digest: z.string().regex(/^[a-f0-9]{64}$/),
-  receipt_byte_length: z.number().int().nonnegative().max(RECEIPT_LIMIT_BYTES),
-  receipt_limit_bytes: z.literal(RECEIPT_LIMIT_BYTES),
+  receipt_byte_length: z.number().int().nonnegative().max(receiptLimitBytes),
+  receipt_limit_bytes: z.literal(receiptLimitBytes),
   record_count: z.number().int().nonnegative().max(10_000),
   complete: z.boolean(),
   recorded_at: z.string().datetime({ offset: true })
-};
+});
 const PublicationReasonSchema = z.object({
   verified: CounterSchema,
   source_unlocated: CounterSchema,
@@ -35,7 +36,7 @@ const SubmissionVetoReasonSchema = z.object({
 
 const Version3RecordAuthorityAuditCliSchema = z.object({
     version: z.literal(3),
-    ...commonFields,
+    ...commonFields(LEGACY_RECEIPT_LIMIT_BYTES),
     counters: z.object({
       relevance: z.object({ s: CounterSchema, n: CounterSchema, u: CounterSchema,
         missing: CounterSchema }).strict(),
@@ -62,9 +63,9 @@ const Version3RecordAuthorityAuditCliSchema = z.object({
     }
   });
 
-const CurrentRecordAuthorityAuditCliSchema = z.object({
-    version: z.literal(4),
-    ...commonFields,
+const currentRecordAuthorityAuditCliSchema = (version, receiptLimitBytes) => z.object({
+    version: z.literal(version),
+    ...commonFields(receiptLimitBytes),
     integrity_complete: z.boolean(),
     package_veto: z.boolean(),
     counters: z.object({
@@ -96,9 +97,22 @@ const CurrentRecordAuthorityAuditCliSchema = z.object({
     }
   });
 
+const Version4RecordAuthorityAuditCliSchema = currentRecordAuthorityAuditCliSchema(
+  4,
+  LEGACY_RECEIPT_LIMIT_BYTES
+);
+const CurrentRecordAuthorityAuditCliSchema = currentRecordAuthorityAuditCliSchema(
+  5,
+  CURRENT_RECEIPT_LIMIT_BYTES
+);
+
 export const RecordAuthorityAuditCliSchema = z.union([
-  z.object({ version: z.union([z.literal(1), z.literal(2)]), ...commonFields }).strict(),
+  z.object({
+    version: z.union([z.literal(1), z.literal(2)]),
+    ...commonFields(LEGACY_RECEIPT_LIMIT_BYTES)
+  }).strict(),
   Version3RecordAuthorityAuditCliSchema,
+  Version4RecordAuthorityAuditCliSchema,
   CurrentRecordAuthorityAuditCliSchema
 ]);
 

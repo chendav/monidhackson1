@@ -1,5 +1,33 @@
 # Current System State
 
+## MH-002 baseline observation — 2026-09-04
+
+Before this task HEAD was bc6c41e, one commit ahead of origin/main. T27 code,
+tests, and diagnostic notes were uncommitted; preserve them as incomplete work,
+not product acceptance. CodeGraph 0.9.9 now has a local SQLite index: initial
+192 files / 3101 nodes / 8216 edges, zero pending changes. It supports query,
+files, callers, callees, impact, affected (not explore/node in this installed
+version). Product and paid tests remain paused. No new deployment is requested.
+Current Q&A uses keyword overlap over retained results, not an LLM; source-anchor
+and materialization paths still contain semantic heuristics contrary to the new
+required architecture. Existing historical release claims below are not refreshed.
+
+## T26 full real CER capture complete; size guard prevents publication
+
+The five response caches are genuine currentv8 on genuine Monid Markdown.
+Test164.17s failed only its final manifest-matches-draft assertion; both raw
+and decoded/materialized artifacts were already saved. Draft216records
+(51claims/120requirements/22risks/23evaluationrules), receipts188true/33false.
+The authority manifest is the empty202-byte fallback with unresolved reason
+record_authority_receipt_capacity (limit262144). It is not a semantic verdict.
+All4temporaryPDFs deleted andHEAD404 confirmed; local public caches retained.
+New MonidUSD0.0036actual, modelUSD0.311548token estimate. Production unchanged.
+T27 diagnostic-only higher-cap replay PASS14.74s, measured269326bytes,
+156authority verified,16claims/32requirements,55citations,49/49criticalcited.
+50/94+70/30+highestcombinedrating recovered; deadline remains null/conflicts0.
+T27 hypothesis accepted with audit CLI compatibility added to scope. Bounded
+implementation active; root owns cache replay and release selection identities.
+
 ## 2026-09-04 T25 derived cached-fixture result
 
 - Actual v8 server pipeline on derived saved v7 batches: authority82 verified,
@@ -12,10 +40,13 @@
 - Focused tests152/152 PASS. Fixed release pin includes all97 authority tests
   and55 adapter tests. T25 independent review PASS, P0/P1=0. Full846 tests
   passed/12 designed skips, typecheck/lint(no errors)/production build PASS.
-- T26 local cache harness prepared for shuffled CER003/base/001/002,79pages,
+- T26 local cache harness prepared for shuffled CER003/base/001/002,75pages,
   five provisional PDF.js-source batches. Genuine Monid cache and current v8
   responses are still absent; Reviewer checks harness before paid execution.
 - Public deployment remains fc85c24. Release automation remains PAUSED.
+- Local citation milestone is committed bc6c41e. T26 direct official fetch hit
+  HTTP403 before any paid dispatch; no new Monid charge. Signed-source fallback
+  prepared from existing pinned cached PDFs, with separate deletion receipts.
 
 ## 2026-09-04 T24 full local proof / T25 next
 

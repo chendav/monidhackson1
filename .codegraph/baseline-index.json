@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "observed_date": "2026-09-04",
+  "tool": "CodeGraph",
+  "tool_version": "0.9.9",
+  "starting_git_head": "bc6c41e93bfc71292fe17ecde5b31a56d37b1aae",
+  "snapshot_kind": "pre_refactor_worktree_checkpoint_not_product_release",
+  "database_path": ".codegraph/codegraph.db",
+  "database_committed": false,
+  "backend": "node-sqlite",
+  "file_count": 194,
+  "node_count": 3101,
+  "edge_count": 8216,
+  "database_size_bytes": 7847936,
+  "languages": ["javascript", "tsx", "typescript", "yaml"],
+  "pending_changes_at_capture": {"added": 0, "modified": 0, "removed": 0},
+  "worktree_mismatch": null,
+  "indexed_paths_sha256": "e3e127e4b4552cd1b1dc381fdd9fe87e16e733e64db8d6178ee1b57d8d224429",
+  "inventory_digest_recipe": "codegraph files --json; take path strings; PowerShell Sort-Object -CaseSensitive; join with LF and one trailing LF; UTF-8 SHA-256. This binds paths, not file contents; Git binds source contents.",
+  "sensitive_or_generated_indexed_paths_found": 0,
+  "limitations": [
+    "Static call edges are incomplete navigation evidence, not runtime proof.",
+    "Markdown, JSON, SQL, CSS and binary artifacts are outside this code index.",
+    "Rebuild locally with codegraph init . or codegraph sync .; do not copy SQLite WAL files."
+  ]
+}

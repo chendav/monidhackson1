@@ -766,7 +766,22 @@ depends_on: [T25]
 include_paths: [.data/diagnostic-package-cer-v8*, docs/specs/MH-001-rfp-xray/**]
 exclude_paths: [src/**, videos/**]
 edits_allowed: true
-status: harness_review
-constraints: [four_monid_source_locks, one_model_package_lock, model_cap_usd_0_50, no_paid_retry, official_sha_pins, no_remote_storage_mutation, no_cleanup_or_ready_claim, cache_before_decode]
+status: captured_diagnostic_failure
+constraints: [four_monid_source_locks, one_model_package_lock, model_cap_usd_0_50, no_paid_retry, official_sha_pins, scoped_probe_objects_only, delete_and_head404_before_model, no_production_ready_claim, cache_before_decode]
 handoff: docs/specs/MH-001-rfp-xray/t26-experiment.md
+```
+
+## T27 Ephemeral authority capacity
+
+```yaml
+id: T27
+owner_profile: backend
+objective: Fix measured269326-byte CER authority overflow with a524288-byte bounded ephemeral cap while preserving historical audit schemas and every semantic/source gate.
+depends_on: [T26]
+include_paths: [src/lib/analysis/record-authority.ts, src/lib/runs/record-authority-audit.ts, scripts/read-record-authority-audit.mjs, tests/unit/record-authority.test.ts, tests/unit/record-authority-audit.test.ts, tests/integration/record-authority-audit.test.ts, tests/integration/retention-cleanup.test.ts, tests/golden/official-fixture-audit.test.ts]
+exclude_paths: [src/lib/providers/openai.ts, src/lib/analysis/materialize.ts, src/lib/analysis/submission-channel.ts, videos/**]
+edits_allowed: true
+status: implementation
+constraints: [preserve_cap_plus_one_rejection, legacy_v1_v4_audit_reads, new_audit_v5, no_provider_calls, cache_replay_only]
+handoff: docs/specs/MH-001-rfp-xray/t27-handoff.md
 ```
