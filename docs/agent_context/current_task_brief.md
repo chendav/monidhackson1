@@ -66,6 +66,10 @@ cost. The product is document-only and does not search for tenders.
 - T8 passed independent QA6 with `APPROVE`, P0=0/P1=0/P2=0. Root reruns passed
   721 tests, official fixtures 3/3, build, and Playwright 14/14. Deployment is
   authorized; a second controlled Edmonton run remains the production proof.
+- The second production run also failed the Email core gate with only four
+  rejected citations and a healthy 88865-byte receipt. T9 moves package safety
+  to the complete all-page ledger, adds v3 diagnostic counters, and passed QA7
+  with `APPROVE`, P0=0/P1=0/P2=0. Redeployment is authorized.
 
 ## Owners
 
@@ -77,6 +81,6 @@ cost. The product is document-only and does not search for tenders.
 
 ## Immediate Next Action
 
-Commit and deploy the QA6-approved T8, refresh exact-deployment attestations,
-then run one controlled Edmonton pilot. Only a full pass can authorize the
-remaining campaign.
+Root-recheck, commit and deploy QA7-approved T9, refresh exact-deployment
+attestations, then run one final controlled Edmonton pilot. Only a full pass can
+authorize the remaining campaign.

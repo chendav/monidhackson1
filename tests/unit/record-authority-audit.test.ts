@@ -43,6 +43,7 @@ describe("record authority audit persistence", () => {
     const audit = createRecordAuthorityAudit(manifest, new Date("2026-09-04T12:01:00Z"));
     expect(Object.keys(audit).toSorted()).toEqual([
       "complete",
+      "counters",
       "manifest_digest",
       "receipt_byte_length",
       "receipt_limit_bytes",
@@ -51,7 +52,7 @@ describe("record authority audit persistence", () => {
       "version"
     ]);
     expect(audit).toMatchObject({
-      version: 2,
+      version: 3,
       manifest_digest: manifest.record_manifest_digest,
       receipt_byte_length: manifest.receipt_byte_length,
       receipt_limit_bytes: MAX_RECORD_AUTHORITY_RECEIPT_BYTES,
@@ -59,6 +60,25 @@ describe("record authority audit persistence", () => {
       complete: false,
       recorded_at: "2026-09-04T12:01:00.000Z"
     });
+    expect(audit.version === 3 && audit.counters).toEqual({
+      relevance: { s: 0, n: 0, u: 0, missing: 0 },
+      source_binding: { unlocated: 0, exact_bound: 0, coverage_gap: 0,
+        relation_gap: 0, relation_conflict: 0 },
+      semantic_crosscheck: { consistent: 0, disagrees: 0, unknown: 0 },
+      publication: { verified: 0, discarded: 0 },
+      publication_reason: { verified: 0, source_unlocated: 0, source_coverage_gap: 0,
+        source_relation_gap: 0, source_relation_conflict: 0, semantic_unknown: 0,
+        semantic_disagreement: 0, receipt_integrity: 0 },
+      submission_veto_reason: { exact_submission_coverage_gap: 0,
+        exact_submission_relation_gap: 0, exact_submission_relation_conflict: 0,
+        exact_non_submission_overlap: 0, exact_semantic_uncertainty: 0,
+        exact_relevance_disagreement: 0 }
+    });
+    const serialized = JSON.stringify(audit);
+    for (const forbidden of ["source_text", "evidence_quote", "record_id", "page", "offset",
+      "source_url", "private_output"]) {
+      expect(serialized).not.toContain(forbidden);
+    }
     expect(RecordAuthorityAuditSchema.safeParse({
       ...audit,
       evidence_quote: "private source text"
@@ -67,6 +87,11 @@ describe("record authority audit persistence", () => {
       ...audit,
       source_url: "https://private.invalid/tender.pdf"
     })).toThrow();
+    if (audit.version !== 3) throw new Error("expected_v3_audit");
+    const inconsistent = structuredClone(audit);
+    inconsistent.counters.relevance.s = 1;
+    expect(RecordAuthorityAuditSchema.safeParse(inconsistent).success).toBe(false);
+    expect(() => formatRecordAuthorityAudit(runId, inconsistent)).toThrow();
   });
 
   it("turns a mutated receipt into an explicit incomplete audit", () => {
@@ -83,9 +108,17 @@ describe("record authority audit persistence", () => {
       version: 1,
       record_manifest_digest: "1".repeat(64)
     }, new Date("2026-09-04T12:02:00Z"));
-    expect(legacy).toMatchObject({ version: 2, complete: false, record_count: 0 });
+    expect(legacy).toMatchObject({ version: 3, complete: false, record_count: 0 });
+    const legacyAudit = {
+      manifest_digest: audit.manifest_digest,
+      receipt_byte_length: audit.receipt_byte_length,
+      receipt_limit_bytes: audit.receipt_limit_bytes,
+      record_count: audit.record_count,
+      complete: audit.complete,
+      recorded_at: audit.recorded_at
+    };
     expect(formatRecordAuthorityAudit(runId, {
-      ...audit,
+      ...legacyAudit,
       version: 1
     }).version).toBe(1);
   });

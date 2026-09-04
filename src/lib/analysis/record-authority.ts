@@ -10,7 +10,7 @@ import { sha256Hex, stableJson } from "@/lib/crypto";
 import type { CitationDocument } from "@/lib/evidence/citations";
 
 export const RECORD_AUTHORITY_ENVELOPE_VERSION = 1 as const;
-export const RECORD_AUTHORITY_VERSION = 2 as const;
+export const RECORD_AUTHORITY_VERSION = 3 as const;
 export const MAX_RECORD_AUTHORITY_ANNOTATIONS_PER_BATCH = 40;
 export const MAX_MODEL_CITATIONS_PER_ANNOTATED_RECORD = 3;
 export const MAX_EXACT_OCCURRENCES_PER_CITATION = 8;
@@ -27,6 +27,14 @@ export const RecordAuthorityEnvelopeSchema = z.object({
 
 export type RecordKind = "c" | "q" | "r" | "e";
 export type SubmissionRelevance = "s" | "n" | "u";
+export type RecordSourceBinding =
+  | "unlocated"
+  | "exact_bound"
+  | "coverage_gap"
+  | "relation_gap"
+  | "relation_conflict";
+export type RecordSemanticCrosscheck = "consistent" | "disagrees" | "unknown";
+export type RecordPublication = "verified" | "discarded";
 export type RecordAuthorityEnvelope = z.infer<typeof RecordAuthorityEnvelopeSchema>;
 
 export type ModelRecord =
@@ -45,8 +53,10 @@ export interface JoinedRecordAuthority {
   merged_record_id: string;
   canonical_record_digest: string;
   kind: RecordKind;
-  relevance: SubmissionRelevance;
-  disposition: "verified" | "discarded" | "unresolved";
+  relevance: SubmissionRelevance | null;
+  source_binding: RecordSourceBinding;
+  semantic_crosscheck: RecordSemanticCrosscheck;
+  publication: RecordPublication;
   reason: string | null;
   contributing_origin_record_keys: string[];
   whole_bid_channels: SubmissionChannelSignature[];
@@ -74,13 +84,15 @@ export interface VerifiedOriginRecordAuthority {
   relevance: SubmissionRelevance | null;
   canonical_record_digest: string;
   merged_record_id: string;
-  disposition: "verified" | "discarded" | "unresolved";
+  source_binding: RecordSourceBinding;
+  semantic_crosscheck: RecordSemanticCrosscheck;
+  publication: RecordPublication;
   reason: string | null;
   citation_bindings: RecordAuthorityCitationBinding[];
 }
 
 export interface VerifiedRecordAuthorityManifest {
-  version: 1 | typeof RECORD_AUTHORITY_VERSION;
+  version: 1 | 2 | typeof RECORD_AUTHORITY_VERSION;
   complete: boolean;
   package_veto: boolean;
   unresolved_reasons: string[];
@@ -92,6 +104,81 @@ export interface VerifiedRecordAuthorityManifest {
   origin_record_key_to_merged_record_id: Record<string, string>;
   origins: VerifiedOriginRecordAuthority[];
   records: JoinedRecordAuthority[];
+}
+
+export const RECORD_AUTHORITY_PUBLICATION_REASON_KEYS = [
+  "verified",
+  "source_unlocated",
+  "source_coverage_gap",
+  "source_relation_gap",
+  "source_relation_conflict",
+  "semantic_unknown",
+  "semantic_disagreement",
+  "receipt_integrity"
+] as const;
+
+export const RECORD_AUTHORITY_SUBMISSION_VETO_REASON_KEYS = [
+  "exact_submission_coverage_gap",
+  "exact_submission_relation_gap",
+  "exact_submission_relation_conflict",
+  "exact_non_submission_overlap",
+  "exact_semantic_uncertainty",
+  "exact_relevance_disagreement"
+] as const;
+
+function zeroCounts<const T extends readonly string[]>(keys: T): Record<T[number], number> {
+  return Object.fromEntries(keys.map((key) => [key, 0])) as Record<T[number], number>;
+}
+
+export function recordAuthorityDiagnosticCounters(manifest: VerifiedRecordAuthorityManifest) {
+  const counters = {
+    relevance: { s: 0, n: 0, u: 0, missing: 0 },
+    source_binding: { unlocated: 0, exact_bound: 0, coverage_gap: 0, relation_gap: 0,
+      relation_conflict: 0 },
+    semantic_crosscheck: { consistent: 0, disagrees: 0, unknown: 0 },
+    publication: { verified: 0, discarded: 0 },
+    publication_reason: zeroCounts(RECORD_AUTHORITY_PUBLICATION_REASON_KEYS),
+    submission_veto_reason: zeroCounts(RECORD_AUTHORITY_SUBMISSION_VETO_REASON_KEYS)
+  };
+  for (const record of manifest.records) {
+    counters.relevance[record.relevance ?? "missing"] += 1;
+    counters.source_binding[record.source_binding] += 1;
+    counters.semantic_crosscheck[record.semantic_crosscheck] += 1;
+    counters.publication[record.publication] += 1;
+    if (record.publication === "verified") {
+      counters.publication_reason.verified += 1;
+    } else if (!manifest.complete) {
+      counters.publication_reason.receipt_integrity += 1;
+    } else if (record.source_binding === "unlocated") {
+      counters.publication_reason.source_unlocated += 1;
+    } else if (record.source_binding === "coverage_gap") {
+      counters.publication_reason.source_coverage_gap += 1;
+    } else if (record.source_binding === "relation_gap") {
+      counters.publication_reason.source_relation_gap += 1;
+    } else if (record.source_binding === "relation_conflict") {
+      counters.publication_reason.source_relation_conflict += 1;
+    } else if (record.semantic_crosscheck === "disagrees") {
+      counters.publication_reason.semantic_disagreement += 1;
+    } else {
+      counters.publication_reason.semantic_unknown += 1;
+    }
+    if (record.semantic_crosscheck !== "disagrees") continue;
+    if (record.relevance === "s" && record.source_binding === "coverage_gap") {
+      counters.submission_veto_reason.exact_submission_coverage_gap += 1;
+    } else if (record.relevance === "s" && record.source_binding === "relation_gap") {
+      counters.submission_veto_reason.exact_submission_relation_gap += 1;
+    } else if (record.relevance === "s" && record.source_binding === "relation_conflict") {
+      counters.submission_veto_reason.exact_submission_relation_conflict += 1;
+    } else if (record.relevance === "n" && record.source_binding === "relation_conflict") {
+      counters.submission_veto_reason.exact_non_submission_overlap += 1;
+    } else if (record.relevance === "u" && record.source_binding === "exact_bound") {
+      counters.submission_veto_reason.exact_semantic_uncertainty += 1;
+    } else if (record.relevance === null && record.source_binding !== "unlocated" &&
+      record.source_binding !== "coverage_gap") {
+      counters.submission_veto_reason.exact_relevance_disagreement += 1;
+    }
+  }
+  return counters;
 }
 
 function authorityManifestDigestPayload(input: Pick<VerifiedRecordAuthorityManifest,
@@ -138,9 +225,8 @@ function sealRecordAuthorityManifest(
 }
 
 export function recordAuthorityManifestIntegrity(input: VerifiedRecordAuthorityManifest) {
-  // Version 1 coupled every publication miss to a package-wide veto. It is
-  // intentionally accepted by the TypeScript boundary only so old receipts
-  // can be rejected deterministically instead of being guessed forward.
+  // Versions 1 and 2 coupled record publication to package authority. They are
+  // deliberately not guessed forward: old receipts suppress model records.
   if (input.version !== RECORD_AUTHORITY_VERSION || !Array.isArray(input.discarded_reasons)) {
     return false;
   }
@@ -151,18 +237,90 @@ export function recordAuthorityManifestIntegrity(input: VerifiedRecordAuthorityM
   const mappingKeys = Object.keys(input.origin_record_key_to_merged_record_id);
   const receiptBytes = new TextEncoder().encode(stableJson(authorityManifestDigestPayload(input))).byteLength;
   const originKeys = input.origins.map((origin) => origin.origin_record_key);
+  const recordKeys = input.records.map((record) => `${record.kind}:${record.merged_record_id}`);
+  const sourceBindings = new Set<RecordSourceBinding>([
+    "unlocated", "exact_bound", "coverage_gap", "relation_gap", "relation_conflict"
+  ]);
+  const semanticCrosschecks = new Set<RecordSemanticCrosscheck>([
+    "consistent", "disagrees", "unknown"
+  ]);
+  const publications = new Set<RecordPublication>(["verified", "discarded"]);
+  const relevances = new Set<SubmissionRelevance | null>(["s", "n", "u", null]);
+  const shapesValid = [...input.records, ...input.origins].every((item) =>
+    sourceBindings.has(item.source_binding) &&
+    semanticCrosschecks.has(item.semantic_crosscheck) &&
+    publications.has(item.publication) && relevances.has(item.relevance)
+  ) && input.origins.every((origin) =>
+    /^[a-f0-9]{64}$/.test(origin.origin_record_key) &&
+    /^[a-f0-9]{64}$/.test(origin.canonical_record_digest) &&
+    origin.citation_bindings.length <= MAX_MODEL_CITATIONS_PER_ANNOTATED_RECORD &&
+    origin.citation_bindings.every((binding) =>
+      /^[a-f0-9]{64}$/.test(binding.document_sha256) &&
+      /^[a-f0-9]{64}$/.test(binding.evidence_quote_sha256) &&
+      binding.occurrences.length <= MAX_EXACT_OCCURRENCES_PER_CITATION &&
+      binding.occurrences.every((occurrence) =>
+        occurrence.pdf_page_1based > 0 && occurrence.start_utf16 >= 0 &&
+        occurrence.end_utf16 > occurrence.start_utf16 &&
+        occurrence.relation_binding_digests.every((digest) => /^[a-f0-9]{64}$/.test(digest))
+      )
+    ) && (origin.publication !== "verified" || (
+      origin.source_binding === "exact_bound" &&
+      origin.semantic_crosscheck === "consistent" && origin.relevance !== null &&
+      origin.reason === null
+    ))
+  );
+  const originsByKey = new Map(input.origins.map((origin) => [origin.origin_record_key, origin]));
+  const joinedSemanticsValid = input.complete
+    ? input.records.every((record) => {
+        const group = record.contributing_origin_record_keys.map((key) => originsByKey.get(key));
+        if (group.some((origin) => !origin)) return false;
+        const concrete = group as VerifiedOriginRecordAuthority[];
+        const groupRelevances = new Set(concrete.map((origin) => origin.relevance));
+        const allExact = concrete.every((origin) => origin.source_binding !== "unlocated" &&
+          origin.source_binding !== "coverage_gap");
+        const expectedRelevance = groupRelevances.size === 1 ? [...groupRelevances][0]! : null;
+        const expectedSourceBinding = concrete.map((origin) => origin.source_binding)
+          .toSorted((left, right) => sourceBindingRank(right) - sourceBindingRank(left))[0] ??
+          "unlocated";
+        const expectedCrosscheck = concrete.some((origin) =>
+          origin.semantic_crosscheck === "disagrees"
+        ) || (groupRelevances.size !== 1 && allExact)
+          ? "disagrees"
+          : concrete.some((origin) => origin.semantic_crosscheck === "unknown") ||
+              groupRelevances.size !== 1
+            ? "unknown"
+            : "consistent";
+        const expectedPublication = concrete.every((origin) => origin.publication === "verified") &&
+          groupRelevances.size === 1 && expectedCrosscheck === "consistent"
+          ? "verified"
+          : "discarded";
+        return record.relevance === expectedRelevance &&
+          record.source_binding === expectedSourceBinding &&
+          record.semantic_crosscheck === expectedCrosscheck &&
+          record.publication === expectedPublication &&
+          concrete.every((origin) => origin.kind === record.kind &&
+            origin.merged_record_id === record.merged_record_id &&
+            origin.canonical_record_digest === record.canonical_record_digest);
+      })
+    : input.package_veto === false && input.records.every((record) =>
+        record.publication === "discarded" && record.semantic_crosscheck === "unknown"
+      );
   return input.receipt_capacity_bytes === MAX_RECORD_AUTHORITY_RECEIPT_BYTES &&
     input.receipt_byte_length === receiptBytes && receiptBytes <= MAX_RECORD_AUTHORITY_RECEIPT_BYTES &&
     input.record_manifest_digest === verifiedRecordAuthorityManifestDigest(input) &&
+    shapesValid && joinedSemanticsValid && new Set(recordKeys).size === recordKeys.length &&
     new Set(originKeys).size === originKeys.length &&
     originKeys.length === contributorKeys.length &&
     new Set(contributorKeys).size === contributorKeys.length &&
     new Set(mappingKeys).size === mappingKeys.length &&
     contributorKeys.length === mappingKeys.length &&
-    input.package_veto === (!input.complete || input.records.some((record) =>
-      record.disposition === "unresolved" || record.relevance === "u"
+    input.package_veto === (input.complete && input.records.some((record) =>
+      record.semantic_crosscheck === "disagrees"
     )) && input.records.every((record) =>
-      record.disposition !== "discarded" || record.relevance === "n"
+      record.publication === "verified"
+        ? record.source_binding === "exact_bound" &&
+          record.semantic_crosscheck === "consistent" && record.relevance !== null
+        : true
     ) && contributors.every(({ origin, mergedId }) =>
       input.origin_record_key_to_merged_record_id[origin] === mergedId
     ) && input.origins.every((origin) =>
@@ -181,7 +339,9 @@ interface OriginRecord {
   record: ModelRecord;
   binding: SubmissionBatchBinding;
   relevance: SubmissionRelevance | null;
-  disposition: "verified" | "discarded" | "unresolved";
+  sourceBinding: RecordSourceBinding;
+  semanticCrosscheck: RecordSemanticCrosscheck;
+  publication: RecordPublication;
   reason: string | null;
   wholeBidChannels: Set<SubmissionChannelSignature>;
   citationBindings: RecordAuthorityCitationBinding[];
@@ -352,17 +512,15 @@ function mergedIds(origins: OriginRecord[]) {
   return result;
 }
 
-// These failures concern whether an exactly-once, canonical-bound `n` record
-// may be published. The Agent has already stated that the record is unrelated
-// to submission method, so omitting it is safe. Semantic/structural failures
-// (including relation overlap and every capacity/integrity failure) are not in
-// this set and retain the package-wide veto.
-const DISCARDABLE_NON_SUBMISSION_PUBLICATION_FAILURES = new Set([
-  "missing_exact_citation",
-  "cross_document_citation",
-  "non_exact_or_uncovered_citation",
-  "incomplete_occurrence_coverage"
-]);
+function sourceBindingRank(value: RecordSourceBinding) {
+  return ({
+    exact_bound: 0,
+    unlocated: 1,
+    coverage_gap: 2,
+    relation_gap: 3,
+    relation_conflict: 4
+  } satisfies Record<RecordSourceBinding, number>)[value];
+}
 
 export function verifyRecordAuthorities(input: {
   batches: RecordAuthorityBatch[];
@@ -373,11 +531,12 @@ export function verifyRecordAuthorities(input: {
   mergedDraft?: DraftAnalysis;
 }): VerifiedRecordAuthorityManifest {
   const origins: OriginRecord[] = [];
-  const globalReasons: string[] = [];
+  const receiptReasons: string[] = [];
+  const submissionVetoReasons: string[] = [];
   const discardedReasons: string[] = [];
   const verifiedCoverage = new Map(input.submission.records.map((record) => [record.candidate_id, record]));
   const knownBatchIds = new Set(input.batches.map((batch) => batch.binding.batch_id));
-  if (knownBatchIds.size !== input.batches.length) globalReasons.push("duplicate_batch");
+  if (knownBatchIds.size !== input.batches.length) receiptReasons.push("duplicate_batch");
 
   for (const batch of input.batches) {
     const expected = recordsIn(batch.draft);
@@ -388,10 +547,10 @@ export function verifyRecordAuthorities(input: {
     }
     const expectedKeys = new Set(expected.map(({ kind, ordinal }) => `${kind}:${ordinal}`));
     if (batch.authority.r.some(([kind, ordinal]) => !expectedKeys.has(`${kind}:${ordinal}`))) {
-      globalReasons.push("unknown_annotation");
+      receiptReasons.push("unknown_annotation");
     }
     if (expected.length > MAX_RECORD_AUTHORITY_ANNOTATIONS_PER_BATCH) {
-      globalReasons.push("record_authority_capacity");
+      receiptReasons.push("record_authority_capacity");
     }
 
     for (const { kind, ordinal, record } of expected) {
@@ -405,13 +564,8 @@ export function verifyRecordAuthorities(input: {
       if (!reason && citations(record).length > MAX_MODEL_CITATIONS_PER_ANNOTATED_RECORD) {
         reason = "record_citation_capacity";
       }
-      if (!reason && kind === "q" &&
-        (record as DraftAnalysis["requirements"][number]).category === "submission" &&
-        relevance === "n") {
-        reason = "submission_requirement_marked_non_submission";
-      }
-      if (!reason && relevance === "u") reason = "semantic_uncertainty";
-
+      let sourceBinding: RecordSourceBinding = "unlocated";
+      let semanticCrosscheck: RecordSemanticCrosscheck = "unknown";
       const wholeBidChannels = new Set<SubmissionChannelSignature>();
       const citationBindings: RecordAuthorityCitationBinding[] = [];
       if (!reason) {
@@ -419,6 +573,7 @@ export function verifyRecordAuthorities(input: {
         for (const citation of citations(record)) {
           if (reason) break;
           if (citation.document_sha256 !== record.document_sha256) {
+            sourceBinding = "unlocated";
             reason = "cross_document_citation";
             break;
           }
@@ -429,10 +584,12 @@ export function verifyRecordAuthorities(input: {
             input.ledger
           );
           if (occurrences.length === 0) {
+            sourceBinding = "unlocated";
             reason = "non_exact_or_uncovered_citation";
             break;
           }
           if (occurrences.length > MAX_EXACT_OCCURRENCES_PER_CITATION) {
+            sourceBinding = "unlocated";
             reason = "exact_occurrence_capacity";
             break;
           }
@@ -462,36 +619,54 @@ export function verifyRecordAuthorities(input: {
             }))
           });
           if (occurrenceStates.some((state) => !state.covered)) {
+            sourceBinding = "coverage_gap";
+            if (relevance === "s") semanticCrosscheck = "disagrees";
             reason = "incomplete_occurrence_coverage";
             break;
           }
-          if (relevance === "s" && occurrenceStates.some((state) => state.overlaps.length === 0)) {
-            reason = "relationless_submission_record";
-            break;
-          }
-          if (relevance === "n" && occurrenceStates.some((state) => state.overlaps.some((relation) =>
-            relation.subject_scope === "whole_bid" || relation.subject_scope === "ambiguous" ||
-            relation.modality === "unknown" || relation.channel === "unspecified"
-          ))) {
-            reason = "non_submission_relation_overlap";
-            break;
-          }
-          const signatures = occurrenceStates.map((state) => stableJson(state.overlaps.map((relation) => ({
-            subject_scope: relation.subject_scope,
-            modality: relation.modality,
-            channel: relation.channel
-          })).toSorted((left, right) => stableJson(left).localeCompare(stableJson(right)))));
-          if (new Set(signatures).size > 1) {
-            reason = "duplicate_quote_mixed_matches";
-            break;
-          }
+          sourceBinding = "exact_bound";
           for (const relation of occurrenceStates.flatMap((state) => state.overlaps)) {
             if (relation.subject_scope === "whole_bid" && relation.channel !== "unspecified") {
               wholeBidChannels.add(relation.channel);
             }
           }
+          const ambiguous = occurrenceStates.some((state) => state.overlaps.some((relation) =>
+            relation.subject_scope === "ambiguous" || relation.modality === "unknown" ||
+            relation.channel === "unspecified"
+          ));
+          const wholeBidOverlap = occurrenceStates.some((state) => state.overlaps.some((relation) =>
+            relation.subject_scope === "whole_bid"
+          ));
+          if (relevance === "s") {
+            const compatible = occurrenceStates.every((state) => state.overlaps.some((relation) =>
+              relation.subject_scope === "whole_bid" && relation.modality !== "unknown" &&
+              relation.channel !== "unspecified"
+            ));
+            if (occurrenceStates.some((state) => state.overlaps.length === 0)) {
+              sourceBinding = "relation_gap";
+              semanticCrosscheck = "disagrees";
+              reason = "relationless_submission_record";
+              break;
+            }
+            if (!compatible || ambiguous) {
+              sourceBinding = "relation_conflict";
+              semanticCrosscheck = "disagrees";
+              reason = "submission_relation_conflict";
+              break;
+            }
+          } else if (relevance === "n" && (wholeBidOverlap || ambiguous)) {
+            sourceBinding = "relation_conflict";
+            semanticCrosscheck = "disagrees";
+            reason = "non_submission_relation_overlap";
+            break;
+          } else if (relevance === "u") {
+            semanticCrosscheck = "disagrees";
+            reason = "semantic_uncertainty";
+            break;
+          }
         }
       }
+      if (!reason && sourceBinding === "exact_bound") semanticCrosscheck = "consistent";
       const originKey = sha256Hex(stableJson({
         authority_version: RECORD_AUTHORITY_VERSION,
         batch_id: batch.binding.batch_id,
@@ -499,12 +674,8 @@ export function verifyRecordAuthorities(input: {
         array_ordinal: ordinal,
         canonical_public_record: canonicalModelRecord(kind, record)
       }));
-      const disposition = !reason
-        ? "verified" as const
-        : relevance === "n" &&
-            DISCARDABLE_NON_SUBMISSION_PUBLICATION_FAILURES.has(reason)
-          ? "discarded" as const
-          : "unresolved" as const;
+      const publication: RecordPublication = !reason && sourceBinding === "exact_bound" &&
+        semanticCrosscheck === "consistent" ? "verified" : "discarded";
       origins.push({
         originKey,
         kind,
@@ -512,14 +683,15 @@ export function verifyRecordAuthorities(input: {
         record,
         binding: batch.binding,
         relevance,
-        disposition,
+        sourceBinding,
+        semanticCrosscheck,
+        publication,
         reason,
         wholeBidChannels,
         citationBindings
       });
-      if (reason) {
-        (disposition === "discarded" ? discardedReasons : globalReasons).push(reason);
-      }
+      if (reason) discardedReasons.push(reason);
+      if (semanticCrosscheck === "disagrees") submissionVetoReasons.push(reason ?? "semantic_disagreement");
     }
   }
 
@@ -528,7 +700,7 @@ export function verifyRecordAuthorities(input: {
   for (const origin of origins) {
     const mergedId = originToMerged.get(origin.originKey);
     if (!mergedId) {
-      globalReasons.push("lost_origin");
+      receiptReasons.push("lost_origin");
       continue;
     }
     const key = `${origin.kind}:${mergedId}`;
@@ -538,54 +710,40 @@ export function verifyRecordAuthorities(input: {
   for (const [key, group] of joinedGroups) {
     const [kind, ...idParts] = key.split(":");
     const relevances = new Set(group.flatMap((origin) => origin.relevance ?? []));
-    let reason = relevances.size !== 1
-      ? "duplicate_record_relevance_disagreement"
-      : group.find((origin) => origin.disposition === "unresolved")?.reason ?? null;
-    let disposition: JoinedRecordAuthority["disposition"] = reason
-      ? "unresolved"
-      : group.some((origin) => origin.disposition === "discarded")
-        ? "discarded"
-        : "verified";
-    if (!reason && disposition === "discarded") {
-      reason = group.find((origin) => origin.disposition === "discarded")?.reason ??
-        "non_submission_publication_failure";
+    const allExact = group.every((origin) => origin.sourceBinding !== "unlocated" &&
+      origin.sourceBinding !== "coverage_gap");
+    let reason = group.find((origin) => origin.reason)?.reason ?? null;
+    let semanticCrosscheck: RecordSemanticCrosscheck = group.some((origin) =>
+      origin.semanticCrosscheck === "disagrees"
+    ) ? "disagrees" : group.some((origin) => origin.semanticCrosscheck === "unknown")
+      ? "unknown" : "consistent";
+    if (relevances.size !== 1) {
+      reason = "duplicate_record_relevance_disagreement";
+      semanticCrosscheck = allExact ? "disagrees" : "unknown";
+      discardedReasons.push(reason);
+      if (allExact) submissionVetoReasons.push(reason);
     }
-    const relevance = relevances.has("s") ? "s" : relevances.has("u") ? "u" : "n";
+    const relevance = relevances.size === 1 ? [...relevances][0]! : null;
+    const sourceBinding = group.map((origin) => origin.sourceBinding).toSorted((left, right) =>
+      sourceBindingRank(right) - sourceBindingRank(left)
+    )[0] ?? "unlocated";
+    const publication: RecordPublication = group.every((origin) => origin.publication === "verified") &&
+      relevances.size === 1 && semanticCrosscheck === "consistent"
+      ? "verified"
+      : "discarded";
     const channels = new Set(group.flatMap((origin) => [...origin.wholeBidChannels]));
-    if (disposition === "verified" && relevance === "s" && channels.size === 0) {
-      reason = "submission_record_without_whole_bid_relation";
-      disposition = "unresolved";
-    }
-    if (reason) {
-      (disposition === "discarded" ? discardedReasons : globalReasons).push(reason);
-    }
     joined.push({
       merged_record_id: idParts.join(":"),
       canonical_record_digest: canonicalModelRecordDigest(kind as RecordKind, group[0]!.record),
       kind: kind as RecordKind,
       relevance,
-      disposition,
+      source_binding: sourceBinding,
+      semantic_crosscheck: semanticCrosscheck,
+      publication,
       reason,
       contributing_origin_record_keys: group.map((origin) => origin.originKey),
       whole_bid_channels: [...channels].toSorted()
     });
-  }
-  const verifiedSubmissionRecords = joined.filter((record) =>
-    record.relevance === "s" && record.disposition === "verified"
-  );
-  const submissionChannels = new Set(verifiedSubmissionRecords.flatMap((record) =>
-    record.whole_bid_channels
-  ));
-  if (verifiedSubmissionRecords.length > 0 && submissionChannels.size !== 1) {
-    globalReasons.push("submission_record_channel_disagreement");
-  }
-  const hasDraftSubmissionSummary = input.batches.some((batch) =>
-    Boolean(batch.draft.summary.submission_method?.trim())
-  );
-  if (hasDraftSubmissionSummary && !verifiedSubmissionRecords.some((record) =>
-    record.kind === "c" || record.kind === "q"
-  )) {
-    globalReasons.push("unmirrored_submission_summary");
   }
   if (input.mergedDraft) {
     const expectedMergedRecords = recordsIn(input.mergedDraft).map(({ kind, record }) =>
@@ -597,11 +755,10 @@ export function verifyRecordAuthorities(input: {
     if (new Set(expectedMergedRecords).size !== expectedMergedRecords.length ||
       new Set(actualMergedRecords).size !== actualMergedRecords.length ||
       stableJson(expectedMergedRecords.toSorted()) !== stableJson(actualMergedRecords.toSorted())) {
-      globalReasons.push("merged_record_mapping_mismatch");
+      receiptReasons.push("merged_record_mapping_mismatch");
     }
   }
-  const uniqueReasons = [...new Set(globalReasons)];
-  const complete = input.submission.complete && uniqueReasons.length === 0 &&
+  const complete = receiptReasons.length === 0 &&
     origins.length === joined.reduce(
       (count, record) => count + record.contributing_origin_record_keys.length,
       0
@@ -616,21 +773,31 @@ export function verifyRecordAuthorities(input: {
       relevance: origin.relevance,
       canonical_record_digest: canonicalModelRecordDigest(origin.kind, origin.record),
       merged_record_id: mergedRecordId,
-      disposition: origin.disposition,
+      source_binding: origin.sourceBinding,
+      semantic_crosscheck: origin.semanticCrosscheck,
+      publication: complete ? origin.publication : "discarded",
       reason: origin.reason,
       citation_bindings: origin.citationBindings
     }] : [];
   });
+  const safeJoined = complete ? joined : joined.map((record) => ({
+    ...record,
+    publication: "discarded" as const,
+    semantic_crosscheck: "unknown" as const,
+    reason: record.reason ?? receiptReasons[0] ?? "record_authority_integrity"
+  }));
+  const uniqueReasons = [...new Set([...receiptReasons, ...submissionVetoReasons])];
   const manifestWithoutDigest: UnsealedRecordAuthorityManifest = {
     version: RECORD_AUTHORITY_VERSION,
     complete,
-    package_veto: !complete || joined.some((record) => record.relevance === "u" ||
-      record.disposition === "unresolved"),
+    package_veto: complete && safeJoined.some((record) =>
+      record.semantic_crosscheck === "disagrees"
+    ),
     unresolved_reasons: uniqueReasons,
     discarded_reasons: [...new Set(discardedReasons)],
     origin_record_key_to_merged_record_id: Object.fromEntries(originToMerged),
     origins: verifiedOrigins,
-    records: joined
+    records: safeJoined
   };
   const sealed = sealRecordAuthorityManifest(manifestWithoutDigest);
   return recordAuthorityReceiptWithinCapacity(sealed.receipt_byte_length)
@@ -642,7 +809,7 @@ export function unresolvedRecordAuthority(reason: string): VerifiedRecordAuthori
   const manifestWithoutDigest: UnsealedRecordAuthorityManifest = {
     version: RECORD_AUTHORITY_VERSION,
     complete: false,
-    package_veto: true,
+    package_veto: false,
     unresolved_reasons: [reason],
     discarded_reasons: [],
     origin_record_key_to_merged_record_id: {},

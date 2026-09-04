@@ -559,9 +559,10 @@ function validateRelation(
       decision.condition_end_utf16 > decision.relation_end_utf16)) {
     return { relation: null, reason: "condition_mismatch" };
   }
-  if (decision.channel !== "unspecified" && !submissionChannelSignatures(quote).has(decision.channel)) {
-    return { relation: null, reason: "channel_mismatch" };
-  }
+  // Channel lexemes are discovery hints only. The same-call Agent adjudicates
+  // the semantics of every complete page window, including unfamiliar product
+  // names that map to a bounded channel enum. Exact offsets still bind the
+  // decision to PDF.js source text; a dictionary match is not authority.
   if (decision.subject_scope === "ambiguous" || decision.modality === "unknown" ||
     (decision.subject_scope === "whole_bid" && decision.channel === "unspecified")) {
     return { relation: null, reason: "semantic_uncertainty" };
@@ -723,19 +724,6 @@ export function verifySubmissionAdjudication(input: {
           relations.push(validated.relation!);
         }
       }
-      if (!reason) {
-        for (const occurrence of candidate.occurrences) {
-          const covering = coverage.relations.filter((relation) =>
-            relation.channel === occurrence.channel_hint &&
-            relation.relation_start_utf16 <= occurrence.mention_start_utf16 &&
-            relation.relation_end_utf16 >= occurrence.mention_end_utf16
-          );
-          if (covering.length !== 1) {
-            reason = covering.length === 0 ? "channel_mismatch" : "overlap_disagreement";
-            break;
-          }
-        }
-      }
       records.set(candidate.candidate_id, {
         candidate_id: candidate.candidate_id,
         document_sha256: candidate.document_sha256,
@@ -763,26 +751,40 @@ export function verifySubmissionAdjudication(input: {
     globalReasons.push("missing_candidate");
   }
 
-  // The same focused occurrence can be visible in overlapping windows. A
-  // semantic disagreement is a fence, never a majority vote.
-  const seenOccurrenceIds = new Set<string>();
-  for (const focused of input.ledger.candidates.flatMap((candidate) => candidate.occurrences)) {
-    if (seenOccurrenceIds.has(focused.occurrence_id)) continue;
-    seenOccurrenceIds.add(focused.occurrence_id);
-    const candidateIds = input.ledger.candidates.filter((candidate) =>
-      candidate.occurrences.some((occurrence) => occurrence.occurrence_id === focused.occurrence_id)
-    ).map((candidate) => candidate.candidate_id);
-    const related = candidateIds.flatMap((candidateId) =>
-      records.get(candidateId)?.relations.filter((relation) =>
-        relation.relation_start_utf16 <= focused.mention_start_utf16 &&
-        relation.relation_end_utf16 >= focused.mention_end_utf16 &&
-        relation.channel === focused.channel_hint
+  // Every exact relation that falls wholly inside more than one overlapping
+  // all-page window must be emitted exactly once and identically by each such
+  // window. This check does not depend on a channel dictionary, so unfamiliar
+  // names receive the same consistency proof as lexically discovered hints.
+  const checkedRelationSpans = new Set<string>();
+  for (const relation of [...records.values()].flatMap((record) => record.relations)) {
+    const spanKey = stableJson({
+      document_sha256: relation.document_sha256,
+      pdf_page_1based: relation.pdf_page_1based,
+      relation_start_utf16: relation.relation_start_utf16,
+      relation_end_utf16: relation.relation_end_utf16
+    });
+    if (checkedRelationSpans.has(spanKey)) continue;
+    checkedRelationSpans.add(spanKey);
+    const enclosingCandidates = input.ledger.candidates.filter((candidate) =>
+      candidate.document_sha256 === relation.document_sha256 &&
+      candidate.pdf_page_1based === relation.pdf_page_1based &&
+      candidate.source_start_utf16 <= relation.relation_start_utf16 &&
+      candidate.source_end_utf16 >= relation.relation_end_utf16
+    );
+    const matches = enclosingCandidates.map((candidate) =>
+      records.get(candidate.candidate_id)?.relations.filter((candidateRelation) =>
+        candidateRelation.relation_start_utf16 === relation.relation_start_utf16 &&
+        candidateRelation.relation_end_utf16 === relation.relation_end_utf16
       ) ?? []
     );
-    if (new Set(related.map(relationSignature)).size <= 1) continue;
+    const signatureSets = matches.map((values) => stableJson(
+      [...new Set(values.map(relationSignature))].toSorted()
+    ));
+    if (matches.every((values) => values.length > 0) &&
+      new Set(signatureSets).size === 1) continue;
     globalReasons.push("overlap_disagreement");
-    for (const candidateId of candidateIds) {
-      const record = records.get(candidateId);
+    for (const candidate of enclosingCandidates) {
+      const record = records.get(candidate.candidate_id);
       if (!record) continue;
       record.disposition = "unresolved";
       record.reason = "overlap_disagreement";

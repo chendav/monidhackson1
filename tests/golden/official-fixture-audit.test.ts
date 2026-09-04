@@ -284,9 +284,9 @@ describe("optional official-PDF local audit (PDFs are never committed)", () => {
       mergedDraft: mergeDrafts(representativeDrafts)
     });
     expect(representativeReceipt).toMatchObject({ complete: true, package_veto: false });
-    expect(representativeReceipt.receipt_byte_length).toBe(3_829);
+    expect(representativeReceipt.receipt_byte_length).toBe(4_225);
     expect(MAX_RECORD_AUTHORITY_RECEIPT_BYTES - representativeReceipt.receipt_byte_length)
-      .toBe(258_315);
+      .toBe(257_919);
 
     const recoveredEvaluation = recoverBasisOfSelectionEvaluationAnchors(
       emptyDraft(),
@@ -521,9 +521,9 @@ describe("optional official-PDF local audit (PDFs are never committed)", () => {
       mergedDraft: mergeDrafts(representativeDrafts)
     });
     expect(representativeReceipt).toMatchObject({ complete: true, package_veto: false });
-    expect(representativeReceipt.receipt_byte_length).toBe(6_021);
+    expect(representativeReceipt.receipt_byte_length).toBe(6_681);
     expect(MAX_RECORD_AUTHORITY_RECEIPT_BYTES - representativeReceipt.receipt_byte_length)
-      .toBe(256_123);
+      .toBe(255_463);
 
     expect(base.pages[8].normalizedText).toContain("fails to meet all mandatory solicitation requirements non-compliant");
     expect(base.pages[10].normalizedText).toContain("minimum of fifty (50) points");

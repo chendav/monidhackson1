@@ -237,9 +237,6 @@ describe("agent-semantic submission adjudication", () => {
     ["wrong page", (response: SubmissionBatchAdjudication) => {
       response.coverage_units[0].pdf_page_1based += 1;
     }, "page_mismatch"],
-    ["wrong channel", (response: SubmissionBatchAdjudication) => {
-      response.coverage_units[0].relations[0].channel = "portal";
-    }, "channel_mismatch"],
     ["wrong quote offsets", (response: SubmissionBatchAdjudication) => {
       response.coverage_units[0].relations[0].relation_end_utf16 += 1;
     }, "offset_mismatch"],
@@ -252,6 +249,28 @@ describe("agent-semantic submission adjudication", () => {
     expect(artifact.complete).toBe(false);
     expect(artifact.unresolved_reasons).toContain(reason);
     expect(resolveVerifiedSubmissionChannel(artifact)).toMatchObject({ status: "unresolved" });
+  });
+
+  it("treats lexical channel matches as hints rather than semantic authority", () => {
+    const ledger = discoverSubmissionCandidateLedger([document([
+      "Bids must be lodged through SecureDrop."
+    ])]);
+    const artifact = verify(ledger, (response) => {
+      response.coverage_units[0].relations.push({
+        relation_start_utf16: 0,
+        relation_end_utf16: "Bids must be lodged through SecureDrop.".length,
+        subject_scope: "whole_bid",
+        modality: "required",
+        channel: "portal",
+        condition_start_utf16: null,
+        condition_end_utf16: null,
+        confidence: 0.99
+      });
+    });
+    expect(artifact.complete).toBe(true);
+    expect(resolveVerifiedSubmissionChannel(artifact)).toMatchObject({
+      status: "unique", channel: "portal"
+    });
   });
 
   it("binds ledger digest and ordered batch manifests", () => {

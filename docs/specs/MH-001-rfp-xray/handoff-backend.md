@@ -828,6 +828,121 @@ credential, deployment, paid-provider, commit, or governance action occurred.
 
 Memory disposition: proposed only; Chief/Reviewer owns promotion or rejection.
 
+## T9 Implementation — Source-Ledger Package Authority
+
+This is the bounded T9 implementation handoff for independent QA7. It is
+implementation evidence, not self-certification. No network or paid-provider
+call, credential use, database operation or migration, deployment, commit,
+push, public API change, or Reviewer-verdict edit occurred.
+
+### Changed Files
+
+- `src/lib/analysis/submission-channel.ts`
+- `src/lib/analysis/record-authority.ts`
+- `src/lib/analysis/materialize.ts`
+- `src/lib/runs/record-authority-audit.ts`
+- `scripts/read-record-authority-audit.mjs`
+- `tests/unit/submission-adjudication.test.ts`
+- `tests/unit/record-authority.test.ts`
+- `tests/unit/record-authority-audit.test.ts`
+- `tests/integration/record-authority-audit.test.ts`
+- `tests/golden/official-fixture-audit.test.ts`
+- `docs/specs/MH-001-rfp-xray/reframing_review.md`
+- `docs/specs/MH-001-rfp-xray/t7-record-bound-semantic-authority.md`
+- `docs/specs/MH-001-rfp-xray/tasks.md`
+- This handoff section.
+
+`qa_gate.yaml` and release-evidence files already present in the shared dirty
+worktree are Chief/Reviewer-owned and were not edited as part of T9.
+
+### Implemented Boundary
+
+- `discoverSubmissionCandidateLedger` continues to cover every PDF.js page with
+  complete overlapping 3,200-UTF16 windows. The Agent adjudicates every window.
+  Lexical matches are hints only: the server no longer uses a channel dictionary
+  to validate Agent semantics or require a relation. Returned relations still
+  require exact source offsets, bounded spans, confidence, manifest identity,
+  and identical relation sets in every enclosing overlapping window.
+- `VerifiedSubmissionAdjudication` is the sole package submission authority.
+  With record authority present, Draft summary/channel values, model amendment
+  signals, generated model conflicts, record receipt corruption, and model
+  publication failures cannot establish or remove the ledger channel.
+- Receipt v3 gives each origin and canonical joined record `source_binding`
+  (`unlocated|exact_bound|coverage_gap|relation_gap|relation_conflict`),
+  `semantic_crosscheck` (`consistent|disagrees|unknown`), and `publication`
+  (`verified|discarded`).
+- Unlocated `s/n/u`, missing or duplicate annotations, exact-occurrence capacity,
+  and later field/scalar/publication failures discard only the affected model
+  record. Discarded records provide no reconciliation lineage, conflict input,
+  or persisted Q&A evidence.
+- Exact-source `s` coverage/relation gaps or incompatible relations, exact `n`
+  overlap with whole-bid/ambiguous relations, exact `u`, and exact canonical
+  `s/n` disagreement set the record receipt's package veto. Ledger incomplete,
+  multiple, contradicted, semantically uncertain, metadata-incomplete, or
+  prompt-tainted states remain independently unresolved.
+- Receipt corruption, unknown annotations, lost/multiple mapping, merged-set
+  mismatch, overflow, and legacy v1/v2 receipts suppress all model records. If
+  the source ledger is independently complete and unique, its derived channel
+  and decisive exact citation remain available.
+- Audit v3 retains the prior seven allowlisted measurements and adds only strict,
+  fixed-key integer counters for relevance, source binding, semantic crosscheck,
+  publication, publication reason, and exact-source veto reason. It contains no
+  IDs, page numbers, offsets, URLs, source/quote/window text, record bodies, or
+  private model output. Historical v1/v2 audit rows remain strict-readable;
+  the existing nullable JSONB column needs no SQL migration and no public route
+  was added.
+
+### Falsification Evidence
+
+- A thirteen-case matrix covers unlocated `s/n/u`, missing/duplicate/unknown
+  annotation, exact `s` coverage gap/relation gap/incompatible relation, exact
+  `n` whole-bid overlap, exact `u`, and verified exact `s`/`n` controls.
+- Invented and paraphrased SecureDrop records cannot denial-of-service verified
+  Email. The behavior is exercised across Claim, Requirement, Risk, and
+  Evaluation; each discarded record is absent from public results and Q&A.
+- Email plus an unfamiliar SecureDrop relation mapped by the Agent to the
+  bounded `portal` enum resolves as multiple without adding a product/channel
+  lexicon. A real exact SecureDrop gap vetoes.
+- The 126-record/25-bad-citation fixture and the four-collection fixture retain
+  verified Email and deterministic facts while dropping bad records. Four or
+  twenty-five non-material publication failures therefore have the same package
+  effect. Fourteen exact submission Requirements remain publishable when the
+  all-page ledger is uniquely Email.
+- Corrupt mapping and v1/v2 receipt tests prove all model records are suppressed
+  while an independent ledger-derived Email remains. Later-invalid records do
+  not contribute reconciliation lineage or conflicts.
+- Official local `representative_local` v3 receipt sizes are 4,225 bytes for
+  Edmonton (257,919-byte headroom) and 6,681 bytes for CER (255,463-byte
+  headroom) against the unchanged 262,144-byte hard cap. These are local
+  representative measurements, not paid-provider or worst-case evidence.
+
+### Exact Checks
+
+- `pnpm test -- tests/unit/record-authority.test.ts tests/unit/submission-adjudication.test.ts tests/unit/core-field-recovery-materialize.test.ts tests/unit/closed-world.test.ts tests/unit/record-authority-audit.test.ts tests/integration/record-authority-audit.test.ts`:
+  PASS, 6 files and 148 tests.
+- `$env:RFP_XRAY_FIXTURE_DIR='D:\monidhackson\.data\official-fixtures'; pnpm test -- tests/golden/official-fixture-audit.test.ts`:
+  PASS, 1 file and 3 tests.
+- `pnpm check`: PASS; ESLint and TypeScript passed, 57 test files passed/4
+  skipped, and 731 tests passed/10 skipped.
+- `pnpm build`: PASS; Next production compilation, TypeScript, 9 Workflow steps,
+  5 workflows, and 13 static pages completed.
+- `pnpm exec playwright test`: PASS, 14 browser tests passed and 2 credentialed
+  Railway S3 live tests skipped.
+- `git diff --check`: PASS; only Windows LF-to-CRLF notices were emitted.
+
+### Risks and Follow-ups
+
+- A complete all-page Agent adjudication remains the semantic authority; the
+  server verifies source binding and cross-window consistency but does not
+  independently understand arbitrary English. This is explicit and introduces
+  no channel/topic grammar heuristic.
+- The bounded channel enum maps unfamiliar product names to a semantic channel
+  such as `portal`. If the Agent cannot do so confidently, it must emit
+  `unspecified`/unknown and the ledger remains unresolved.
+- No new paid run is authorized by this handoff. QA7 must independently approve
+  P0/P1=0 before the Chief redeploys and performs the final controlled Edmonton
+  evidence run.
+
 ## T7 Implementation — Record-Bound Agent Semantic Authority
 
 This is the implementation handoff for the separately approved T7 design in
@@ -2275,3 +2390,13 @@ classification result.
   object filters, so an unrelated second object cannot erase a valid first fact.
 
 Memory disposition: proposed only; Chief/Reviewer owns promotion or rejection.
+
+## T9 QA7 Handoff Locator (Latest)
+
+The complete bounded implementation handoff is the section **T9 Implementation
+— Source-Ledger Package Authority** in this file. Its final evidence is: focused
+T9/adjacent tests pass, official fixtures 3/3 pass, `pnpm check` passes with 731
+tests passed/10 skipped, production build passes, and Playwright passes 14/2
+skipped. No deployment, network/paid call, credential use, DB operation or
+migration, commit, push, public route, or Reviewer-verdict edit occurred. QA7 is
+the next independent gate.

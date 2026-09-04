@@ -52,6 +52,60 @@ to `885404f` while preserving schema v10 if the experiment fails.
 ACCEPT — authorize only this state-model split and tests. A later controlled paid
 Edmonton run remains necessary production proof; missing closing dates stay null.
 
+## T9 Addendum — Source Ledger Owns Package Safety
+
+T8 production falsified the remaining coupling: 84 records, four rejected
+citations, and 88865/262144 receipt bytes still produced `complete=false` and
+withheld Email. The independent ledger covers every PDF.js page using complete
+overlapping 3200-UTF16 windows; lexical channel matches are hints only, not the
+coverage boundary.
+
+The accepted minimum v3 model makes the complete source ledger the sole package
+submission authority. An unlocated model record, including `s`, is discarded
+and cannot publish or denial-of-service the ledger result. An exact-source `s`
+outside ledger coverage, without a compatible relation, or with an ambiguous or
+incompatible relation proves a real ledger gap/disagreement and vetoes. Exact
+`n` overlap, exact `u`, ledger incompleteness/ambiguity, and prompt taint remain
+vetoes. Later field/scalar/publication failure only discards the affected record.
+
+Receipt/audit v3 adds strict bounded enum counters for relevance, source binding,
+publication, publication reasons, and submission veto reasons. It persists no
+text, record IDs, pages, offsets, URLs, or private output. v1/v2 materialization
+remains fail-closed. No SQL or public API migration is required.
+
+Chief disposition: ACCEPT for a bounded synthetic/official falsification matrix;
+no third paid run before independent QA7 approval.
+
+## Implemented T9 Design
+
+The source ledger is now the only package-level submission authority. Candidate
+discovery emits complete overlapping 3,200-UTF16 windows over every PDF.js page;
+lexical channel matches remain hints and no longer validate or limit Agent
+relations. Exact relation offsets, page/document hashes, batch manifests,
+capacity, confidence, and agreement across every enclosing overlapping window
+remain server-verified.
+
+The internal authority receipt is v3. Every model record has independent
+`source_binding`, `semantic_crosscheck`, and `publication` axes. Unlocated or
+later-invalid records are discarded without lineage or Q&A and cannot suppress
+a complete unique ledger result. Only exact-source relevance disagreement with
+the ledger can set the receipt's package veto. A corrupt/mismatched/legacy
+receipt suppresses all model records while leaving independently verified
+ledger-derived channel authority intact.
+
+The existing private audit JSONB now emits only fixed-key bounded counters for
+the three axes, relevance, publication reasons, and exact-source veto reasons in
+addition to its prior non-body measurements. Historical v1/v2 audit rows remain
+strict-readable. No SQL or public route changed.
+
+The bounded falsification matrix passes the thirteen source/relevance cases,
+all four public record collections, invented and paraphrased SecureDrop, exact
+coverage/relation gaps, Email plus unfamiliar-portal ambiguity, the 126/25 and
+four-collection failure invariants, fourteen exact submission Requirements,
+complete all-page window coverage, corrupt/v1/v2 receipts, lineage suppression,
+and closed-world Q&A. Official local v3 representative receipts are 4,225 bytes
+for Edmonton and 6,681 bytes for CER under the unchanged 262,144-byte cap.
+
 ## Implemented T8 Design
 
 The provider-private annotation wire remains version 1 so T8 does not change the

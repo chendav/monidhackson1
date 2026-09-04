@@ -93,7 +93,8 @@ function artifact(pages: string[], relationForPage: (page: number, text: string)
   return { source, ledger, binding, submission };
 }
 
-function relation(text: string, clause: string, channel: "email" = "email", scope: "whole_bid" | "other" = "whole_bid") {
+function relation(text: string, clause: string, channel: "email" | "portal" = "email",
+  scope: "whole_bid" | "other" | "ambiguous" = "whole_bid") {
   const start = text.indexOf(clause);
   if (start < 0) return [];
   return [{
@@ -106,6 +107,15 @@ function relation(text: string, clause: string, channel: "email" = "email", scop
     condition_end_utf16: null,
     confidence: 0.99
   }];
+}
+
+function manifest(pageCount: number): DocumentManifest {
+  return {
+    document_id: "10000000-0000-4000-8000-000000000001", role: "base",
+    source_type: "upload", source_name: "base.pdf", source_url: null, sha256: sha,
+    pages: pageCount, language: "en", solicitation_number: "RFP-1", amendment_number: null,
+    status: "active", cleanup_status: "deleted"
+  };
 }
 
 function verify(options: {
@@ -213,7 +223,7 @@ describe("T7 record-bound semantic authority", () => {
       package_veto: false,
       unresolved_reasons: []
     });
-    expect(authority.records.filter((record) => record.disposition === "discarded"))
+    expect(authority.records.filter((record) => record.publication === "discarded"))
       .toHaveLength(25);
     expect(authority.discarded_reasons).toEqual(["non_exact_or_uncovered_citation"]);
     const discarded = authority.records.find((record) => record.merged_record_id === "noise-1")!;
@@ -290,7 +300,7 @@ describe("T7 record-bound semantic authority", () => {
       relationForPage: (_page, text) => relation(text, email)
     });
     expect(authority).toMatchObject({ complete: true, package_veto: false });
-    expect(authority.records.filter((record) => record.disposition === "discarded"))
+    expect(authority.records.filter((record) => record.publication === "discarded"))
       .toHaveLength(4);
     const result = materializeAnalysis({
       draft: analysis,
@@ -358,7 +368,7 @@ describe("T7 record-bound semantic authority", () => {
     expect(authority).toMatchObject({ complete: true, package_veto: false });
     expect(authority.records.filter((record) => record.merged_record_id.startsWith("bad-")))
       .toEqual(expect.arrayContaining([
-        expect.objectContaining({ disposition: "verified", relevance: "n" })
+        expect.objectContaining({ publication: "verified", relevance: "n" })
       ]));
     const result = materializeAnalysis({
       draft: analysis,
@@ -381,7 +391,7 @@ describe("T7 record-bound semantic authority", () => {
       .toBe("not_found");
   });
 
-  it("turns a verified s record's later publication failure into a package veto", () => {
+  it("discards a verified s record's later publication failure without overriding the ledger", () => {
     const email = "Bids must be submitted by email.";
     const analysis = draft({
       summary: { ...draft().summary, submission_method: "Email" },
@@ -409,12 +419,12 @@ describe("T7 record-bound semantic authority", () => {
       costs: [], submissionAdjudication: state.submission, recordAuthority: authority,
       expiresAt: new Date("2026-09-04T00:00:00.000Z")
     }).result;
-    expect(result.summary.submission_method).toBeNull();
+    expect(result.summary.submission_method).toBe("Email");
     expect(answerFromPersistedEvidence("How must bids be submitted?", result).answerability)
       .toBe("not_found");
   });
 
-  it("rejects a legacy v1 authority receipt rather than upgrading it", () => {
+  it("suppresses legacy v1/v2 model records while retaining independent ledger authority", () => {
     const quote = "Bids must be submitted by email.";
     const analysis = draft({
       summary: { ...draft().summary, submission_method: "Email" },
@@ -428,28 +438,24 @@ describe("T7 record-bound semantic authority", () => {
       pages: [quote], analysis, annotations: [["c", 0, "s"]],
       relationForPage: (_page, text) => relation(text, quote)
     });
-    const legacy = { ...current, version: 1 as const };
-    expect(recordAuthorityManifestIntegrity(legacy)).toBe(false);
-    const result = materializeAnalysis({
-      draft: analysis,
-      documents: [state.source],
-      manifests: [{
-        document_id: "10000000-0000-4000-8000-000000000001", role: "base",
-        source_type: "upload", source_name: "base.pdf", source_url: null, sha256: sha,
-        pages: 1, language: "en", solicitation_number: "RFP-1", amendment_number: null,
-        status: "active", cleanup_status: "deleted"
-      }],
-      costs: [],
-      submissionAdjudication: state.submission,
-      recordAuthority: legacy,
-      expiresAt: new Date("2026-09-04T00:00:00.000Z")
-    }).result;
-    expect(result.summary.submission_method).toBeNull();
-    expect(answerFromPersistedEvidence("How must bids be submitted?", result).answerability)
-      .toBe("not_found");
+    for (const version of [1, 2] as const) {
+      const legacy = { ...current, version };
+      expect(recordAuthorityManifestIntegrity(legacy)).toBe(false);
+      const result = materializeAnalysis({
+        draft: analysis,
+        documents: [state.source], manifests: [manifest(1)], costs: [],
+        submissionAdjudication: state.submission,
+        recordAuthority: legacy,
+        expiresAt: new Date("2026-09-04T00:00:00.000Z")
+      }).result;
+      expect(result.summary.submission_method).toBe("Email");
+      expect(result.claims.some((claim) => claim.claim_id === "email")).toBe(false);
+      expect(answerFromPersistedEvidence("How must bids be submitted?", result).answerability)
+        .toBe("not_found");
+    }
   });
 
-  it("keeps semantic, annotation, taint, mapping, and capacity failures as global vetoes", () => {
+  it("separates record publication failures from exact-source ledger disagreements", () => {
     const financial = "Invoices are payable within 30 days.";
     const base = draft({ requirements: [{
       id: "payment", topic: "payment", category: "financial", text: financial,
@@ -462,21 +468,21 @@ describe("T7 record-bound semantic authority", () => {
     expect(verify({ pages: [financial], analysis: invalidN, annotations: [["q", 0, "n"]] }))
       .toMatchObject({ complete: true, package_veto: false });
     expect(verify({ pages: [financial], analysis: invalidN, annotations: [["q", 0, "s"]] }))
-      .toMatchObject({ complete: false, package_veto: true });
+      .toMatchObject({ complete: true, package_veto: false });
     expect(verify({ pages: [financial], analysis: base, annotations: [["q", 0, "u"]] }))
-      .toMatchObject({ complete: false, package_veto: true });
+      .toMatchObject({ complete: true, package_veto: true });
     expect(verify({ pages: [financial], analysis: base, annotations: [] }))
-      .toMatchObject({ complete: false, package_veto: true });
+      .toMatchObject({ complete: true, package_veto: false });
     expect(verify({
       pages: [financial], analysis: base,
       annotations: [["q", 0, "n"], ["q", 0, "n"]]
-    })).toMatchObject({ complete: false, package_veto: true });
+    })).toMatchObject({ complete: true, package_veto: false });
     expect(verify({
       pages: [financial], analysis: base,
       annotations: [["q", 0, "n"], ["c", 0, "n"]]
-    })).toMatchObject({ complete: false, package_veto: true });
+    })).toMatchObject({ complete: false, package_veto: false });
     expect(verify({ pages: [financial], analysis: base, annotations: [["q", 0, "n"]], tainted: true }))
-      .toMatchObject({ complete: false, package_veto: true });
+      .toMatchObject({ complete: true, package_veto: false });
 
     const email = "Bids must be submitted by email.";
     const falselyNonSubmission = draft({ claims: [{
@@ -487,21 +493,21 @@ describe("T7 record-bound semantic authority", () => {
     expect(verify({
       pages: [email], analysis: falselyNonSubmission, annotations: [["c", 0, "n"]],
       relationForPage: (_page, text) => relation(text, email)
-    })).toMatchObject({ complete: false, package_veto: true });
+    })).toMatchObject({ complete: true, package_veto: true });
 
     const submissionRequirement = draft({ requirements: [{
       ...base.requirements[0]!, category: "submission"
     }] });
     expect(verify({
       pages: [financial], analysis: submissionRequirement, annotations: [["q", 0, "n"]]
-    })).toMatchObject({ complete: false, package_veto: true });
+    })).toMatchObject({ complete: true, package_veto: false });
 
     const unmirrored = draft({
       summary: { ...draft().summary, submission_method: "Email" },
       requirements: base.requirements
     });
     expect(verify({ pages: [financial], analysis: unmirrored, annotations: [["q", 0, "n"]] }))
-      .toMatchObject({ complete: false, package_veto: true });
+      .toMatchObject({ complete: true, package_veto: false });
 
     const state = artifact([financial]);
     const incompleteLedger = verifyRecordAuthorities({
@@ -515,7 +521,7 @@ describe("T7 record-bound semantic authority", () => {
       documents: [state.source],
       mergedDraft: base
     });
-    expect(incompleteLedger).toMatchObject({ complete: false, package_veto: true });
+    expect(incompleteLedger).toMatchObject({ complete: true, package_veto: false });
     const mappingMismatch = verifyRecordAuthorities({
       batches: [{
         binding: state.binding,
@@ -529,10 +535,10 @@ describe("T7 record-bound semantic authority", () => {
         ...base.requirements[0]!, id: "different-record"
       }] })
     });
-    expect(mappingMismatch).toMatchObject({ complete: false, package_veto: true });
+    expect(mappingMismatch).toMatchObject({ complete: false, package_veto: false });
     expect(mappingMismatch.unresolved_reasons).toContain("merged_record_mapping_mismatch");
     expect(unresolvedRecordAuthority("record_authority_receipt_capacity"))
-      .toMatchObject({ complete: false, package_veto: true });
+      .toMatchObject({ complete: false, package_veto: false });
   });
 
   it("keeps a cited financial control authoritative while binding Email submission authority", () => {
@@ -557,8 +563,8 @@ describe("T7 record-bound semantic authority", () => {
     });
     expect(result).toMatchObject({ complete: true, package_veto: false });
     expect(result.records).toEqual(expect.arrayContaining([
-      expect.objectContaining({ merged_record_id: "email", relevance: "s", disposition: "verified" }),
-      expect.objectContaining({ merged_record_id: "payment", relevance: "n", disposition: "verified" })
+      expect.objectContaining({ merged_record_id: "email", relevance: "s", publication: "verified" }),
+      expect.objectContaining({ merged_record_id: "payment", relevance: "n", publication: "verified" })
     ]));
   });
 
@@ -584,7 +590,8 @@ describe("T7 record-bound semantic authority", () => {
     }] } });
     const result = verify({ pages: [secure], analysis, annotations: [[kind, 0, "s"]] });
     expect(result.package_veto).toBe(true);
-    expect(result.records[0]).toMatchObject({ disposition: "unresolved", reason: "relationless_submission_record" });
+    expect(result.records[0]).toMatchObject({ publication: "discarded", source_binding: "relation_gap",
+      semantic_crosscheck: "disagrees", reason: "relationless_submission_record" });
   });
 
   it("fails closed for missing, duplicate, unknown, and structurally invalid annotations", () => {
@@ -594,10 +601,10 @@ describe("T7 record-bound semantic authority", () => {
       evidence_needed: null, consequence: null, document_sha256: sha,
       amendment_number: null, effect: "add", citations: [citation(quote)]
     }] });
-    expect(verify({ pages: [quote], analysis, annotations: [] }).unresolved_reasons)
+    expect(verify({ pages: [quote], analysis, annotations: [] }).discarded_reasons)
       .toContain("missing_annotation");
     expect(verify({ pages: [quote], analysis, annotations: [["q", 0, "n"], ["q", 0, "n"]] })
-      .unresolved_reasons).toContain("duplicate_annotation");
+      .discarded_reasons).toContain("duplicate_annotation");
     expect(verify({ pages: [quote], analysis, annotations: [["q", 0, "n"], ["c", 0, "n"]] })
       .unresolved_reasons).toContain("unknown_annotation");
   });
@@ -613,7 +620,7 @@ describe("T7 record-bound semantic authority", () => {
       pages: [email, email], analysis, annotations: [["c", 0, "s"]],
       relationForPage: (page, text) => relation(text, email, "email", page === 1 ? "whole_bid" : "other")
     });
-    expect(result.unresolved_reasons).toContain("duplicate_quote_mixed_matches");
+    expect(result.unresolved_reasons).toContain("submission_relation_conflict");
   });
 
   it("merges identical semantics across different model IDs and joins authority conservatively", () => {
@@ -665,7 +672,8 @@ describe("T7 record-bound semantic authority", () => {
       amendment_number: null, effect: "add", citations: [citation(quote)]
     }] });
     const result = verify({ pages: [quote], analysis, annotations: [["q", 0, "n"]], tainted: true });
-    expect(result.records[0]).toMatchObject({ disposition: "unresolved", reason: "prompt_injection" });
+    expect(result.records[0]).toMatchObject({ publication: "discarded", source_binding: "unlocated",
+      semantic_crosscheck: "unknown", reason: "prompt_injection" });
   });
 
   it("detects wrong manifest digests, lost origins, and multiply attached origins", () => {
@@ -702,8 +710,9 @@ describe("T7 record-bound semantic authority", () => {
       annotations: [["q", 0, "n"]] });
     expect(eight.complete).toBe(true);
     expect(eight.origins[0]?.citation_bindings[0]?.occurrences).toHaveLength(8);
-    expect(nine.complete).toBe(false);
-    expect(nine.unresolved_reasons).toContain("exact_occurrence_capacity");
+    expect(nine.complete).toBe(true);
+    expect(nine.package_veto).toBe(false);
+    expect(nine.discarded_reasons).toContain("exact_occurrence_capacity");
   });
 
   it("enforces the 262144-byte receipt boundary without truncation", () => {
@@ -779,10 +788,9 @@ describe("T7 record-bound semantic authority", () => {
       expiresAt: new Date("2026-09-04T00:00:00.000Z")
     }).result;
     expect(result.summary.submission_method).toBeNull();
-    expect(result.claims.find((claim) => claim.claim_id === "secure-claim")?.status)
-      .toBe("needs_review");
-    expect(result.requirements.find((requirement) => requirement.id === "secure-req")?.status)
-      .toBe("needs_review");
+    expect(result.claims.find((claim) => claim.claim_id === "secure-claim")).toBeUndefined();
+    expect(result.requirements.find((requirement) => requirement.id === "secure-req"))
+      .toBeUndefined();
     expect(result.risks.find((risk) => risk.id === "secure-risk")).toBeUndefined();
     expect(result.requirements.find((requirement) => requirement.id === "payment")?.status)
       .toBe("active");
@@ -817,8 +825,7 @@ describe("T7 record-bound semantic authority", () => {
       submissionAdjudication: state.submission, recordAuthority: authority,
       expiresAt: new Date("2026-09-04T00:00:00.000Z")
     }).result;
-    expect(result.requirements.find((requirement) => requirement.id === "shared")?.status)
-      .toBe("needs_review");
+    expect(result.requirements.find((requirement) => requirement.id === "shared")).toBeUndefined();
     expect(answerFromPersistedEvidence("How does the response travel?", result).answerability)
       .toBe("not_found");
   });
@@ -956,9 +963,9 @@ describe("T7 record-bound semantic authority", () => {
       expiresAt: new Date("2026-09-04T00:00:00.000Z")
     }).result;
     expect(result.conflicts.length).toBeGreaterThan(0);
-    expect(result.summary.submission_method).toBeNull();
+    expect(result.summary.submission_method).toBe("Email");
     expect(answerFromPersistedEvidence("How must bids be submitted?", result).answerability)
-      .toBe("not_found");
+      .toBe("answered");
   });
 
   it("preserves contributor origins through conflicts and amendment tombstones", () => {
@@ -996,5 +1003,238 @@ describe("T7 record-bound semantic authority", () => {
     expect(tombstone.facts.find((fact) => fact.id === "delete")).toMatchObject({
       status: "superseded", contributingOriginRecordKeys: ["origin-delete"]
     });
+  });
+});
+
+describe("T9 source-ledger package authority", () => {
+  it("classifies the thirteen publication and exact-source safety cases without a channel lexicon", () => {
+    const email = "Bids must be submitted by email.";
+    const invented = "The response travels through SecureDrop.";
+    const baseClaim = (quote: string) => draft({ claims: [{
+      claim_id: "record", topic: "opaque", claim_text: quote, claim_type: "source",
+      confidence: 1, document_sha256: sha, amendment_number: null, effect: "add",
+      citations: [citation(quote)], supersedes_claim_ids: []
+    }] });
+    const classify = (options: {
+      pages: string[]; quote: string; annotations: unknown[];
+      relationForPage?: (page: number, text: string) => SubmissionRelationDecision[];
+    }) => verify({
+      pages: options.pages,
+      analysis: baseClaim(options.quote),
+      annotations: options.annotations,
+      relationForPage: options.relationForPage
+    });
+
+    const cases = [
+      ["unlocated s", classify({ pages: [email], quote: invented,
+        annotations: [["c", 0, "s"]] }), false, "unlocated", "unknown"],
+      ["unlocated n", classify({ pages: [email], quote: invented,
+        annotations: [["c", 0, "n"]] }), false, "unlocated", "unknown"],
+      ["unlocated u", classify({ pages: [email], quote: invented,
+        annotations: [["c", 0, "u"]] }), false, "unlocated", "unknown"],
+      ["missing annotation", classify({ pages: [email], quote: email,
+        annotations: [] }), false, "unlocated", "unknown"],
+      ["duplicate annotation", classify({ pages: [email], quote: email,
+        annotations: [["c", 0, "s"], ["c", 0, "s"]] }), false, "unlocated", "unknown"],
+      ["unknown annotation", classify({ pages: [email], quote: email,
+        annotations: [["c", 0, "n"], ["q", 0, "n"]] }), false, "exact_bound", "unknown"],
+      ["exact s relation gap", classify({ pages: [invented], quote: invented,
+        annotations: [["c", 0, "s"]] }), true, "relation_gap", "disagrees"],
+      ["exact s incompatible relation", classify({ pages: [invented], quote: invented,
+        annotations: [["c", 0, "s"]], relationForPage: (_page, text) =>
+          relation(text, invented, "portal", "other") }), true, "relation_conflict", "disagrees"],
+      ["exact n whole-bid overlap", classify({ pages: [email], quote: email,
+        annotations: [["c", 0, "n"]], relationForPage: (_page, text) => relation(text, email) }),
+      true, "relation_conflict", "disagrees"],
+      ["exact u", classify({ pages: [email], quote: email,
+        annotations: [["c", 0, "u"]] }), true, "exact_bound", "disagrees"],
+      ["exact n unrelated", classify({ pages: [email], quote: email,
+        annotations: [["c", 0, "n"]] }), false, "exact_bound", "consistent"],
+      ["exact s compatible", classify({ pages: [email], quote: email,
+        annotations: [["c", 0, "s"]], relationForPage: (_page, text) => relation(text, email) }),
+      false, "exact_bound", "consistent"]
+    ] as const;
+    const longSecureDrop = `SecureDrop ${"x".repeat(3_300)}`;
+    const coverageGap = classify({ pages: [longSecureDrop], quote: longSecureDrop,
+      annotations: [["c", 0, "s"]] });
+    const allCases = [...cases, ["exact s coverage gap", coverageGap, true,
+      "coverage_gap", "disagrees"] as const];
+    expect(allCases).toHaveLength(13);
+    for (const [label, authority, veto, sourceBinding, crosscheck] of allCases) {
+      expect(authority.package_veto, label).toBe(veto);
+      expect(authority.records[0]?.source_binding, label).toBe(sourceBinding);
+      expect(authority.records[0]?.semantic_crosscheck, label).toBe(crosscheck);
+      expect(authority.records[0]?.publication, label).toBe(
+        sourceBinding === "exact_bound" && crosscheck === "consistent" ? "verified" : "discarded"
+      );
+    }
+  });
+
+  it("keeps Email despite invented and paraphrased SecureDrop model records", () => {
+    const email = "Bids must be submitted by email.";
+    const secure = "Responses must use SecureDrop.";
+    const analysis = draft({
+      summary: { ...draft().summary, submission_method: "SecureDrop" },
+      claims: [{
+        claim_id: "invented", topic: "opaque", claim_text: secure, claim_type: "source",
+        confidence: 1, document_sha256: sha, amendment_number: null, effect: "add",
+        citations: [citation(secure)], supersedes_claim_ids: []
+      }, {
+        claim_id: "paraphrased", topic: "opaque", claim_text: secure, claim_type: "source",
+        confidence: 1, document_sha256: sha, amendment_number: null, effect: "add",
+        citations: [citation(email)], supersedes_claim_ids: []
+      }]
+    });
+    const { authority, state } = verifyBundle({
+      pages: [email], analysis, annotations: [["c", 0, "s"], ["c", 1, "s"]],
+      relationForPage: (_page, text) => relation(text, email)
+    });
+    expect(authority.package_veto).toBe(false);
+    expect(authority.records.map((record) => record.publication).toSorted())
+      .toEqual(["discarded", "verified"]);
+    const result = materializeAnalysis({
+      draft: analysis, documents: [state.source], manifests: [manifest(1)], costs: [],
+      submissionAdjudication: state.submission, recordAuthority: authority,
+      expiresAt: new Date("2026-09-04T00:00:00.000Z")
+    }).result;
+    expect(result.summary.submission_method).toBe("Email");
+    expect(result.claims.some((claim) => ["invented", "paraphrased"].includes(claim.claim_id)))
+      .toBe(false);
+    expect(answerFromPersistedEvidence("Must responses use SecureDrop?", result).answerability)
+      .toBe("not_found");
+  });
+
+  it("suppresses every model record on receipt corruption without denying ledger Email", () => {
+    const email = "Bids must be submitted by email.";
+    const analysis = draft({
+      summary: { ...draft().summary, submission_method: "Email" },
+      claims: [{
+        claim_id: "model-email", topic: "submission", claim_text: email,
+        claim_type: "source", confidence: 1, document_sha256: sha, amendment_number: null,
+        effect: "add", citations: [citation(email)], supersedes_claim_ids: []
+      }]
+    });
+    const { authority, state } = verifyBundle({
+      pages: [email], analysis, annotations: [["c", 0, "s"]],
+      relationForPage: (_page, text) => relation(text, email)
+    });
+    const corrupt = { ...authority, origin_record_key_to_merged_record_id: {} };
+    expect(recordAuthorityManifestIntegrity(corrupt)).toBe(false);
+    const result = materializeAnalysis({
+      draft: analysis, documents: [state.source], manifests: [manifest(1)], costs: [],
+      submissionAdjudication: state.submission, recordAuthority: corrupt,
+      expiresAt: new Date("2026-09-04T00:00:00.000Z")
+    }).result;
+    expect(result.summary.submission_method).toBe("Email");
+    expect(result.claims.some((claim) => claim.claim_id === "model-email")).toBe(false);
+    expect(answerFromPersistedEvidence("How must bids be submitted?", result).answerability)
+      .toBe("not_found");
+  });
+
+  it.each([
+    ["claim", "c"], ["requirement", "q"], ["risk", "r"], ["evaluation", "e"]
+  ] as const)("discards an unlocated SecureDrop %s without denying ledger Email", (_label, kind) => {
+    const email = "Bids must be submitted by email.";
+    const secure = "Responses must use SecureDrop.";
+    const common = { topic: "opaque", document_sha256: sha, amendment_number: null,
+      effect: "add" as const, citations: [citation(secure)] };
+    const analysis = draft({
+      summary: { ...draft().summary, submission_method: "SecureDrop" },
+      ...(kind === "c" ? { claims: [{ ...common, claim_id: "secure", claim_text: secure,
+        claim_type: "source" as const, confidence: 1, supersedes_claim_ids: [] }] } : {}),
+      ...(kind === "q" ? { requirements: [{ ...common, id: "secure", category: "submission" as const,
+        text: secure, evidence_needed: null, consequence: null }] } : {}),
+      ...(kind === "r" ? { risks: [{ ...common, id: "secure", severity: "high" as const,
+        category: "submission", finding: secure, impact: secure, recommended_action: secure }] } : {}),
+      ...(kind === "e" ? { evaluation: { rules: [{ ...common, id: "secure",
+        field: "selection_method" as const, value: secure }] } } : {})
+    });
+    const { authority, state } = verifyBundle({
+      pages: [email], analysis, annotations: [[kind, 0, "s"]],
+      relationForPage: (_page, text) => relation(text, email)
+    });
+    expect(authority).toMatchObject({ complete: true, package_veto: false });
+    expect(authority.records[0]).toMatchObject({
+      source_binding: "unlocated", semantic_crosscheck: "unknown", publication: "discarded"
+    });
+    const result = materializeAnalysis({
+      draft: analysis, documents: [state.source], manifests: [manifest(1)], costs: [],
+      submissionAdjudication: state.submission, recordAuthority: authority,
+      expiresAt: new Date("2026-09-04T00:00:00.000Z")
+    }).result;
+    expect(result.summary.submission_method).toBe("Email");
+    expect(result.claims.some((record) => record.claim_id === "secure")).toBe(false);
+    expect(result.requirements.some((record) => record.id === "secure")).toBe(false);
+    expect(result.risks.some((record) => record.id === "secure")).toBe(false);
+    expect(result.evaluation.selection_method).toBeNull();
+    expect(answerFromPersistedEvidence("Must responses use SecureDrop?", result).answerability)
+      .toBe("not_found");
+  });
+
+  it("lets the all-page ledger detect Email plus an unfamiliar portal as multiple", () => {
+    const email = "Bids must be submitted by email.";
+    const secure = "Bids must also be lodged through SecureDrop.";
+    const analysis = draft();
+    const state = artifact([email, secure], (_page, text) => [
+      ...relation(text, email),
+      ...relation(text, secure, "portal")
+    ]);
+    const authority = verifyRecordAuthorities({
+      batches: [{ binding: state.binding, draft: analysis,
+        authority: RecordAuthorityEnvelopeSchema.parse({ v: 1, r: [] }) }],
+      ledger: state.ledger, submission: state.submission, documents: [state.source],
+      mergedDraft: analysis
+    });
+    const result = materializeAnalysis({
+      draft: analysis, documents: [state.source], manifests: [manifest(2)], costs: [],
+      submissionAdjudication: state.submission, recordAuthority: authority,
+      expiresAt: new Date("2026-09-04T00:00:00.000Z")
+    }).result;
+    expect(state.submission.complete).toBe(true);
+    expect(result.summary.submission_method).toBeNull();
+  });
+
+  it("covers every PDF.js page with complete overlapping 3200-UTF16 windows", () => {
+    const pages = ["a".repeat(7_001), "", "b".repeat(3_201)];
+    const ledger = discoverSubmissionCandidateLedger([document(pages)]);
+    expect(ledger.expected_page_count).toBe(3);
+    expect(ledger.covered_page_count).toBe(3);
+    for (const [pageIndex, pageText] of pages.entries()) {
+      const windows = ledger.candidates.filter((candidate) =>
+        candidate.pdf_page_1based === pageIndex + 1
+      ).toSorted((left, right) => left.source_start_utf16 - right.source_start_utf16);
+      expect(windows[0]?.source_start_utf16).toBe(0);
+      expect(windows.at(-1)?.source_end_utf16).toBe(pageText.length);
+      expect(windows.every((window, index) => index === 0 ||
+        window.source_start_utf16 <= windows[index - 1]!.source_end_utf16)).toBe(true);
+    }
+  });
+
+  it("publishes fourteen exact submission requirements when the ledger stays uniquely Email", () => {
+    const clauses = Array.from({ length: 14 }, (_, index) =>
+      `Submission component ${index + 1} must be sent by email.`
+    );
+    const analysis = draft({
+      summary: { ...draft().summary, submission_method: "Email" },
+      requirements: clauses.map((text, index) => ({
+        id: `submission-${index + 1}`, topic: "submission", category: "submission" as const,
+        text, evidence_needed: null, consequence: null, document_sha256: sha,
+        amendment_number: null, effect: "add" as const, citations: [citation(text)]
+      }))
+    });
+    const { authority, state } = verifyBundle({
+      pages: clauses, analysis,
+      annotations: clauses.map((_text, ordinal) => ["q", ordinal, "s"]),
+      relationForPage: (_page, text) => clauses.flatMap((clause) => relation(text, clause))
+    });
+    const result = materializeAnalysis({
+      draft: analysis, documents: [state.source], manifests: [manifest(clauses.length)], costs: [],
+      submissionAdjudication: state.submission, recordAuthority: authority,
+      expiresAt: new Date("2026-09-04T00:00:00.000Z")
+    }).result;
+    expect(authority.records.filter((record) => record.publication === "verified")).toHaveLength(14);
+    expect(result.summary.submission_method).toBe("Email");
+    expect(result.requirements.filter((requirement) => requirement.category === "submission"))
+      .toHaveLength(14);
   });
 });

@@ -85,7 +85,7 @@ export function materializedModelOriginKeysForRecord(
     kind,
     id
   );
-  return authority?.disposition === "verified"
+  return authority?.publication === "verified"
     ? authority.contributing_origin_record_keys
     : [];
 }
@@ -943,12 +943,18 @@ export function materializeAnalysis(input: MaterializeInput): {
   const authoritativeModelRecord = (kind: RecordAuthorityKind, id: string) => {
     if (!recordAuthorityEnforced) return true;
     const authority = authorityFor(kind, id);
-    return Boolean(authority?.disposition === "verified" && authority.relevance !== "u");
+    return Boolean(authority?.publication === "verified" && authority.relevance !== "u");
   };
   const discardedModelRecord = (kind: RecordAuthorityKind, id: string) =>
-    authorityFor(kind, id)?.disposition === "discarded";
+    recordAuthorityEnforced && (!recordAuthorityIntegrity ||
+      authorityFor(kind, id)?.publication === "discarded");
   const originKeysFor = (kind: RecordAuthorityKind, id: string) =>
     materializedModelOriginKeysForRecord(authorityByRecord, recoveredIdsByKind, kind, id);
+  const laterDiscardedOriginKeys = new Set<string>();
+  const discardLaterPublication = (kind: RecordAuthorityKind, id: string) => {
+    if (!recordAuthorityEnforced) return;
+    for (const origin of originKeysFor(kind, id)) laterDiscardedOriginKeys.add(origin);
+  };
   const submissionRelevantClaimIds = new Set<string>();
   const submissionRelevantRequirementIds = new Set<string>();
   const submissionRelevantRiskIds = new Set<string>();
@@ -1051,10 +1057,6 @@ export function materializeAnalysis(input: MaterializeInput): {
     ...input.draft.evaluation.rules.filter((rule) => !recoveredEvaluationIds.has(rule.id)),
     ...recoveredEvaluationRules
   ];
-  if (recordAuthorityEnforced && (!recordAuthorityIntegrity || !input.recordAuthority?.complete ||
-    input.recordAuthority.package_veto)) {
-    unboundDraftSubmissionEvidence = true;
-  }
   const duplicateClaimIds = duplicateIds(draftClaims, (claim) => claim.claim_id);
   const duplicateRequirementIds = duplicateIds(draftRequirements, (requirement) => requirement.id);
   const duplicateEvaluationIds = duplicateIds(draftEvaluationRules, (rule) => rule.id);
@@ -1170,6 +1172,11 @@ export function materializeAnalysis(input: MaterializeInput): {
       continue;
     }
     if (claim.claim_type === "unknown") {
+      if (recordAuthorityEnforced && !recoveredClaim) {
+        unsupportedItemsRemoved += 1;
+        discardLaterPublication("c", claim.claim_id);
+        continue;
+      }
       unknownClaimCount += 1;
       truthReviewItems += 1;
       reviewClaims.push({
@@ -1192,9 +1199,11 @@ export function materializeAnalysis(input: MaterializeInput): {
     const proseOrTypedFieldSupported = proseSupported || Boolean(typedField && fieldBound);
     if (!sourceConsistent || !scalarSupported || !proseOrTypedFieldSupported || !fieldBound) {
       unsupportedItemsRemoved += 1;
-      const discard = !recoveredClaim && claimAuthority?.relevance === "n";
+      const discard = !recoveredClaim && (recordAuthorityEnforced ||
+        claimAuthority?.relevance === "n");
+      if (discard) discardLaterPublication("c", claim.claim_id);
       if (!discard) truthReviewItems += 1;
-      if (!recoveredClaim && claimAuthority?.relevance === "s") {
+      if (!recordAuthorityEnforced && !recoveredClaim && claimAuthority?.relevance === "s") {
         unboundDraftSubmissionEvidence = true;
       }
       if (!discard && claim.effect !== "delete" && matchingCitations.length > 0) {
@@ -1291,12 +1300,14 @@ export function materializeAnalysis(input: MaterializeInput): {
     supersedesIds: claim.supersedes_claim_ids
   })));
   const unauthorizedClaimMutations = new Set(claimReconciliation.unauthorizedMutationIds);
+  for (const id of unauthorizedClaimMutations) discardLaterPublication("c", id);
   unsupportedItemsRemoved += unauthorizedClaimMutations.size;
   truthReviewItems += unauthorizedClaimMutations.size;
   const claims: AnalysisResult["claims"] = [
     ...claimReconciliation.facts.flatMap((fact) => {
       const draft = reconciledClaimDrafts.find((item) => item.claim.claim_id === fact.id)?.claim;
-      if (!draft || draft.effect === "delete") return [];
+      if (!draft || draft.effect === "delete" || (recordAuthorityEnforced &&
+        !recoveredClaimIds.has(fact.id) && unauthorizedClaimMutations.has(fact.id))) return [];
       return [{
         claim_id: fact.id,
         claim_text: fact.value,
@@ -1381,9 +1392,11 @@ export function materializeAnalysis(input: MaterializeInput): {
       (requirement.effect === "delete" || requirement.category !== "mandatory" || sourceMarksMandatory));
     if (!supported) {
       unsupportedItemsRemoved += 1;
-      const discard = !recoveredRequirement && requirementAuthority?.relevance === "n";
+      const discard = !recoveredRequirement && (recordAuthorityEnforced ||
+        requirementAuthority?.relevance === "n");
+      if (discard) discardLaterPublication("q", requirement.id);
       if (!discard) truthReviewItems += 1;
-      if (!recoveredRequirement && requirementAuthority?.relevance === "s") {
+      if (!recordAuthorityEnforced && !recoveredRequirement && requirementAuthority?.relevance === "s") {
         unboundDraftSubmissionEvidence = true;
       }
       if (!discard && requirement.effect !== "delete" && matchingCitations.length > 0) {
@@ -1501,13 +1514,17 @@ export function materializeAnalysis(input: MaterializeInput): {
     }
   ));
   const unauthorizedRequirementMutations = new Set(requirementReconciliation.unauthorizedMutationIds);
+  for (const id of unauthorizedRequirementMutations) discardLaterPublication("q", id);
   unsupportedItemsRemoved += unauthorizedRequirementMutations.size;
   truthReviewItems += unauthorizedRequirementMutations.size;
   const requirements: AnalysisResult["requirements"] = [
     ...requirementReconciliation.facts.flatMap((fact) => {
       const validated = reconciledRequirementDrafts.find((item) => item.requirement.id === fact.id);
       const draft = validated?.requirement;
-      if (!draft || !validated || draft.effect === "delete") return [];
+      if (!draft || !validated || draft.effect === "delete" || (recordAuthorityEnforced &&
+        !recoveredRequirementIds.has(fact.id) && unauthorizedRequirementMutations.has(fact.id))) {
+        return [];
+      }
       return [{
         id: draft.id,
         category: validated.category,
@@ -1540,6 +1557,14 @@ export function materializeAnalysis(input: MaterializeInput): {
   truthReviewItems += packageSourceReconciliation.unauthorizedMutationIds.length;
   const packageFactsById = new Map(packageSourceReconciliation.facts.map((fact) => [fact.id, fact]));
   const packageUnauthorized = new Set(packageSourceReconciliation.unauthorizedMutationIds);
+  for (const value of packageUnauthorized) {
+    const [collection, ...idParts] = value.split(":");
+    const id = idParts.join(":");
+    if (collection === "claim" && !recoveredClaimIds.has(id)) discardLaterPublication("c", id);
+    if (collection === "requirement" && !recoveredRequirementIds.has(id)) {
+      discardLaterPublication("q", id);
+    }
+  }
   const effectiveClaimFacts = claimReconciliation.facts.map((fact) => ({
     ...fact,
     status: packageFactsById.get(`claim:${fact.id}`)?.status ?? fact.status
@@ -1564,6 +1589,17 @@ export function materializeAnalysis(input: MaterializeInput): {
       (nonAuthoritativeSubmissionRequirementIds.has(requirement.id) &&
         effective.status !== "superseded")
       ? "needs_review" : effective.status;
+  }
+
+  if (recordAuthorityEnforced) {
+    for (let index = claims.length - 1; index >= 0; index -= 1) {
+      if (packageUnauthorized.has(`claim:${claims[index]!.claim_id}`) &&
+        !recoveredClaimIds.has(claims[index]!.claim_id)) claims.splice(index, 1);
+    }
+    for (let index = requirements.length - 1; index >= 0; index -= 1) {
+      if (packageUnauthorized.has(`requirement:${requirements[index]!.id}`) &&
+        !recoveredRequirementIds.has(requirements[index]!.id)) requirements.splice(index, 1);
+    }
   }
 
   const validEvaluationRules: Array<{
@@ -1602,12 +1638,13 @@ export function materializeAnalysis(input: MaterializeInput): {
       : null;
     if (!supportedCitations) {
       unsupportedItemsRemoved += 1;
+      if (!recoveredEvaluation) discardLaterPublication("e", rule.id);
       if (evaluationAuthority?.relevance === "n") {
         // Canonical-bound non-submission noise is omitted without becoming a
         // package truth blocker.
       } else {
         truthReviewItems += 1;
-        if (!recoveredEvaluation && evaluationAuthority?.relevance === "s") {
+        if (!recordAuthorityEnforced && !recoveredEvaluation && evaluationAuthority?.relevance === "s") {
           unboundDraftSubmissionEvidence = true;
         }
       }
@@ -1643,6 +1680,9 @@ export function materializeAnalysis(input: MaterializeInput): {
   ));
   unsupportedItemsRemoved += evaluationReconciliation.unauthorizedMutationIds.length;
   truthReviewItems += evaluationReconciliation.unauthorizedMutationIds.length;
+  for (const id of evaluationReconciliation.unauthorizedMutationIds) {
+    discardLaterPublication("e", id);
+  }
   const evaluationValues: {
     mandatory_gate: boolean | null;
     rated_threshold: string | null;
@@ -1712,9 +1752,12 @@ export function materializeAnalysis(input: MaterializeInput): {
       ));
     if (!supported) {
       unsupportedItemsRemoved += 1;
+      discardLaterPublication("r", risk.id);
       if (riskAuthority?.relevance !== "n") {
         truthReviewItems += 1;
-        if (riskAuthority?.relevance === "s") unboundDraftSubmissionEvidence = true;
+        if (!recordAuthorityEnforced && riskAuthority?.relevance === "s") {
+          unboundDraftSubmissionEvidence = true;
+        }
       }
       continue;
     }
@@ -1741,6 +1784,7 @@ export function materializeAnalysis(input: MaterializeInput): {
   }));
   unsupportedItemsRemoved += riskReconciliation.unauthorizedMutationIds.length;
   truthReviewItems += riskReconciliation.unauthorizedMutationIds.length;
+  for (const id of riskReconciliation.unauthorizedMutationIds) discardLaterPublication("r", id);
   const allEffectiveSourceFacts = [
     ...effectiveClaimFacts,
     ...effectiveRequirementFacts,
@@ -1794,6 +1838,12 @@ export function materializeAnalysis(input: MaterializeInput): {
     ...evaluationReconciliation.conflicts,
     ...riskReconciliation.conflicts
   ].filter((conflict) => {
+    if (recordAuthorityEnforced && conflict.contributingOriginRecordKeys.some((origin) =>
+      laterDiscardedOriginKeys.has(origin)
+    )) {
+      unsupportedItemsRemoved += 1;
+      return false;
+    }
     const supported = conflict.citations.length >= 2 && conflict.citations.every(
       (citation) => citation.verified && citation.pdf_page_1based !== null
     );
@@ -1805,11 +1855,13 @@ export function materializeAnalysis(input: MaterializeInput): {
       authorityByOrigin.get(origin)
     );
     return contributorStates.some((authority) => !authority || authority.relevance !== "n" ||
-      authority.disposition !== "verified")
+      authority.publication !== "verified")
       ? [conflict.id]
       : [];
   }));
-  if (submissionRelevantConflictIds.size > 0) unboundDraftSubmissionEvidence = true;
+  if (!recordAuthorityEnforced && submissionRelevantConflictIds.size > 0) {
+    unboundDraftSubmissionEvidence = true;
+  }
 
   const blockingUnknowns = [...input.draft.blocking_unknowns];
   if (unknownClaimCount > 0) {
@@ -1945,10 +1997,12 @@ export function materializeAnalysis(input: MaterializeInput): {
     }
   }
   let packageSubmissionResolution = resolveVerifiedSubmissionChannel(input.submissionAdjudication, {
-    draftChannels: verifiedDraftSubmissionChannels,
-    amendmentMutationSignal: amendmentSubmissionMutationSignal,
+    draftChannels: recordAuthorityEnforced ? [] : verifiedDraftSubmissionChannels,
+    amendmentMutationSignal: recordAuthorityEnforced ? false : amendmentSubmissionMutationSignal,
     packageMetadataComplete: packageCompleteness !== "incomplete",
-    unboundEvidenceSignal: unboundDraftSubmissionEvidence
+    unboundEvidenceSignal: recordAuthorityEnforced
+      ? Boolean(recordAuthorityIntegrity && input.recordAuthority?.package_veto)
+      : unboundDraftSubmissionEvidence
   });
   let decisiveCitation: Citation | null = null;
   if (packageSubmissionResolution.status === "unique" &&

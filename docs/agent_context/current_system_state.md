@@ -43,6 +43,10 @@ Updated: 2026-09-04
   package submission safety. T8 passed independent QA6 with
   `APPROVE`, P0=0/P1=0/P2=0; root release checks passed and redeployment is
   authorized before the second controlled run.
+- The second T8 production run also reached `ready` with cleanup but withheld
+  Email. It had 84 records, four rejected citations, and an 88865-byte v2
+  receipt. T9 makes the complete all-page ledger authoritative, adds v3 bounded
+  diagnostic counters, and passed independent QA7 with P0=0/P1=0/P2=0.
 - Root `AGENTS.md`, Chief governance, role catalog, context bundles, knowledge
   policy, and reusable task templates match the refreshed global
   `chief-agent-orchestration` assets. Bootstrap and active validation pass.

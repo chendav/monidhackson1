@@ -199,6 +199,36 @@ handoff: qa_report.md
 status: completed_approve
 ```
 
+## T9 Source-ledger package authority
+
+```yaml
+id: T9
+owner_profile: backend
+objective: Make the complete all-page source ledger own package submission safety while record authority gates only publication and exact-source ledger disagreements.
+depends_on: [QA6]
+include_paths: [src/lib/analysis/record-authority.ts, src/lib/analysis/materialize.ts, src/lib/runs/record-authority-audit.ts, scripts/read-record-authority-audit.mjs, tests/**, docs/specs/MH-001-rfp-xray/**]
+exclude_paths: [src/app/**, src/components/**, drizzle/**]
+edits_allowed: true
+acceptance: [AC-2, AC-4, AC-5, AC-9, AC-10]
+handoff: handoff-backend.md
+status: completed_accepted
+```
+
+## QA7 T9 source-ledger authority review
+
+```yaml
+id: QA7
+owner_profile: reviewer
+objective: Independently verify all-page ledger ownership, invented-record DoS resistance, exact-source gap vetoes, receipt v3 compatibility, and diagnostic redaction.
+depends_on: [T9]
+include_paths: [src/lib/analysis/**, src/lib/runs/record-authority-audit.ts, scripts/read-record-authority-audit.mjs, tests/**]
+exclude_paths: []
+edits_allowed: false
+acceptance: [AC-2, AC-4, AC-5, AC-9, AC-10, AC-11]
+handoff: qa_report.md
+status: completed_approve
+```
+
 ## EXT-1 Production evidence and publication
 
 ```yaml

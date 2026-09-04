@@ -44,10 +44,10 @@ regression_checks:
 review:
   required: true
   verdict: APPROVE
-  active_review_task: QA6
+  active_review_task: QA7
   revision_round: 0
-  starts_after: T8 handoff exists and implementation checks are recorded
-  implementation_handoff: handoff-backend.md T8 Implementation — Publication Validity vs Submission Safety
+  starts_after: T9 handoff exists and implementation checks are recorded
+  implementation_handoff: handoff-backend.md T9 Implementation — Source-Ledger Package Authority
   active_failures: []
   p0: 0
   p1: 0
@@ -72,8 +72,8 @@ governance_may_change_automatically: false
 
 current_release_evidence:
   observed_at: 2026-09-04
-  deployed_commit: 885404f15cdd4b2c095123c2eb4d8037d3f4c3d3
-  deployment_id: dpl_7wWdF8MR2XfzV2EebDLWTPN1AfGn
+  deployed_commit: fc2adadae97111cee2d5640c9a1d4549fd79e428
+  deployment_id: dpl_H92p52THaTe2gWan16sYuByqhRbX
   public_url: https://rfp-xray.vercel.app
   health:
     http_status: 200
@@ -83,12 +83,12 @@ current_release_evidence:
   last_controlled_edmonton_run:
     result: ready_but_core_accuracy_failed
     actual_cost_usd: 0.0036
-    estimated_cost_usd: 1.125910
+    estimated_cost_usd: 1.085495
     app_controlled_cleanup: confirmed
-    limitation: 25 rejected model citations made authority incomplete and withheld the independently adjudicated Email method.
+    limitation: 4 rejected model citations or a remaining source-ledger condition made authority incomplete and withheld Email; v2 lacked reason counters.
   evidence_boundary: Health and terminal READY do not override the failed core accuracy gate.
 
 release:
   status: NOT_READY
-  next_gate: Root-recheck and deploy QA6-approved T8, attest it, then rerun Edmonton to pass the core accuracy gate.
+  next_gate: Root-recheck and deploy QA7-approved T9, attest it, then run one final controlled Edmonton pilot.
   remaining_after_edmonton: CER campaign, 12-citation review, final video, contest submission, and five publications.

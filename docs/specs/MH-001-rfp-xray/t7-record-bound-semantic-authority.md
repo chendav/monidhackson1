@@ -234,7 +234,61 @@ first controlled post-deploy Edmonton/CER runs remain necessary: local tests
 prove that a non-empty verified receipt's actual digest/byte length traverse the
 real pipeline and store, but they are not paid-provider evidence.
 
-## Resolution and Materialization
+## T9 Superseding Boundary — Source Ledger Owns Package Authority
+
+T9 supersedes the T7/T8 coupling rules above where they conflict. Discovery
+creates overlapping 3,200-UTF16 windows that cover every PDF.js page from byte
+zero through the page end. Lexical channel matches help the Agent notice likely
+relations, but neither candidate creation nor semantic channel validation is
+bounded by that dictionary. Every returned relation remains exact-offset,
+page-hash, batch-manifest, overlap-consistency, and confidence verified.
+
+`VerifiedSubmissionAdjudication` is the only package-level submission-method
+authority. With record authority enabled, Draft summary values, model record
+channels, amendment effects, record conflicts, and record publication failures
+cannot establish or remove a channel. The ledger must itself be complete and
+resolve to one required whole-bid channel with an exact decisive citation.
+Incomplete, multiple, contradicted, semantically uncertain, prompt-tainted, or
+metadata-incomplete ledger states remain unresolved.
+
+The server receipt is version 3. Each canonical record carries three independent
+axes:
+
+```text
+source_binding = unlocated | exact_bound | coverage_gap | relation_gap | relation_conflict
+semantic_crosscheck = consistent | disagrees | unknown
+publication = verified | discarded
+```
+
+Unlocated `s`, `n`, `u`, missing/duplicate annotations, and later field/scalar
+publication failures discard only their record. They contribute no lineage,
+conflict, or Q&A evidence and cannot denial-of-service a complete unique ledger.
+An exact-source `s` outside all ledger windows, without a compatible relation,
+or with incompatible/ambiguous relation evidence is a real source-ledger
+disagreement and vetoes publication of the method. Exact `n` overlapping a
+whole-bid/ambiguous relation and exact `u` do the same. An exact `s/n`
+disagreement across canonical duplicates also vetoes. Receipt corruption,
+unknown annotations, lost/multiple origin mapping, merged-set mismatch, receipt
+overflow, or a v1/v2 receipt suppress every model record; it does not override
+an independently complete ledger.
+
+The v3 audit retains the existing seven non-body measurements and adds only
+strict fixed-key integer counters for relevance, source binding, semantic
+crosscheck, publication, publication reason, and exact-source submission-veto
+reason. It stores no record IDs, page numbers, offsets, URLs, source text,
+quotes, windows, record bodies, or private model output. Historical v1/v2 audit
+rows remain strict-readable; v1/v2 full authority receipts remain unusable for
+model publication. The existing nullable JSONB column is sufficient and no SQL
+or public API migration is required.
+
+The hard receipt cap remains 262,144 bytes. Representative local v3 receipts
+built from official PDF.js sources measure 4,225 bytes for Edmonton (257,919
+bytes remaining) and 6,681 bytes for CER (255,463 remaining). These are local
+representative measurements, not paid-provider or theoretical worst-case
+claims; the runtime cap and first controlled post-QA production audit remain the
+empirical authority.
+
+## Historical T7/T8 Resolution and Materialization (Superseded by T9)
 
 Resolution order is fixed:
 

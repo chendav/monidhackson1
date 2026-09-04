@@ -221,3 +221,27 @@ skipped, official Edmonton/CER fixtures 3/3, production build, and
 `git diff --check`. The internal receipt is v2; v1 full receipts remain
 fail-closed, the private audit/CLI strictly dual-read 1|2, and no public API or
 database migration changed.
+
+## QA7 — T9 Source-Ledger Package Authority
+
+```yaml
+verdict: APPROVE
+revision_round: 0
+p0: 0
+p1: 0
+p2: 0
+deployment_allowed: true
+```
+
+The all-page overlapping source ledger is independently verified as the sole
+package-channel authority. Receipt v3 separates source binding, semantic
+cross-check, and publication. Unlocated model records are suppressed without
+denial-of-service authority; exact-source coverage/relation disagreements,
+`n` overlap, exact `u`, ledger ambiguity/incompleteness, and prompt taint still
+veto the package. Discarded records have no public, lineage, or Q&A authority.
+
+Independent evidence: focused QA7 suite 148/148, `pnpm check` 731 passed/10
+skipped, official Edmonton/CER fixtures 3/3, production build, and
+`git diff --check`. The strict v3 audit contains only bounded enum counters plus
+the existing non-body fields. No product/channel lexicon, public/API contract,
+SQL schema, or migration changed.
