@@ -14,6 +14,7 @@ import {
 } from "@/lib/analysis/reconciliation";
 import {
   recoverMandatoryTableAnchors,
+  recoverSecurityRequirementAnchors,
   recoverSecurityChecklistConflictAnchors,
   recoverSummarySectionAnchors
 } from "@/lib/analysis/source-anchors";
@@ -907,9 +908,19 @@ export function materializeAnalysis(input: MaterializeInput): {
     ...recoverSecurityChecklistConflictAnchors(input.draft, input.documents),
     ...recoveredSummaryClaims
   ];
-  const recoveredRequirements = recoverMandatoryTableAnchors(input.draft, input.documents);
+  const recoveredSecurityRequirements = recoverSecurityRequirementAnchors(
+    input.draft,
+    input.documents
+  );
+  const recoveredRequirements = [
+    ...recoverMandatoryTableAnchors(input.draft, input.documents),
+    ...recoveredSecurityRequirements
+  ];
   const recoveredClaimIds = new Set(recoveredClaims.map((claim) => claim.claim_id));
   const recoveredRequirementIds = new Set(recoveredRequirements.map((requirement) => requirement.id));
+  const recoveredSecurityRequirementIds = new Set(
+    recoveredSecurityRequirements.map((requirement) => requirement.id)
+  );
   const securityAnchorKey = (claim: DraftAnalysis["claims"][number]) => {
     const sourceText = `${claim.topic} ${claim.citations.map((citation) => citation.evidence_quote).join(" ")}`;
     return /^annex\s+[a-z]$/i.test(claim.claim_text.trim()) &&
@@ -933,6 +944,42 @@ export function materializeAnalysis(input: MaterializeInput): {
       ? `${requirement.document_sha256}:${[...labels][0]}`
       : null;
   };
+  const securityRequirementAnchorKey = (requirement: {
+    document_sha256?: string;
+    topic?: string;
+    text: string;
+    citations: Array<{ document_sha256: string; evidence_quote: string }>;
+  }) => {
+    const sourceText = normalizeEvidenceText(
+      `${requirement.topic ?? ""} ${requirement.text} ${requirement.citations
+        .map((citation) => citation.evidence_quote).join(" ")}`
+    );
+    const kind = [
+      ["afr-registration", /\bapplication for registration\b.{0,80}\bafr\b/],
+      ["organization-clearance", /\borganization security clearance\b/],
+      ["designated-organization-screening", /\bdesignated organization screening\b.{0,40}\bdos\b/],
+      ["personnel-reliability-status", /\bpersonnel\b.{0,180}\breliability status\b/]
+    ].find(([, pattern]) => (pattern as RegExp).test(sourceText))?.[0];
+    const documents = new Set(requirement.citations.map((citation) => citation.document_sha256));
+    const documentSha256 = requirement.document_sha256 ??
+      (documents.size === 1 ? [...documents][0] : null);
+    return kind && documentSha256 ? `${documentSha256}:security:${kind}` : null;
+  };
+  const securityRequirementExactKey = (input: {
+    document_sha256?: string;
+    text: string;
+    citations: Array<{ document_sha256: string }>;
+  }) => {
+    const documents = new Set(input.citations.map((citation) => citation.document_sha256));
+    const documentSha256 = input.document_sha256 ??
+      (documents.size === 1 ? [...documents][0] : null);
+    return documentSha256 && input.text.trim()
+      ? `${documentSha256}:security-exact:${normalizeEvidenceText(input.text)}`
+      : null;
+  };
+  const recoveredSecurityExactKeys = new Set(recoveredSecurityRequirements.flatMap(
+    (requirement) => securityRequirementExactKey(requirement) ?? []
+  ));
   const claimAnchorCollisions = input.draft.claims.filter((claim) =>
     recoveredClaimIds.has(claim.claim_id)
   ).length;
@@ -1045,11 +1092,23 @@ export function materializeAnalysis(input: MaterializeInput): {
     recoveredSummaryClaimIds.has(claim.claim_id) ? summaryAnchorKey(claim) ?? [] : []
   ));
   const reconciledClaimDrafts = validClaimDrafts.filter(({ claim }) =>
-    recoveredClaimIds.has(claim.claim_id) ||
-    (!verifiedRecoveredSecurityKeys.has(securityAnchorKey(claim) ?? "") &&
-      !verifiedRecoveredSummaryKeys.has(summaryAnchorKey(claim) ?? ""))
+    !recoveredSecurityExactKeys.has(securityRequirementExactKey({
+      document_sha256: claim.document_sha256,
+      text: claim.claim_text,
+      citations: claim.citations
+    }) ?? "") && (
+      recoveredClaimIds.has(claim.claim_id) ||
+      (!verifiedRecoveredSecurityKeys.has(securityAnchorKey(claim) ?? "") &&
+        !verifiedRecoveredSummaryKeys.has(summaryAnchorKey(claim) ?? ""))
+    )
   );
   unsupportedItemsRemoved += validClaimDrafts.length - reconciledClaimDrafts.length;
+  const visibleReviewClaims = reviewClaims.filter((claim) =>
+    !recoveredSecurityExactKeys.has(securityRequirementExactKey({
+      text: claim.claim_text,
+      citations: claim.citations
+    }) ?? "")
+  );
 
   const claimReconciliation = reconcileVersionedFacts(reconciledClaimDrafts.map(({ claim, citations, document }) => ({
     id: claim.claim_id,
@@ -1085,7 +1144,7 @@ export function materializeAnalysis(input: MaterializeInput): {
         formula_and_inputs: null
       }];
     }),
-    ...reviewClaims
+    ...visibleReviewClaims
   ];
 
   const validRequirementDrafts: Array<{
@@ -1140,18 +1199,31 @@ export function materializeAnalysis(input: MaterializeInput): {
       requirement,
       citations: matchingCitations,
       document: document!,
-      category: sourceMarksMandatory ? "mandatory" : requirement.category
+      category: recoveredSecurityRequirementIds.has(requirement.id)
+        ? "security"
+        : sourceMarksMandatory ? "mandatory" : requirement.category
     });
   }
   const verifiedRecoveredMandatoryKeys = new Set(validRequirementDrafts.flatMap(({ requirement }) =>
     recoveredRequirementIds.has(requirement.id) ? mandatoryAnchorKey(requirement) ?? [] : []
   ));
+  const verifiedRecoveredSecurityRequirementKeys = new Set(validRequirementDrafts.flatMap(
+    ({ requirement }) => recoveredSecurityRequirementIds.has(requirement.id)
+      ? securityRequirementAnchorKey(requirement) ?? []
+      : []
+  ));
   const reconciledRequirementDrafts = validRequirementDrafts.filter(({ requirement }) =>
     recoveredRequirementIds.has(requirement.id) ||
-    !verifiedRecoveredMandatoryKeys.has(mandatoryAnchorKey(requirement) ?? "")
+    (!verifiedRecoveredMandatoryKeys.has(mandatoryAnchorKey(requirement) ?? "") &&
+      !verifiedRecoveredSecurityRequirementKeys.has(
+        securityRequirementAnchorKey(requirement) ?? ""
+      ))
   );
   unsupportedItemsRemoved += validRequirementDrafts.length - reconciledRequirementDrafts.length;
   const visibleReviewRequirements = reviewRequirements.filter((requirement) => {
+    if (verifiedRecoveredSecurityRequirementKeys.has(
+      securityRequirementAnchorKey(requirement) ?? ""
+    )) return false;
     if (requirement.category !== "mandatory") return true;
     const labels = new Set(requirement.citations.flatMap((citation) => {
       const normalized = normalizeEvidenceText(citation.section ?? "");
@@ -1168,16 +1240,23 @@ export function materializeAnalysis(input: MaterializeInput): {
       const recoveredLabel = recoveredRequirementIds.has(requirement.id)
         ? citations.map((citation) => citation.section).find((section) => /^M\d{1,3}$/i.test(section ?? ""))
         : null;
+      const recoveredSecurityKey = recoveredSecurityRequirementIds.has(requirement.id)
+        ? securityRequirementAnchorKey(requirement)
+        : null;
       return {
         id: requirement.id,
         topic: requirement.topic,
         factKey: recoveredLabel
           ? `document:${requirement.document_sha256}:mandatory:${recoveredLabel.toLowerCase()}`
+          : recoveredSecurityKey
+            ? `document:${recoveredSecurityKey}`
           : deriveDeadlineFactKey(requirement.text, citations) ?? deriveSourceFactKey({
             topic: requirement.topic, value: requirement.text,
             documentSha256: requirement.document_sha256, citations
           }) ?? undefined,
-        factKeySource: recoveredLabel ? "validated" as const : "derived" as const,
+        factKeySource: recoveredLabel || recoveredSecurityKey
+          ? "validated" as const
+          : "derived" as const,
         value: requirement.text,
         documentSha256: requirement.document_sha256,
         documentRole: document.role,

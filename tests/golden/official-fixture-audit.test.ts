@@ -2,6 +2,8 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import type { Citation } from "@/contracts";
+import type { DraftAnalysis } from "@/lib/analysis/draft";
+import { recoverSecurityRequirementAnchors } from "@/lib/analysis/source-anchors";
 import { verifyCitation, type CitationDocument } from "@/lib/evidence/citations";
 import {
   CER_DOCUMENTS,
@@ -33,6 +35,17 @@ function allEdmontonCitations(): Citation[] {
     ...result.risks.flatMap((item) => item.citations),
     ...result.conflicts.flatMap((item) => item.citations)
   ];
+}
+
+function emptyDraft(): DraftAnalysis {
+  return {
+    summary: {
+      title: "", solicitation_number: null, issuer: null, closing_date: null,
+      overview: "", scope: [], submission_method: null, current_selection_method: null
+    },
+    claims: [], requirements: [], evaluation: { rules: [] }, risks: [],
+    clarification_questions: [], blocking_unknowns: []
+  };
 }
 
 function allCerCitations(): Citation[] {
@@ -86,6 +99,20 @@ describe("optional official-PDF local audit (PDFs are never committed)", () => {
     expect(index.pages[16].normalizedText).toContain("each hold a valid reliability status");
     expect(index.pages[16].normalizedText).toContain("attached at annex d");
     expect(index.pages[42].normalizedText).toContain(normalizeEvidenceText("ANNEX “ E ” - SECURITY REQUIREMENTS CHECK LIST"));
+
+    const recoveredSecurity = recoverSecurityRequirementAnchors(emptyDraft(), [{
+      name: "edmonton-100022184-A.pdf",
+      sourceUrl: EDMONTON_SOURCE_URL,
+      index,
+      role: "base",
+      amendmentNumber: null
+    }]);
+    expect(recoveredSecurity).toHaveLength(4);
+    expect(recoveredSecurity.map((requirement) => requirement.citations[0].section))
+      .toEqual(["5.2.2", "6.1", "7.3.1", "7.3.1"]);
+    expect(new Set(recoveredSecurity.flatMap((requirement) =>
+      requirement.citations.map((citation) => citation.evidence_quote)
+    )).size).toBe(4);
 
     const blankCounts = Object.fromEntries(
       [40, 41, 42].map((page) => [page, index.pages[page - 1].text.match(/\$_{7,}/g)?.length ?? 0])

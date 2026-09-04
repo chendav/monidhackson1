@@ -199,6 +199,138 @@ export function recoverMandatoryTableAnchors(
   return recovered;
 }
 
+interface SecurityRequirementPattern {
+  key: string;
+  topic: string;
+  pattern: RegExp;
+}
+
+const SECURITY_REQUIREMENT_PATTERNS: SecurityRequirementPattern[] = [
+  {
+    key: "afr-registration",
+    topic: "contract security program AFR registration requirement",
+    pattern: /\b(?:the\s+)?(?:bidder|offeror|proponent|tenderer)\s+must\s+provide\s+(?:a|an)\s+completed\s+[^.]{0,220}?\bapplication\s+for\s+registration\s*\(\s*afr\s*\)\s+form[^.]{0,180}\./giu
+  },
+  {
+    key: "organization-clearance",
+    topic: "organization security clearance requirement",
+    pattern: /\b(?:the\s+)?(?:bidder|offeror|proponent|tenderer)\s+must\s+hold\s+a\s+valid\s+organization\s+security\s+clearance[^.]{0,240}\./giu
+  },
+  {
+    key: "designated-organization-screening",
+    topic: "designated organization screening DOS requirement",
+    pattern: /\b(?:the\s+)?contractor\s+must\s*,?\s+at\s+all\s+times[^.]{0,180}?\bhold\s+a\s+valid\s+designated\s+organization\s+screening\s*\(\s*dos\s*\)[^.]{0,180}\./giu
+  },
+  {
+    key: "personnel-reliability-status",
+    topic: "personnel reliability status requirement",
+    pattern: /\b(?:the\s+)?contractor\s+personnel[^.]{0,220}?\bmust\s+each\s+hold\s+a\s+valid\s+reliability\s+status[^.]{0,180}\./giu
+  }
+];
+
+const NUMBERED_SECURITY_HEADING =
+  /^\s*(\d+(?:\.\d+)*)\.?\s+security requirements?\b(?:\s*[-\u2010-\u2015:]\s*[^\r\n]*)?\s*$/gimu;
+const NUMBERED_HEADING_LINE = /^\s*(\d+(?:\.\d+)*)(\.)?\s+(\S[^\r\n]*)$/gimu;
+
+function dottedTopLevelLineLooksLikeOrderedItem(number: string, title: string, root: string) {
+  const candidateOrdinal = Number.parseInt(number, 10);
+  const rootOrdinal = Number.parseInt(root.split(".")[0], 10);
+  const trimmed = title.trim();
+  const words = trimmed.split(/\s+/);
+  const sentenceStart = /^(?:at|before|after|for|if|when|where|while|unless|the|a|an|each|all|any|subcontracts?|bidders?|contractors?)\b/i
+    .test(trimmed);
+  const predicateOrTerminator = /\b(?:must|shall|will|should|may|can|is|are|was|were|has|have|refer(?:s)?|apply|applies)\b/
+    .test(trimmed) || /[:.!?]$/.test(trimmed);
+  const lexicalWords = words.filter((word) => /[a-z]/i.test(word));
+  const titleLike = lexicalWords.length > 0 && lexicalWords.every((word) =>
+    /^[A-Z][A-Za-z'/-]*$/.test(word) || /^(?:and|or|of|the|to|for|in|on|with)$/i.test(word)
+  );
+  return Number.isFinite(candidateOrdinal) && Number.isFinite(rootOrdinal) &&
+    candidateOrdinal <= rootOrdinal && sentenceStart && predicateOrTerminator && !titleLike;
+}
+
+function securitySectionForMatch(text: string, matchIndex: number): string | null {
+  const securityHeadings = [...text.matchAll(NUMBERED_SECURITY_HEADING)].filter((heading) =>
+    heading.index !== undefined && heading.index + heading[0].length <= matchIndex
+  );
+  const securityHeading = securityHeadings.at(-1);
+  if (!securityHeading || securityHeading.index === undefined) return null;
+
+  const root = securityHeading[1];
+  const rootDepth = sectionDepth(root);
+  let section = root;
+  for (const candidate of text.matchAll(NUMBERED_HEADING_LINE)) {
+    if (candidate.index === undefined || candidate.index <= securityHeading.index) continue;
+    if (candidate.index >= matchIndex) break;
+    const number = candidate[1];
+    // A top-level "1. First condition" line is ordinarily an ordered-list
+    // item, not a section boundary. A top-level number without that list
+    // punctuation (for example "3 Other Requirements") is treated as a
+    // conservative boundary. Decimal numbers are section-like either way.
+    if (!number.includes(".") && candidate[2] === "." &&
+      dottedTopLevelLineLooksLikeOrderedItem(number, candidate[3], root)) continue;
+    if (number === root) continue;
+    if (!number.startsWith(`${root}.`)) return null;
+    const depth = sectionDepth(number);
+    if (depth <= rootDepth) return null;
+    section = number;
+  }
+  return section;
+}
+
+/**
+ * Recover a small closed set of explicit security obligations only when they
+ * occur inside a numbered Security Requirements section in a base tender.
+ * This prevents a model omission from hiding distinct organizational and
+ * personnel clearances without inferring amendment semantics.
+ */
+export function recoverSecurityRequirementAnchors(
+  _draft: DraftAnalysis,
+  documents: SourceAnchorDocument[]
+): DraftAnalysis["requirements"] {
+  // This fallback intentionally has no amendment-operation parser. In a
+  // multi-document package, publishing a base-only recovered clause could
+  // make superseded text look current when a model misses the amendment.
+  // Leave amended packages to the ordinary verified reconciliation path.
+  if (documents.some((document) => document.role === "amendment")) return [];
+  const recovered: DraftAnalysis["requirements"] = [];
+  for (const document of documents) {
+    if (document.role !== "base") continue;
+    for (const page of document.index.pages) {
+      const text = page.text;
+      for (const definition of SECURITY_REQUIREMENT_PATTERNS) {
+        for (const match of text.matchAll(definition.pattern)) {
+          if (match.index === undefined) continue;
+          const section = securitySectionForMatch(text, match.index);
+          const clause = displayText(match[0]);
+          if (!section || clause.length < 24 || clause.length > 500) continue;
+          if (recovered.some((requirement) =>
+            requirement.document_sha256 === document.index.documentSha256 &&
+            requirement.id.endsWith(`-security-${definition.key}`))) continue;
+          recovered.push({
+            id: `server-anchor-${document.index.documentSha256.slice(0, 12)}-p${page.pdfPage1Based}-security-${definition.key}`,
+            topic: definition.topic,
+            document_sha256: document.index.documentSha256,
+            amendment_number: document.amendmentNumber,
+            effect: "add",
+            category: "security",
+            text: clause,
+            evidence_needed: null,
+            consequence: null,
+            citations: [{
+              document_sha256: document.index.documentSha256,
+              chunk_id: null,
+              evidence_quote: clause,
+              section
+            }]
+          });
+        }
+      }
+    }
+  }
+  return recovered;
+}
+
 interface AnnexCandidate {
   value: string;
   quote: string;

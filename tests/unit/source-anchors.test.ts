@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { DraftAnalysis } from "@/lib/analysis/draft";
 import {
   recoverMandatoryTableAnchors,
+  recoverSecurityRequirementAnchors,
   recoverSecurityChecklistConflictAnchors,
   type SourceAnchorDocument
 } from "@/lib/analysis/source-anchors";
@@ -90,6 +91,113 @@ function mandatoryRequirement(label: string, text: string): DraftAnalysis["requi
 }
 
 describe("server-derived source anchors", () => {
+  it("recovers distinct source-owned security obligations inside numbered security sections", () => {
+    const recovered = recoverSecurityRequirementAnchors(draft(), [document([
+      {
+        page: 15,
+        text: "5.2.2 Security Requirements - Required Documentation\nIn accordance with the Contract Security Program, the Bidder must provide a completed Contract Security Program Application for Registration (AFR) form at Annex F to be given further consideration in the procurement process."
+      },
+      {
+        page: 16,
+        text: "6.1 Security Requirements\nAt the date of bid closing, the Bidder must hold a valid organization security clearance as indicated in Part 7 - Resulting Contract Clauses."
+      },
+      {
+        page: 17,
+        text: "7.3 Security Requirements\n7.3.1 The following requirements apply.\nThe Contractor must, at all times during the performance of the Contract, hold a valid Designated Organization Screening (DOS), issued by the Contract Security Program.\nThe Contractor personnel requiring access to sensitive site(s) must each hold a valid Reliability Status, granted or approved by the Contract Security Program."
+      }
+    ])]);
+
+    expect(recovered.map((requirement) => ({
+      id: requirement.id.split("-security-").at(-1),
+      page: Number(requirement.id.match(/-p(\d+)-/)?.[1]),
+      category: requirement.category,
+      section: requirement.citations[0].section
+    }))).toEqual([
+      { id: "afr-registration", page: 15, category: "security", section: "5.2.2" },
+      { id: "organization-clearance", page: 16, category: "security", section: "6.1" },
+      { id: "designated-organization-screening", page: 17, category: "security", section: "7.3.1" },
+      { id: "personnel-reliability-status", page: 17, category: "security", section: "7.3.1" }
+    ]);
+    expect(recovered.every((requirement) =>
+      requirement.effect === "add" && requirement.citations[0].chunk_id === null &&
+      requirement.text === requirement.citations[0].evidence_quote
+    )).toBe(true);
+  });
+
+  it("does not recover security phrases outside a numbered Security Requirements section", () => {
+    expect(recoverSecurityRequirementAnchors(draft(), [document([{
+      page: 1,
+      text: "Overview: The Contractor must hold a valid Designated Organization Screening (DOS)."
+    }])])).toEqual([]);
+  });
+
+  it("does not treat an inline security-section cross-reference as a heading", () => {
+    expect(recoverSecurityRequirementAnchors(draft(), [document([{
+      page: 1,
+      text: "2.1 General Information\nRefer to 7.3 Security Requirements for details. The Contractor must, at all times during the performance of the Contract, hold a valid Designated Organization Screening (DOS), issued by the Contract Security Program."
+    }])])).toEqual([]);
+  });
+
+  it("stops recovery at a same-or-shallower top-level numbered heading", () => {
+    expect(recoverSecurityRequirementAnchors(draft(), [document([{
+      page: 1,
+      text: "2.1 Security Requirements\nThese requirements apply.\n3 Other Requirements\nThe Contractor must, at all times during the performance of the Contract, hold a valid Designated Organization Screening (DOS), issued by the Contract Security Program."
+    }])])).toEqual([]);
+  });
+
+  it("stops recovery at a dotted top-level heading", () => {
+    expect(recoverSecurityRequirementAnchors(draft(), [document([{
+      page: 1,
+      text: "2.1 Security Requirements\nThese requirements apply.\n3. Other Requirements\nThe Contractor must, at all times during the performance of the Contract, hold a valid Designated Organization Screening (DOS), issued by the Contract Security Program."
+    }])])).toEqual([]);
+  });
+
+  it("does not mistake a title-cased dotted heading for an ordered-list sentence", () => {
+    expect(recoverSecurityRequirementAnchors(draft(), [document([{
+      page: 1,
+      text: "2.1 Security Requirements\nThese requirements apply.\n3. Bidders Must Submit\nThe Contractor must, at all times during the performance of the Contract, hold a valid Designated Organization Screening (DOS), issued by the Contract Security Program."
+    }])])).toEqual([]);
+  });
+
+  it("stops recovery at a non-descendant dotted section", () => {
+    expect(recoverSecurityRequirementAnchors(draft(), [document([{
+      page: 1,
+      text: "7.3 Security Requirements\nThese requirements apply.\n7.4.1 Other Requirements\nThe Contractor must, at all times during the performance of the Contract, hold a valid Designated Organization Screening (DOS), issued by the Contract Security Program."
+    }])])).toEqual([]);
+  });
+
+  it("uses the complete numbered line when a sibling clause contains the obligation", () => {
+    expect(recoverSecurityRequirementAnchors(draft(), [document([{
+      page: 1,
+      text: "2.1 Security Requirements\nThese requirements apply.\n2.2 The Contractor must, at all times during the performance of the Contract, hold a valid Designated Organization Screening (DOS), issued by the Contract Security Program."
+    }])])).toEqual([]);
+  });
+
+  it("keeps a clearly sentence-like dotted list item inside the security section", () => {
+    const recovered = recoverSecurityRequirementAnchors(draft(), [document([{
+      page: 1,
+      text: "6.1 Security Requirements\n1. At the date of bid closing, the Bidder must hold a valid organization security clearance as indicated in Part 7."
+    }])]);
+    expect(recovered).toHaveLength(1);
+    expect(recovered[0].citations[0].section).toBe("6.1");
+  });
+
+  it("does not infer security amendment operations from phrase matching", () => {
+    const amendment = {
+      ...document([{
+        page: 2,
+        text: "7.3 Security Requirements The Contractor personnel must each hold a valid Reliability Status."
+      }]),
+      role: "amendment" as const,
+      amendmentNumber: "001"
+    };
+    const base = document([{
+      page: 1,
+      text: "7.3 Security Requirements\n7.3.1 Requirements apply.\nThe Contractor must, at all times during the performance of the Contract, hold a valid Designated Organization Screening (DOS), issued by the Contract Security Program."
+    }]);
+    expect(recoverSecurityRequirementAnchors(draft(), [base, amendment])).toEqual([]);
+  });
+
   it("recovers both Edmonton security-checklist annex labels from the relation and heading", () => {
     const recovered = recoverSecurityChecklistConflictAnchors(draft(), [document([
       { page: 2, text: "ANNEX \u201cE\u201d - SECURITY REQUIREMENTS CHECK LIST ............ 43" },

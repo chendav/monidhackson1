@@ -105,6 +105,113 @@ function addMinimumCoverage(value: DraftAnalysis) {
 }
 
 describe("server-owned materialization and reconciliation", () => {
+  it("recovers and de-duplicates distinct security requirements as security", () => {
+    const afr = "The Bidder must provide a completed Contract Security Program Application for Registration (AFR) form at Annex F.";
+    const securityText = [
+      `5.2.2 Security Requirements - Required Documentation ${afr}`,
+      "6.1 Security Requirements The Bidder must hold a valid organization security clearance as indicated in Part 7.",
+      "7.3 Security Requirements 7.3.1 The Contractor must, at all times during the performance of the Contract, hold a valid Designated Organization Screening (DOS), issued by the Contract Security Program.",
+      "The Contractor personnel requiring access to sensitive site(s) must each hold a valid Reliability Status, granted by the Contract Security Program."
+    ].map((value) => value
+      .replace("Security Requirements - Required Documentation ", "Security Requirements - Required Documentation\n")
+      .replace("Security Requirements The", "Security Requirements\nThe")
+      .replace("Security Requirements 7.3.1", "Security Requirements\n7.3.1"))
+      .join("\n");
+    const securityIndex = index(baseSha, [securityText]);
+    const duplicateAfr: DraftAnalysis["requirements"][number] = {
+      id: "model-afr",
+      topic: "AFR required documentation",
+      document_sha256: baseSha,
+      amendment_number: null,
+      effect: "add",
+      category: "mandatory",
+      text: afr,
+      evidence_needed: null,
+      consequence: null,
+      citations: [citation(baseSha, afr)]
+    };
+    const duplicateDos = "The Contractor must, at all times during the performance of the Contract, hold a valid Designated Organization Screening (DOS), issued by the Contract Security Program.";
+    const value = draft([duplicateAfr]);
+    value.claims = [{
+      claim_id: "model-dos-claim",
+      topic: "contract security clearance",
+      claim_text: duplicateDos,
+      claim_type: "source",
+      confidence: 1,
+      document_sha256: baseSha,
+      amendment_number: null,
+      effect: "add",
+      citations: [citation(baseSha, duplicateDos)],
+      supersedes_claim_ids: []
+    }];
+
+    const result = materializeAnalysis({
+      draft: value,
+      documents: [{
+        name: "security.pdf",
+        sourceUrl: null,
+        index: securityIndex,
+        role: "base",
+        amendmentNumber: null
+      }],
+      manifests: [{ ...manifests[0], pages: 1 }],
+      costs: [],
+      expiresAt: new Date("2026-09-03T00:00:00Z")
+    }).result;
+
+    const security = result.requirements.filter((requirement) =>
+      requirement.category === "security"
+    );
+    expect(security).toHaveLength(4);
+    expect(security.map((requirement) => requirement.id.split("-security-").at(-1)).sort()).toEqual([
+      "afr-registration",
+      "designated-organization-screening",
+      "organization-clearance",
+      "personnel-reliability-status"
+    ]);
+    expect(result.requirements.some((requirement) => requirement.id === "model-afr")).toBe(false);
+    expect(result.claims.some((claim) => claim.claim_id === "model-dos-claim")).toBe(false);
+    expect(security.every((requirement) =>
+      requirement.status === "active" && requirement.citations.length === 1 &&
+      requirement.citations[0].verified
+    )).toBe(true);
+  });
+
+  it("does not publish deterministic base security recovery for an amended package", () => {
+    const baseSecurity = [
+      "7.3 Security Requirements",
+      "7.3.1 The following requirements apply.",
+      "The Contractor must, at all times during the performance of the Contract, hold a valid Designated Organization Screening (DOS), issued by the Contract Security Program."
+    ].join("\n");
+    const amendmentSecurity = "Section 7.3 Security Requirements is deleted in its entirety and replaced with: The Contractor must hold a valid Facility Security Clearance.";
+    const value = draft([]);
+
+    const result = materializeAnalysis({
+      draft: value,
+      documents: [
+        {
+          name: "base-security.pdf", sourceUrl: null, index: index(baseSha, [baseSecurity]),
+          role: "base", amendmentNumber: null
+        },
+        {
+          name: "amendment-security.pdf", sourceUrl: null,
+          index: index(amendmentSha, [amendmentSecurity]), role: "amendment", amendmentNumber: "001"
+        }
+      ],
+      manifests: [
+        { ...manifests[0], pages: 1 },
+        { ...manifests[1], pages: 1, amendment_number: "001" }
+      ],
+      costs: [],
+      expiresAt: new Date("2026-09-03T00:00:00Z")
+    }).result;
+
+    expect(result.requirements.some((requirement) =>
+      requirement.text.includes("Designated Organization Screening")
+    )).toBe(false);
+    expect(result.decision_readiness).toBe("incomplete");
+  });
+
   it("reconciles requirements independently, ignores model amendment numbers, and keeps current-stage conflict evidence", () => {
     const result = materializeAnalysis({
       draft: draft([
