@@ -4,6 +4,13 @@ thresholds:
   mandatory_at: 5
   block_local_heuristics_at: 8
 subsystems:
+  - id: delivery_domain_coverage_contract
+    evidence_count: 1
+    status: reframed
+    trigger: fifteen T12 production cores were uncertain under an unbounded fully-adjudicated-procurement wording
+    accepted_model: coverage quantifies only exhaustive delivery-relation scanning; conditions use a relation-relative bounded object
+    review: docs/specs/MH-001-rfp-xray/reframing_review.md#t13-addendum--coverage-has-a-domain-conditions-have-one-coordinate-system
+    local_heuristics_blocked: true
   - id: submission_authority_publication_boundary
     evidence_count: 1
     status: reframed

@@ -269,3 +269,40 @@ can falsify the unsafe counterexample.
 
 No deployment or paid run is authorized until this experiment, the full local
 gate, and independent QA10 pass with P0=0/P1=0.
+
+## T13 Addendum — Coverage has a domain, conditions have one coordinate system
+
+The controlled T12 run proved canonical ownership: offset, overlap, ownership,
+length, and confidence failures were all zero. It falsified the remaining
+provider wording and condition representation with fifteen
+`semantic_uncertainty` outcomes and one `condition_mismatch`.
+
+Chief disposition: ACCEPT a delivery-domain coverage definition and a single
+relation-relative condition object. REJECT weakening uncertainty, ignoring
+relation gaps, relaxing mixed-record vetoes, restoring overlapping authority,
+or adding a channel dictionary.
+
+`coverage=complete` means the Agent exhaustively scanned the owned core for
+every semantic predicate linking any artifact, whole bid, question, or other
+subject to transmission, lodging, delivery, or receipt. Named and unfamiliar
+mechanisms remain in scope. `complete` with an empty relation list is valid when
+the core contains no plausible delivery relation; it says nothing about whether
+unrelated procurement prose was fully understood. `coverage=uncertain` is
+reserved for a plausible target relation that cannot be safely bounded or
+classified, truncated context, or capacity failure.
+
+The private wire replaces independent context-relative condition offsets with
+one nullable object containing `start_in_relation_utf16` and `length_utf16`.
+The server uses checked addition and requires the condition span to fit wholly
+inside the already verified relation span. Old private wire shapes fail closed.
+
+The no-cost falsification matrix includes administrative and unrelated ambiguous
+cores returning complete-empty; Email and question relations remaining distinct;
+unknown SecureDrop whole-bid delivery remaining source-bound generic electronic;
+plausible unclassifiable delivery remaining uncertain; null, malformed, zero,
+oversized, and out-of-relation conditions; boundary ownership; mixed relevance;
+exact relation gaps; provider call, retry, deadline, and cost ceilings; official
+Edmonton/CER fixtures; full check, build, and browser tests.
+
+No deployment or paid run is authorized until independent QA11 returns PASS
+with P0=0 and P1=0.

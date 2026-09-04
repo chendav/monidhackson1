@@ -1,0 +1,88 @@
+{
+  "evidence_version": 1,
+  "observed_at": "2026-09-04",
+  "deployment_id": "dpl_8tXppF1sZrqfZMN9czN1C7tRuo9M",
+  "git_commit_sha": "6916da8b504ff064d721661b89e7dc1d2afb18d0",
+  "terminal_state": "ready",
+  "cleanup_confirmed": true,
+  "release_gate": "CORE_ACCURACY_GATE_FAILED",
+  "cost_micro_usd": {
+    "monid_actual": 3600,
+    "estimated": 1061024,
+    "known_total": 1064624,
+    "includes_failed_attempts": false
+  },
+  "public_result": {
+    "pages_total": 55,
+    "critical_claims": 32,
+    "critical_claims_cited": 32,
+    "citations_verified": 34,
+    "unsupported_items_removed": 62,
+    "mandatory_gate": true,
+    "submission_method": null,
+    "selection_method": "Lowest evaluated price",
+    "closing_date": null,
+    "search_events": 0,
+    "follow_embedded_link_events": 0
+  },
+  "submission_adjudication_audit": {
+    "version": 2,
+    "complete": false,
+    "resolution_status": "unresolved",
+    "expected_candidate_count": 85,
+    "verified_candidate_count": 69,
+    "expected_page_count": 55,
+    "covered_page_count": 55,
+    "expected_source_fragment_count": 16,
+    "verified_source_fragment_count": 16,
+    "expected_batch_count": 4,
+    "verified_batch_count": 3,
+    "unresolved_batch_count": 1,
+    "nonzero_unresolved_reason_counts": {
+      "semantic_uncertainty": 15,
+      "condition_mismatch": 1
+    }
+  },
+  "record_authority_audit": {
+    "version": 4,
+    "receipt_byte_length": 94148,
+    "receipt_limit_bytes": 262144,
+    "record_count": 73,
+    "complete": false,
+    "integrity_complete": true,
+    "package_veto": true,
+    "relevance": {
+      "s": 16,
+      "n": 56,
+      "u": 0,
+      "mixed": 1,
+      "missing": 0
+    },
+    "source_binding": {
+      "unlocated": 22,
+      "exact": 36,
+      "coverage_gap": 5,
+      "relation_gap": 10,
+      "relation_conflict": 0
+    },
+    "semantic_crosscheck": {
+      "consistent": 36,
+      "disagrees": 10,
+      "unknown": 27
+    },
+    "publication": {
+      "verified": 36,
+      "discarded": 37
+    },
+    "submission_veto_reason": {
+      "exact_submission_relation_gap": 9,
+      "exact_relevance_disagreement": 1
+    }
+  },
+  "deployment_attestations": {
+    "runtime_payload_sha256": "ef39c4e58c661e18575d0e50eb719e70bcaf03b8ccb47cf7b7b90dbff117208c",
+    "provider_payload_sha256": "f945c8ea3f7a21077925ba64e0ca668ca77f9bb1f8af8c27fcb61660387e340f",
+    "monid_inspect_sha256": "ffbb4ef1505c2a102da100289039722b68e782d6d4d50e8abe7aa6726a531f9f"
+  },
+  "diagnosis_boundary": "T12 eliminated every offset, overlap, ownership, length, and confidence failure. The remaining failure is bounded to fifteen overloaded coverage uncertainties and one condition-coordinate mismatch. Record-level mixed relevance and exact relation gaps remain conservative vetoes. No source text, raw run ID, page offsets, provider output, signed URL, or credential is stored here."
+}

@@ -1,5 +1,20 @@
 # Current System State
 
+## 2026-09-04 T12 production boundary
+
+- `main` and `origin/main` are commit
+  `6916da8b504ff064d721661b89e7dc1d2afb18d0`; exact deployment
+  `dpl_8tXppF1sZrqfZMN9czN1C7tRuo9M` passed component health and deployment
+  attestations.
+- The controlled T12 Edmonton run reached READY and confirmed cleanup but
+  failed the core accuracy gate. Canonical ownership succeeded: all offset,
+  overlap, ownership, length, confidence, and quote bounds were clean.
+- The remaining submission audit failures are exactly fifteen
+  `semantic_uncertainty` and one `condition_mismatch`; Email and closing date
+  remain withheld. Known run cost was USD 1.064624 with no failed attempt.
+- T13 is the active bounded repair. Deployment and paid runs are prohibited
+  until QA11 PASS with P0=0/P1=0.
+
 Updated: 2026-09-04
 
 ## Confirmed

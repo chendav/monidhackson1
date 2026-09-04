@@ -345,6 +345,36 @@ handoff: qa_report.md
 status: completed_pass
 ```
 
+## T13 Domain-bounded coverage and relation-relative conditions
+
+```yaml
+id: T13
+owner_profile: backend
+objective: Make coverage quantify only exhaustive delivery-relation scanning of each owned core, and replace context-relative condition coordinates with one relation-relative condition object without weakening uncertainty, unfamiliar-channel handling, or record vetoes.
+depends_on: [QA10]
+include_paths: [src/lib/providers/openai.ts, src/lib/analysis/submission-channel.ts, tests/**, docs/specs/MH-001-rfp-xray/**]
+exclude_paths: [src/app/**, src/components/**, drizzle/**]
+edits_allowed: true
+acceptance: [AC-2, AC-4, AC-5, AC-9, AC-10]
+handoff: handoff-backend.md
+status: in_progress
+```
+
+## QA11 T13 contract review
+
+```yaml
+id: QA11
+owner_profile: reviewer
+objective: Independently falsify domain-bounded coverage, complete-empty cores, explicit plausible-relation uncertainty, relation-relative condition bounds, unfamiliar SecureDrop handling, preserved mixed and relation-gap vetoes, and unchanged paid-call and budget limits.
+depends_on: [T13]
+include_paths: [src/lib/providers/openai.ts, src/lib/analysis/submission-channel.ts, tests/**]
+exclude_paths: []
+edits_allowed: false
+acceptance: [AC-2, AC-4, AC-5, AC-9, AC-10, AC-11]
+handoff: qa_report.md
+status: blocked_on_T13
+```
+
 ## T8 Publication/submission authority separation
 
 ```yaml

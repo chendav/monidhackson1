@@ -2,8 +2,8 @@
 
 - Task ID: MH-001
 - Title: RFP X-Ray contest MVP
-- Status: active; T10 is independently accepted and authorized for controlled
-  schema-v11 migration, deployment, attestation, and one Edmonton pilot
+- Status: active; T12 production evidence failed the core gate and T13 is the
+  only authorized implementation before independent QA11
 - Chief owner: chief
 - Updated: 2026-09-04
 - Active packet: `docs/specs/MH-001-rfp-xray/`
@@ -92,8 +92,8 @@ cost. The product is document-only and does not search for tenders.
 
 ## Immediate Next Action
 
-Implement T12 canonical ownership cores with halo-only context and explicit core
-coverage while preserving mixed-record fail-closed behavior; run the
-falsification matrix and full local gates, then obtain independent QA10. Only
-after QA10 PASS may the Chief deploy and authorize another controlled Edmonton
-pilot. A full golden pass is required before the CER campaign.
+Implement T13's delivery-domain coverage definition and relation-relative
+condition object while preserving canonical ownership and every current veto;
+run the falsification matrix and full local gates, then obtain independent
+QA11. Only after QA11 PASS may the Chief deploy and authorize one controlled
+Edmonton pilot. A full golden pass remains required before the CER campaign.

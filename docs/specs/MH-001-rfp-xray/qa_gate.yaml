@@ -43,16 +43,16 @@ regression_checks:
 
 review:
   required: true
-  verdict: PASS
-  active_review_task: QA10
-  revision_round: 1
-  starts_after: T12 handoff independently reviewed
-  implementation_handoff: handoff-backend.md T12 QA10 Revision 1 — Halo-context record-authority fence
-  active_failures: []
+  verdict: BLOCKED
+  active_review_task: QA11
+  revision_round: 0
+  starts_after: T13 implementation handoff
+  implementation_handoff: pending
+  active_failures: [T13_NOT_IMPLEMENTED]
   p0: 0
   p1: 0
   p2: 0
-  deployment_allowed: true
+  deployment_allowed: false
   previous_review:
     task: QA4
     verdict: REQUEST_CHANGES
