@@ -1,37 +1,59 @@
-import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { getConfig } from "@/lib/config";
 import {
   providerContractsConfiguration,
   providerCredentialBindings
 } from "@/lib/health/provider-contracts";
+import { monidInspectSemanticContractSha256 } from "@/lib/providers/monid-inspect-contract.mjs";
 // @ts-expect-error The release utility is deliberately executable plain ESM.
 import { ATTESTATION_KIND, MAX_TTL_HOURS, MONID_ORIGIN, OPENAI_BASE_URL, buildProviderContractsAttestation, buildReleaseSubprocessEnvironment, isGloballyReachableAddress, parseReleaseArguments, performProviderChecks, providerConfigurationFromEnvironment, providerCredentialBindingsForDeployment } from "../../scripts/attest-provider-contracts.mjs";
 
-function stableJson(value: unknown): string {
-  if (value === null || typeof value !== "object") return JSON.stringify(value);
-  if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
-  return `{${Object.entries(value as Record<string, unknown>)
-    .sort(([left], [right]) => left.localeCompare(right))
-    .map(([key, item]) => `${JSON.stringify(key)}:${stableJson(item)}`).join(",")}}`;
-}
-
-function sha256(value: unknown) {
-  return createHash("sha256").update(stableJson(value)).digest("hex");
-}
-
 const inspectPayload = {
-  provider: "context-dev",
-  endpoint: "parse",
-  schema: { input: ["file_url"], output: "markdown" },
-  private_catalog_detail: "must-never-be-stored"
+  provider: "context.dev",
+  endpoint: "/parse",
+  method: "POST",
+  input: {
+    bodyType: "json",
+    body: {
+      $schema: "https://json-schema.org/draft/2020-12/schema",
+      "~standard": { vendor: "zod", version: 1, jsonSchema: {} },
+      type: "object",
+      additionalProperties: false,
+      required: ["file_url"],
+      properties: {
+        file_url: { type: "string", format: "uri", description: "Source URL" },
+        extension: { type: "string", minLength: 1, maxLength: 16, description: "Extension" },
+        ocr: { type: "boolean", description: "OCR" },
+        includeLinks: { type: "boolean", description: "Links" },
+        includeImages: { type: "boolean", description: "Images" },
+        shortenBase64Images: { type: "boolean", description: "Shorten" },
+        useMainContentOnly: { type: "boolean", description: "Main content" },
+        zdr: { type: "string", enum: ["disabled", "required"], description: "ZDR" }
+      }
+    }
+  },
+  price: {
+    type: "TIERED",
+    amount: { value: 0.0009, currency: "USD" },
+    default: { amount: { value: 0.0009, currency: "USD" }, type: "PER_CALL" },
+    tiers: [{
+      label: "OCR", selector: { in: "body", key: "ocr", label: "OCR" },
+      when: { ocr: true },
+      price: { amount: { value: 0.0036, currency: "USD" }, type: "PER_CALL" }
+    }],
+    notes: ["presentation only"]
+  },
+  metrics: { status: "healthy", runTimeMs: { p50: 100, p95: 200 } },
+  description: "must-never-be-stored",
+  categories: ["documents"], tags: ["parse"], hints: {}, notes: [],
+  docUrl: "https://docs.example/parse", providerName: "Context", summary: "Parse"
 };
 
 function environment(overrides: Record<string, string> = {}) {
   return {
     MONID_API_BASE_URL: MONID_ORIGIN,
-    MONID_PARSE_PROVIDER: "context-dev",
-    MONID_PARSE_ENDPOINT: "parse",
+    MONID_PARSE_PROVIDER: "context.dev",
+    MONID_PARSE_ENDPOINT: "/parse",
     MONID_RUN_ID_PATH: "id",
     MONID_RUN_STATUS_PATH: "status",
     MONID_PROVIDER_STATUS_PATH: "result.status",
@@ -39,7 +61,7 @@ function environment(overrides: Record<string, string> = {}) {
     MONID_COST_VALUE_PATH: "cost.value",
     MONID_COST_CURRENCY_PATH: "cost.currency",
     MONID_COST_VALUE_UNIT: "currency_major",
-    MONID_INSPECT_SCHEMA_SHA256: sha256(inspectPayload),
+    MONID_INSPECT_SCHEMA_SHA256: monidInspectSemanticContractSha256(inspectPayload),
     MONID_ARTIFACT_HOST_ALLOWLIST: "artifacts.monid.ai,download.context.dev",
     OPENAI_EXTRACTION_MODEL: "gpt-5.4-mini",
     OPENAI_QA_MODEL: "gpt-5.4-mini",
@@ -150,7 +172,15 @@ describe("provider-contract release attestation script", () => {
       const url = input.toString();
       requests.push({ url, init: init ?? {} });
       if (url === `${MONID_ORIGIN}/v1/inspect`) {
-        return new Response(JSON.stringify(inspectPayload), {
+        const telemetryDrift = structuredClone(inspectPayload);
+        telemetryDrift.metrics = {
+          status: "changed",
+          runTimeMs: { p50: 9_999, p95: 20_000 }
+        };
+        telemetryDrift.description = "changed presentation";
+        telemetryDrift.input.body.properties.file_url.description = "changed field description";
+        telemetryDrift.price.notes = ["changed price note"];
+        return new Response(JSON.stringify(telemetryDrift), {
           status: 200,
           headers: { "content-type": "application/json" }
         });
@@ -196,6 +226,23 @@ describe("provider-contract release attestation script", () => {
       fetcher: (async () => new Response(JSON.stringify(inspectPayload), { status: 200 })) as typeof fetch,
       resolveHostname: async () => ["93.184.216.34"]
     })).rejects.toThrow(/MONID_INSPECT_HASH_MISMATCH/);
+
+    const semanticDriftRequests: string[] = [];
+    await expect(performProviderChecks({
+      configuration: providerConfigurationFromEnvironment(environment()),
+      monidApiKey: "monid-test-secret",
+      openaiApiKey: "openai-test-secret",
+      fetcher: (async (input: URL | RequestInfo) => {
+        const url = input.toString();
+        semanticDriftRequests.push(url);
+        if (url !== `${MONID_ORIGIN}/v1/inspect`) throw new Error("paid dispatch boundary crossed");
+        const drifted = structuredClone(inspectPayload);
+        drifted.input.bodyType = "different-body-type";
+        return new Response(JSON.stringify(drifted), { status: 200 });
+      }) as typeof fetch,
+      resolveHostname: async () => ["93.184.216.34"]
+    })).rejects.toThrow(/MONID_INSPECT_HASH_MISMATCH/);
+    expect(semanticDriftRequests).toEqual([`${MONID_ORIGIN}/v1/inspect`]);
 
     const configuration = providerConfigurationFromEnvironment(environment());
     await expect(performProviderChecks({

@@ -538,3 +538,32 @@ sibling properties when called directly. The provider-facing generated JSON
 Schema has `additionalProperties:false`, and stripped values cannot influence
 authority. Record `.strict()` hardening for later; it does not block the T13
 deployment proof.
+
+## QA12 — Stable Monid semantic contract fingerprint
+
+```yaml
+verdict: PASS
+revision_round: 0
+p0: 0
+p1: 0
+p2: 0
+deployment_allowed: true
+```
+
+Independent review confirmed one shared semantic projection is imported by the
+runtime and release script. Explicit allowlists ignore only reviewed telemetry,
+catalog, and presentation fields; unknown root, request-schema, or pricing
+semantics fail closed. Identity, strict request fields and validation keywords,
+the full USD tier structure, configured adapter paths, artifact hosts,
+credential bindings, deployment identity, and terminal validation remain bound.
+
+Evidence: focused provider/runtime/script/receipt/pipeline suites 49/49; health
+contract 15/15; an independent 18-case mutation matrix rejected or changed the
+digest for every material mutation while telemetry/description/title/label
+changes stayed stable; runtime/shared-module parity matched; `pnpm check`
+passed with 762 tests and 10 skips. No network, credential, paid, deployment,
+commit, or file mutation occurred during independent review.
+
+The application retains its existing 25 MiB limit while documentation labels
+the provider's “25 MB” unit unverified. This truth boundary is not promoted to
+machine-verified provider evidence.

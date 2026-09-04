@@ -6,10 +6,44 @@ import {
 } from "@/lib/providers/monid";
 
 const inspectedContract = {
-  provider: "context-dev",
-  endpoint: "parse",
-  input_schema: { type: "object", required: ["file_url"] },
-  run_schema: { cost: { value: "number", currency: "string" } }
+  provider: "context.dev",
+  endpoint: "/parse",
+  method: "POST",
+  input: {
+    bodyType: "json",
+    body: {
+      $schema: "https://json-schema.org/draft/2020-12/schema",
+      "~standard": { vendor: "zod", version: 1, jsonSchema: {} },
+      type: "object",
+      additionalProperties: false,
+      required: ["file_url"],
+      properties: {
+        file_url: { type: "string", format: "uri", description: "Source URL" },
+        extension: { type: "string", minLength: 1, maxLength: 16, description: "Extension" },
+        ocr: { type: "boolean", description: "OCR" },
+        includeLinks: { type: "boolean", description: "Links" },
+        includeImages: { type: "boolean", description: "Images" },
+        shortenBase64Images: { type: "boolean", description: "Shorten" },
+        useMainContentOnly: { type: "boolean", description: "Main content" },
+        zdr: { type: "string", enum: ["disabled", "required"], description: "ZDR" }
+      }
+    }
+  },
+  price: {
+    type: "TIERED",
+    amount: { value: 0.0009, currency: "USD" },
+    default: { amount: { value: 0.0009, currency: "USD" }, type: "PER_CALL" },
+    tiers: [{
+      label: "OCR", selector: { in: "body", key: "ocr", label: "OCR" },
+      when: { ocr: true },
+      price: { amount: { value: 0.0036, currency: "USD" }, type: "PER_CALL" }
+    }],
+    notes: ["presentation only"]
+  },
+  metrics: { status: "healthy", runTimeMs: { p50: 100, p95: 200 } },
+  description: "presentation only",
+  categories: ["documents"], tags: ["parse"], hints: {}, notes: [],
+  docUrl: "https://docs.example/parse", providerName: "Context", summary: "Parse"
 };
 const inspectedContractSha256 = monidInspectResponseSha256(inspectedContract);
 
@@ -25,8 +59,8 @@ function monidConfig(resultPath = "result.artifact.url") {
     NODE_ENV: "test",
     MONID_API_KEY: "test-key",
     MONID_API_BASE_URL: "https://api.monid.test",
-    MONID_PARSE_PROVIDER: "context-dev",
-    MONID_PARSE_ENDPOINT: "parse",
+    MONID_PARSE_PROVIDER: "context.dev",
+    MONID_PARSE_ENDPOINT: "/parse",
     MONID_RESULT_URL_PATH: resultPath,
     MONID_COST_VALUE_PATH: "cost.value",
     MONID_COST_CURRENCY_PATH: "cost.currency",
@@ -88,8 +122,8 @@ describe("Monid nested run adapter", () => {
     });
     const body = JSON.parse(String(requests.find((request) => request.url.endsWith("/v1/run"))?.init?.body));
     expect(body).toEqual({
-      provider: "context-dev",
-      endpoint: "parse",
+      provider: "context.dev",
+      endpoint: "/parse",
       input: {
         body: {
           file_url: "https://private-blob.test/source.pdf",
@@ -350,7 +384,9 @@ describe("Monid nested run adapter", () => {
         const url = input.toString();
         requests.push(url);
         if (url.endsWith("/v1/inspect")) {
-          return Response.json({ ...inspectedContract, run_schema: { changed: true } });
+          const changed = structuredClone(inspectedContract);
+          changed.input.body.properties.ocr.type = "string";
+          return Response.json(changed);
         }
         throw new Error("paid run must not be dispatched");
 
@@ -361,6 +397,43 @@ describe("Monid nested run adapter", () => {
     await expect(adapter.parse({ fileUrl: "https://private-blob.test/source.pdf" }))
       .rejects.toMatchObject({ code: "MONID_PARSE_FAILED" });
     expect(requests).toEqual(["https://api.monid.test/v1/inspect"]);
+  });
+
+  it("ignores reviewed inspect telemetry and presentation drift while still dispatching the run", async () => {
+    const requests: string[] = [];
+    const fetcher = (async (input: URL | RequestInfo) => {
+      const url = input.toString();
+      requests.push(url);
+      if (url.endsWith("/v1/inspect")) {
+        const changed = structuredClone(inspectedContract);
+        changed.metrics = { status: "changed", runTimeMs: { p50: 9_999, p95: 20_000 } };
+        changed.description = "changed presentation";
+        changed.input.body.properties.file_url.description = "changed field description";
+        changed.price.notes = ["changed price note"];
+        changed.price.tiers[0]!.label = "changed label";
+        return Response.json(changed);
+      }
+      if (url.endsWith("/v1/run")) return Response.json({ id: "run-telemetry" });
+      if (url.endsWith("/v1/runs/run-telemetry")) return Response.json({
+        status: "COMPLETED",
+        result: { status: 200, artifact: { url: "https://artifacts.monid.test/result.md" } },
+        cost: { value: 0.0009, currency: "USD" }
+      });
+      if (url === "https://artifacts.monid.test/result.md") return new Response("# Parsed");
+      throw new Error(`Unexpected URL: ${url}`);
+    }) as typeof fetch;
+    const adapter = new MonidAdapter({
+      config: monidConfig(), fetcher, sleep: async () => undefined,
+      resolveHostname: async () => ["93.184.216.34"]
+    });
+    await expect(adapter.parse({ fileUrl: "https://private-blob.test/source.pdf" }))
+      .resolves.toMatchObject({ runId: "run-telemetry", costAmount: 0.0009 });
+    expect(requests).toEqual([
+      "https://api.monid.test/v1/inspect",
+      "https://api.monid.test/v1/run",
+      "https://api.monid.test/v1/runs/run-telemetry",
+      "https://artifacts.monid.test/result.md"
+    ]);
   });
 
   it("never manufactures terminal cost provenance without a validated inspect contract", async () => {

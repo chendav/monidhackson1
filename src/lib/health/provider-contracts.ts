@@ -142,7 +142,7 @@ export const ProviderContractsAttestationPayloadSchema = z.strictObject({
     context.addIssue({
       code: "custom",
       path: ["checks", "monid_inspect", "canonical_response_sha256"],
-      message: "The checked Monid response hash must equal the pinned full-response hash."
+      message: "The checked Monid semantic contract hash must equal the pinned inspect schema hash."
     });
   }
   const checkedModels = payload.checks.openai_models.map((item) => item.model);

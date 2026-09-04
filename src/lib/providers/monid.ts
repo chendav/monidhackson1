@@ -2,9 +2,9 @@ import { z } from "zod";
 import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
 import { getConfig, type AppConfig } from "@/lib/config";
-import { sha256Hex, stableJson } from "@/lib/crypto";
 import { AppError } from "@/lib/errors";
 import { isGloballyReachableIpAddress } from "@/lib/security/public-network";
+import { monidInspectSemanticContractSha256 } from "@/lib/providers/monid-inspect-contract.mjs";
 
 const LifecycleStatusSchema = z.enum([
   "QUEUED",
@@ -84,7 +84,7 @@ export interface MonidAdapterOptions {
 const PRODUCTION_MONID_ORIGIN = "https://api.monid.ai";
 
 export function monidInspectResponseSha256(payload: unknown) {
-  return sha256Hex(stableJson(payload));
+  return monidInspectSemanticContractSha256(payload);
 }
 
 interface ValidatedMonidCostContract {
@@ -381,7 +381,9 @@ export class MonidAdapter {
   /**
    * A configured path/unit/hash is only an operator assertion. Bind cost
    * provenance to a credentialed inspect response fetched in this adapter
-   * lifetime, and fail before the paid run when the pinned response changed.
+   * lifetime, and fail before the paid run when its pinned semantic contract
+   * changed. Volatile telemetry and reviewed catalog presentation fields are
+   * outside this versioned fingerprint.
    */
   async validateCurrentCostContract(): Promise<ValidatedMonidCostContract | null> {
     this.validatedCostContractPromise ??= (async () => {
@@ -400,7 +402,17 @@ export class MonidAdapter {
         return null;
       }
       const payload = await this.inspect();
-      if (monidInspectResponseSha256(payload) !== inspectSchemaSha256) {
+      let currentInspectSchemaSha256: string;
+      try {
+        currentInspectSchemaSha256 = monidInspectResponseSha256(payload);
+      } catch (cause) {
+        throw new AppError(
+          "MONID_PARSE_FAILED",
+          "The current credentialed Monid inspect response has an invalid semantic contract.",
+          { httpStatus: 503, retryable: false, cause }
+        );
+      }
+      if (currentInspectSchemaSha256 !== inspectSchemaSha256) {
         throw new AppError(
           "MONID_PARSE_FAILED",
           "The current credentialed Monid inspect response does not match the pinned contract.",

@@ -176,7 +176,7 @@ describe("deployment-bound provider contract attestation", () => {
     await expect(inspect([row(overlong)])).resolves.toEqual({ status: "mismatch" });
   });
 
-  it("rejects tampered payloads, duplicated columns, and full-response hash drift", async () => {
+  it("rejects tampered payloads, duplicated columns, and semantic-contract hash drift", async () => {
     const value = payload();
     const valid = row(value);
     await expect(inspect([{ ...valid, payload_sha256: "d".repeat(64) }]))
@@ -191,11 +191,23 @@ describe("deployment-bound provider contract attestation", () => {
 
   it("rejects configuration and deployment drift even when the row hash is valid", async () => {
     const valid = row(payload());
-    await expect(inspect([valid], productionConfig({ MONID_PARSE_ENDPOINT: "different" })))
-      .resolves.toEqual({ status: "mismatch" });
-    await expect(inspect([valid], productionConfig({
-      MONID_ARTIFACT_HOST_ALLOWLIST: "different.example"
-    }))).resolves.toEqual({ status: "mismatch" });
+    const configurationDrifts: Array<Record<string, string>> = [
+      { MONID_PARSE_PROVIDER: "other" },
+      { MONID_PARSE_ENDPOINT: "/different" },
+      { MONID_RUN_ID_PATH: "other.id" },
+      { MONID_RUN_STATUS_PATH: "other.status" },
+      { MONID_PROVIDER_STATUS_PATH: "other.providerStatus" },
+      { MONID_RESULT_URL_PATH: "other.resultUrl" },
+      { MONID_COST_VALUE_PATH: "other.cost" },
+      { MONID_COST_CURRENCY_PATH: "other.currency" },
+      { MONID_COST_VALUE_UNIT: "micro_dollar" },
+      { MONID_ARTIFACT_HOST_ALLOWLIST: "different.example" },
+      { MONID_INSPECT_SCHEMA_SHA256: "e".repeat(64) }
+    ];
+    for (const drift of configurationDrifts) {
+      await expect(inspect([valid], productionConfig(drift)))
+        .resolves.toEqual({ status: "mismatch" });
+    }
     await expect(inspect([valid], productionConfig(), {
       ...runtimeEnvironment,
       VERCEL_DEPLOYMENT_ID: "dpl_DifferentProviderProof123"

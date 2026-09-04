@@ -36,6 +36,14 @@
   attestation identifies the volatile whole-response inspect hash as the
   bounded failure. T14 replaces it with a strict semantic projection; blind
   hash refresh/retry is prohibited.
+- T14 implementation is frozen in the worktree. Focused tests passed 55/55,
+  full checks passed 762 with 10 skips, build passed, and Playwright passed 14
+  with 2 credentialed skips. These are implementer handoff facts, not
+  independent acceptance; QA12 is active and no paid call is authorized.
+- QA12 independently returned PASS with P0=0/P1=0/P2=0 and deployment allowed.
+  Its mutation matrix proved telemetry stability and material contract drift
+  rejection. Production still uses the old whole-response hash until the exact
+  T14 build and new semantic hash are configured and attested.
 
 Updated: 2026-09-04
 

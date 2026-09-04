@@ -22,8 +22,12 @@ Verified: 2026-09-03. This file records implementation constraints, not secrets.
 - Expected parse input is normalized inside the adapter and never leaks into the
   core domain: `file_url`, `extension`, `ocr`, `includeLinks:false`,
   `includeImages:false`, `shortenBase64Images:true`, `useMainContentOnly:false`.
-- The credentialed contract reports a 25MB input limit and returns a temporary
-  Markdown download URL. Download and validate the bytes immediately.
+- Provider presentation metadata describes a 25 MB input ceiling, but the
+  inspect request schema exposes no byte-valued maximum and does not establish
+  whether MB means decimal or binary units. The application therefore retains
+  its existing 25 MiB ceiling as an explicitly unverified-unit risk rather than
+  describing it as provider-verified. A successful parse returns a temporary
+  Markdown download URL; download and validate the bytes immediately.
 - Reserve 4,500 micro-USD when OCR is requested; terminal Monid cost is the
   authoritative settlement value.
 - Credentialed execution proved that ZDR is not enabled for this workspace. A
@@ -45,8 +49,10 @@ Verified: 2026-09-03. This file records implementation constraints, not secrets.
 
 ## Credentialed gate results
 
-1. PASS — exact inspect schema, response paths, optional ZDR field, and prices
-   are pinned by SHA-256.
+1. PASS — exact inspect identity, recursive request validation, optional ZDR
+   enum, and tiered USD prices are pinned by the shared versioned semantic
+   SHA-256 projection. Configured response, lifecycle, cost-path, and artifact
+   host settings remain separately bound by the deployment receipt.
 2. PASS — Context.dev fetched a five-minute Railway signed GET URL; capture,
    conditional deletion, and absence confirmation completed in 8.140 seconds.
 3. PASS WITH LIMITATION — Edmonton semantic content was useful, but Monid

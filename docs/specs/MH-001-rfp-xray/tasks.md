@@ -387,7 +387,7 @@ exclude_paths: [src/app/**, src/components/**, src/lib/analysis/**, drizzle/**]
 edits_allowed: true
 acceptance: [AC-3, AC-9, AC-10]
 handoff: handoff-backend.md
-status: in_progress
+status: completed_accepted
 ```
 
 ## QA12 T14 provider fingerprint review
@@ -402,7 +402,7 @@ exclude_paths: []
 edits_allowed: false
 acceptance: [AC-3, AC-9, AC-10, AC-11]
 handoff: qa_report.md
-status: blocked_on_T14
+status: completed_pass
 ```
 
 ## T8 Publication/submission authority separation

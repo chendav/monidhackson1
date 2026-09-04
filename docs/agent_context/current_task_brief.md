@@ -2,9 +2,8 @@
 
 - Task ID: MH-001
 - Title: RFP X-Ray contest MVP
-- Status: active; Edmonton passed seven golden checks; the first CER attempt
-  failed before paid dispatch because volatile Monid telemetry changed the
-  whole inspect hash; T14 is the bounded provider-contract repair
+- Status: active; T14 passed independent QA12 with P0=0/P1=0/P2=0 and is
+  authorized for commit, semantic-hash configuration, deployment, and one CER retry
 - Chief owner: chief
 - Updated: 2026-09-04
 - Active packet: `docs/specs/MH-001-rfp-xray/`
@@ -93,10 +92,9 @@ cost. The product is document-only and does not search for tenders.
 
 ## Immediate Next Action
 
-Implement and independently review a stable semantic Monid contract fingerprint
-that ignores only live telemetry and fails closed on every material parse,
-schema, path, price, currency, or limit change. Then redeploy and reuse the
-saved CER package. Do not reparse Edmonton or reopen submission analysis.
+Commit T14, calculate the current non-paid semantic fingerprint, configure and
+deploy the exact build, refresh attestations, then reuse the saved CER package
+once. Do not reparse Edmonton or reopen submission analysis.
 
 ## Verification Cadence
 

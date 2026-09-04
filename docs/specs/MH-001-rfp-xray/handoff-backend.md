@@ -3009,3 +3009,138 @@ the private adapter converts the v5 wire.
 
 None. The T13 provider-private contract remains project-specific pending QA11
 and a later Chief-authorized controlled production run.
+
+## T14 Implementation — Stable Monid semantic contract fingerprint
+
+This is the bounded T14 implementation handoff for QA12. It is implementation
+evidence, not self-certification. One credentialed, non-paid `POST /v1/inspect`
+was performed only to learn the live contract shape. The response was parsed
+and sanitized in memory: neither the raw response nor the API key was printed
+or persisted, and no `/v1/run` call occurred. No paid call, deployment,
+database operation or migration, commit, push, release-evidence edit, public
+API change, or Reviewer-verdict edit occurred.
+
+### Implemented contracts
+
+1. `src/lib/providers/monid-inspect-contract.mjs` is the single plain-Node and
+   runtime-compatible semantic projection. Version 1 binds the exact
+   `context.dev`, `/parse`, `POST` identity; the exact request property set;
+   required fields; recursive validation-bearing JSON Schema keywords; body
+   type; strict object behavior; formats, types, enums, and bounds; and the
+   complete tiered USD base/default/OCR price structure. Its declaration file
+   exposes the same contract to TypeScript without creating a second
+   implementation.
+2. Unknown top-level inspect fields, request-schema keywords, schema shapes,
+   price fields, tiers, selectors, or conditions fail closed. The only ignored
+   paths are the explicitly reviewed catalog/telemetry fields
+   `categories`, `description`, `docUrl`, `hints`, `metrics`, `notes`,
+   `providerName`, `summary`, and `tags`; schema annotations `~standard`,
+   `description`, `title`, and `examples`; and price/tier/selector
+   presentation notes or labels. The JSON Schema dialect identifier `$schema`
+   is validation-bearing and remains bound. A semantic selector value remains inside the
+   projection and therefore any selector drift changes the hash.
+3. The existing `monidInspectResponseSha256` compatibility function now hashes
+   this semantic projection. `MonidAdapter.validateCurrentCostContract` wraps
+   malformed semantic contracts as non-retryable `MONID_PARSE_FAILED` and
+   still compares the configured pin before any `/v1/run` dispatch. The
+   release attestation script imports exactly the same implementation and
+   rejects malformed contracts as `MONID_INSPECT_CONTRACT_INVALID` before its
+   OpenAI check.
+4. The existing environment, health receipt, attestation, and cost-provenance
+   field names are deliberately unchanged. In particular, historical
+   `canonical_response_sha256` and `inspect_schema_sha256` names now carry the
+   semantic-contract digest. Configured lifecycle/result/provider-status/cost
+   paths, cost unit, artifact hosts, and deployment identity remain a separate
+   adapter/deployment contract in the existing signed receipt; they are not
+   falsely attributed to the inspect payload.
+5. The verified live inspect shape established a base/default price of USD
+   0.0009 per call and an OCR tier of USD 0.0036 per call, matching the existing
+   4,500 micro-USD OCR reservation. ZDR remains a two-member string enum bound
+   by the semantic hash. ZDR availability, observed seven-day upstream expiry,
+   and absence of provider early deletion remain historical operational
+   evidence rather than inspect-derived claims.
+6. The application keeps its existing 25 MiB ceiling. The inspect request
+   schema contains no byte-valued maximum, and provider presentation text alone
+   does not prove whether “25 MB” is decimal or binary. Reducing the application
+   limit would cross source validation, upload/storage, public contract, UI,
+   cost, and test boundaries outside bounded T14; `provider-contract.md` now
+   states the unverified-unit risk instead of calling 25 MiB provider-verified.
+
+### No-cost falsification evidence
+
+- Direct projection tests prove that all reviewed telemetry/presentation and
+  schema-annotation changes keep the digest stable, including reordered ZDR
+  enum values. Identity, body type, required set, additional-property policy,
+  property presence, type, URI format, string bounds, enum membership, unknown
+  schema semantics, tier structure, amounts, currency, charge unit, selector,
+  condition, and unknown price semantics either change the digest or reject the
+  payload.
+- Runtime adapter tests prove telemetry-only inspect drift still reaches the
+  locally faked paid-run path, while a request-schema mutation stops after the
+  inspect request and never calls the faked `/v1/run` endpoint.
+- Release-script tests prove the same presentation stability, reject semantic
+  drift before the OpenAI control-plane request, and keep raw response contents
+  and test credentials out of the returned evidence.
+- Deployment-receipt tests independently mutate provider, endpoint, lifecycle
+  and result paths, provider-status path, cost value/currency paths, unit,
+  artifact hosts, inspect semantic hash, and deployment identity; every change
+  remains a mismatch.
+
+### Changed files in T14
+
+- `src/lib/providers/monid-inspect-contract.mjs`
+- `src/lib/providers/monid-inspect-contract.d.mts`
+- `src/lib/providers/monid.ts`
+- `src/lib/health/provider-contracts.ts`
+- `scripts/attest-provider-contracts.mjs`
+- `tests/unit/monid-inspect-contract.test.ts`
+- `tests/unit/monid-adapter.test.ts`
+- `tests/unit/provider-contract-attestation-script.test.ts`
+- `tests/unit/provider-contracts-attestation.test.ts`
+- `docs/specs/MH-001-rfp-xray/provider-contract.md`
+- `docs/specs/MH-001-rfp-xray/tasks.md`
+- This T14 section in `docs/specs/MH-001-rfp-xray/handoff-backend.md`
+
+### Exact checks
+
+- Final focused command covering the semantic projector, runtime adapter,
+  release utility, deployment receipt, readiness gate, and parallel Monid
+  dispatch boundary: PASS, 6 files and 55 tests.
+- Targeted ESLint over all changed source/script/test files: PASS.
+- `pnpm check`: PASS; ESLint and TypeScript passed, 59 test files passed/4
+  skipped, and 762 tests passed/10 skipped.
+- `pnpm build`: PASS; Next production compilation, TypeScript, 9 Workflow
+  steps, 5 workflows, and all 13 static-generation entries completed.
+- `pnpm test:e2e`: PASS, 14 browser tests passed and 2 credentialed live-storage
+  tests skipped.
+- `git diff --check`: PASS; only Git's Windows LF-to-CRLF notices were emitted.
+- Scoped high-risk credential-pattern scan over every T14 source, test, script,
+  and handoff file: PASS, zero matches.
+- The official PDF fixture suite was not rerun because T14 does not change
+  parsing, analysis, citations, fixtures, or provider output schemas; the full
+  suite still exercised all uncredentialed repository tests once at handoff.
+
+### Confirmed, inferred, unknown, and next gate
+
+- Confirmed: runtime and release attestation can no longer disagree about how
+  the inspect payload is projected or hashed, and live latency/catalog copy no
+  longer invalidates the pin.
+- Confirmed: material inspect-contract drift and separately configured adapter
+  drift both remain fail-closed before paid dispatch. Existing `$2/run` and
+  `$20/day` gates, call/retry logic, and cost settlement are unchanged.
+- Inferred: the stable projection removes the production failure caused solely
+  by whole-response telemetry drift without weakening schema or price safety.
+- Unknown: the current deployment still carries the historical whole-response
+  pin until a Chief-controlled release re-attests and updates the existing
+  environment field. No claim is made that the local tests refreshed production
+  configuration or that a second CER run is authorized.
+- Unknown: provider presentation says 25 MB, but its exact byte definition is
+  not machine-readable in inspect; R-56 remains active.
+- QA12 is the next independent gate. Deployment and any paid production run
+  remain blocked until Reviewer `PASS` with P0=0 and P1=0, followed by exact
+  deployment re-attestation.
+
+### Proposed long-term memory
+
+None. The explicit projection and ignore allowlist are provider-specific and
+must first survive independent QA12 and a controlled production attestation.

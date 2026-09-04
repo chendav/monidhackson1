@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import { join, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import { neon } from "@neondatabase/serverless";
+import { monidInspectSemanticContractSha256 } from "../src/lib/providers/monid-inspect-contract.mjs";
 
 export const ATTESTATION_KIND = "provider_contracts/v1";
 export const MAX_TTL_HOURS = 24;
@@ -346,7 +347,12 @@ export async function performProviderChecks({
     monidApiKey,
     { fetcher, resolveHostname }
   );
-  const monidInspectSha256 = sha256Hex(stableJson(monidInspect));
+  let monidInspectSha256;
+  try {
+    monidInspectSha256 = monidInspectSemanticContractSha256(monidInspect);
+  } catch {
+    fail("MONID_INSPECT_CONTRACT_INVALID");
+  }
   if (!constantTimeHexEqual(
     monidInspectSha256,
     configuration.monid.inspect_schema_sha256
