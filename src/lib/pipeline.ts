@@ -1,6 +1,11 @@
 import type { AnalysisResult, CostEvent, DocumentManifest } from "@/contracts";
 import { materializeAnalysis } from "@/lib/analysis/materialize";
+import { unresolvedRecordAuthority } from "@/lib/analysis/record-authority";
 import { LocalDeterministicModel } from "@/lib/analysis/local-model";
+import {
+  discoverSubmissionCandidateLedger,
+  scrubSubmissionCandidateLedger
+} from "@/lib/analysis/submission-channel";
 import { cleanupGate, executeCleanup, type CleanupTarget } from "@/lib/cleanup";
 import {
   getConfig,
@@ -48,6 +53,7 @@ import {
   type PaidExtractionCallbacks
 } from "@/lib/providers/openai";
 import { getRunStore, type RunStore } from "@/lib/runs/store";
+import { createRecordAuthorityAudit } from "@/lib/runs/record-authority-audit";
 import { startProcessingHeartbeat } from "@/lib/runs/processing-heartbeat";
 import {
   markPaidCostAttemptStarted,
@@ -966,14 +972,26 @@ export async function processRun(runId: string, dependencies: PipelineDependenci
           }
         }
       : undefined;
+    const submissionDocuments = indexed.map((item) => ({
+      name: item.source.sourceName,
+      sourceUrl: item.source.sourceUrl,
+      index: item.index,
+      role: item.source.role,
+      amendmentNumber: item.amendmentNumber
+    }));
+    const submissionLedger = discoverSubmissionCandidateLedger(submissionDocuments);
     const modelInput: ModelDocumentInput[] = parsed.map((item) => ({
       document_sha256: item.index.documentSha256,
       document_name: item.source.sourceName,
       role: item.source.role,
       amendment_number: item.amendmentNumber,
       parsed_markdown: item.markdown,
-      evidence_chunks: item.index.chunks
+      evidence_chunks: item.index.chunks,
+      citation_document: submissionDocuments.find((document) =>
+        document.index.documentSha256 === item.index.documentSha256
+      )
     }));
+    if (modelInput[0]) modelInput[0].submission_ledger = submissionLedger;
     let extraction: ExtractionCallResult;
     const modelStarted = performance.now();
     try {
@@ -1049,6 +1067,7 @@ export async function processRun(runId: string, dependencies: PipelineDependenci
       // independent string references. Drop those references before any raw
       // cleanup receipt can unlock a public result.
       for (const document of modelInput) document.parsed_markdown = "";
+      scrubSubmissionCandidateLedger(submissionLedger);
     }
 
     assertBeforeDeadline(workflowStarted + RESULT_COMMIT_DEADLINE_MS, "result-commit");
@@ -1056,15 +1075,13 @@ export async function processRun(runId: string, dependencies: PipelineDependenci
     await stage(store, runId, "reconciling", claim);
     const storageProvider = getPrivateStorageProvider(config);
     recordInfrastructureCosts();
+    const recordAuthority = extraction.recordAuthority ??
+      unresolvedRecordAuthority("missing_record_authority");
     const materialized = materializeAnalysis({
       draft: extraction.analysis,
-      documents: indexed.map((item) => ({
-        name: item.source.sourceName,
-        sourceUrl: item.source.sourceUrl,
-        index: item.index,
-        role: item.source.role,
-        amendmentNumber: item.amendmentNumber
-      })),
+      submissionAdjudication: extraction.submissionAdjudication,
+      recordAuthority,
+      documents: submissionDocuments,
       manifests: cleanedManifests,
       costs,
       storageProvider,
@@ -1122,9 +1139,11 @@ export async function processRun(runId: string, dependencies: PipelineDependenci
     // catch path withholds the result and trips the budget failure closed.
     await budget.settle(runId, updated.costMicroUsd, now());
     assertBeforeDeadline(workflowStarted + RESULT_COMMIT_DEADLINE_MS, "final-ready-transition");
+    const recordAuthorityAudit = createRecordAuthorityAudit(recordAuthority, now());
     updated = await store.update(runId, (record) => ({
       ...transitionRun(record, finalStatus),
       result: materialized.result,
+      recordAuthorityAudit,
       processingLeaseId: null,
       processingLeaseExpiresAt: null
     }), claim);

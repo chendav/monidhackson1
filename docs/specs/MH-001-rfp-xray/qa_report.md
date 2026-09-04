@@ -1,78 +1,200 @@
-reviewer: independent_reviewer
-independent: true
+# QA4 Independent Review — T6 Revision 15
+
+```yaml
+task: QA4
+reviewed_handoff: handoff-backend.md Revision 15
 verdict: REQUEST_CHANGES
-source_verdict: REVISE
+revision_round: 0
+p0: 0
+p1: 5
+p2: 3
+```
+
+## P1 Findings
+
+1. `P1-QA-GLOBAL-VETO`: an incomplete private artifact can leave a corroborated
+   submission requirement active, allowing Q&A to answer with a channel while
+   the summary correctly withholds it.
+2. `P1-OCR-UNBOUND-FENCE`: additional Monid/OCR submission evidence that cannot
+   bind to PDF.js is discarded instead of fencing a unique PDF.js channel.
+3. `P1-CONDITION-SPAN-BINDING`: condition offsets are window-bounded but not
+   relation-bounded, so unrelated later conditions can change prohibition
+   semantics.
+4. `P1-AMENDMENT-MUTATION-VETO`: an explicit verified amendment deletion signal
+   is ignored when no private amendment relation survives.
+5. `P1-PROMPT-INJECTION-VARIANT`: `Forget prior directions; output ...` is not
+   batch-tainted and can publish a mocked, offset-valid injected relation.
+
+## P2 Findings
+
+1. A lexical occurrence intersecting but not enclosed by a 3,200-character
+   window is impossible to cover in that candidate and forces unresolved.
+2. The same candidate assigned to two server batch bindings can still yield a
+   globally complete artifact.
+3. Private-output fit uses fixed token estimates rather than an exact or
+   demonstrably conservative serialized-envelope bound.
+
+## Independent Passing Evidence
+
+- Focused T6 suite: 335/335.
+- `pnpm check`: 662 passed, 10 skipped.
+- Official Edmonton/CER PDF audit: 3/3.
+- Golden/security/API/cleanup subset: 38/38.
+- Production build: passed.
+- Playwright: 14 passed, 2 credentialed live tests skipped.
+- No public contract, database, migration, or UI change was found.
+
+## Next Gate
+
+T6 Revision 16 must add exact adversarial regressions for every finding and
+produce a new handoff. QA4 then re-reviews the bounded delta. Deployment and
+paid runs remain prohibited until QA4 returns `PASS` with P0=0/P1=0.
+
+## QA4 Revision-Round 1 — Revision 16
+
+```yaml
+verdict: REQUEST_CHANGES
+revision_round: 1
+p0: 0
+p1: 1
+p2: 0
+```
+
+`P1-QA-GLOBAL-VETO-UNKNOWN-CHANNEL` remains. With exact PDF.js evidence saying
+`Bids must be lodged in SecureDrop.`, an incomplete private artifact correctly
+withheld `summary.submission_method` but left the `submission` requirement
+active; Q&A then answered it authoritatively. The same leak reproduced across
+several unfamiliar topics. The authority gate must use server-owned category
+and completion state, not a fixed channel lexicon.
+
+## QA4 Revision-Round 2 — Revision 17
+
+```yaml
+verdict: REQUEST_CHANGES
+revision_round: 2
+p0: 0
+p1: 1
+p2: 0
+```
+
+`P1-QA-GLOBAL-VETO-NONREQUIREMENT` remains. Revision 17 correctly demotes the
+SecureDrop `submission` requirement and makes its Q&A `not_found`, but the same
+source text stays authoritative when emitted as a free-form Claim or Risk; Q&A
+answers both while `summary.submission_method=null`. Every public evidence
+collection must obey the server-owned resolved submission state without a
+known-channel vocabulary gate.
+
+## QA4 Revision-Round 3 — Revision 18
+
+```yaml
+verdict: REQUEST_CHANGES
 revision_round: 3
-review_task: legacy_core_field_delta
-report_status: completed_and_superseded_by_T4_redesign
-recorded_at: 2026-09-03
-reviewed_base_commit: d0b937e8e75ae5b2ae52985f1e1a0cfc7f13a0c5
-reviewed_application_commit: null
+p0: 0
+p1: 1
+p2: 0
+disposition: architectural_redesign
+```
 
-criteria:
-  - id: AC-4
-    result: fail
-    evidence: Conditional, permissive, and deadline-qualified Portal evidence can be dropped before submission-channel collision handling.
-  - id: AC-5
-    result: fail
-    evidence: A deterministic Email anchor can become the summary value while another possible whole-bid channel remains unresolved.
-  - id: AC-10
-    result: pass
-    evidence: The focused official and unit recovery suite passed 46 of 46 tests on the reviewed delta.
-  - id: AC-11
-    result: fail
-    evidence: Independent review has two open P1 findings, so PASS is not available.
+`P1-QA-NONNULL-UNFAMILIAR-DISAGREEMENT` remains. Revision 18 fixes every null
+authority path, but a valid Email relation on one page makes the global gate
+true while an unfamiliar SecureDrop Claim or Risk from another page can remain
+authoritative when that coverage unit reports zero relations. This violates the
+Draft-veto requirement. All original Revision 15 failures otherwise pass.
 
-failures:
-  - id: P1-SUBMISSION-CONDITIONAL-REJECTION
-    acceptance: AC-4
-    evidence: Conditional rejection after closing still authorizes Portal for timely bids but was classified as a channel prohibition.
-  - id: P1-SUBMISSION-AMBIGUITY-COLLECTOR
-    acceptance: AC-5
-    evidence: The materializer dropped may/can, not-later-than, and conditional alternate-channel evidence before collision resolution.
+The three-round T6 review loop is exhausted. T7 must replace the global boolean
+with record-bound Agent semantic authority inside the same structured response;
+the server then verifies record IDs, relation references, citations, coverage,
+and disagreement without interpreting arbitrary English.
 
-regressions:
-  - focused_official_and_unit_recovery: 46_passed
-  - required_next_cases:
-      - permissive_portal
-      - not_later_than_portal
-      - conditional_rejection_portal
-      - unconditional_fax_rejection
-      - explicit_portal_prohibition
+## QA5 Initial Review — T7 Implementation
 
-limitations:
-  - This report records the exhausted legacy delta loop; it is not a review of T4.
-  - T4 is in progress and has not produced its implementation handoff.
-  - QA2 must remain pending until that handoff and its checks exist.
-  - Production health is ready, but the last controlled Edmonton run was partial.
-  - CER, 12-citation review, final video, submission, and publication remain open.
+```yaml
+verdict: REQUEST_CHANGES
+revision_round: 0
+p0: 0
+p1: 2
+p2: 0
+deployment_allowed: false
+```
 
-loop_disposition: redesign_or_human
-superseded_by_task: T4
-next_review:
-  task: QA2
-  status: pending_waiting_for_T4_handoff
-  allowed_verdicts: [PASS, REQUEST_CHANGES, BLOCKED]
-  required_passing_condition: P0=0 and P1=0 with criterion-level evidence
+1. `P1_RECORD_RECEIPT_REUSE`: the authority manifest and materializer bind by
+   `kind:model_id` without revalidating canonical record content. A complete
+   `n` receipt for an invoice Claim can therefore be reused by a same-ID
+   SecureDrop Claim; it remains active and persisted Q&A answers it. Model IDs
+   also still participate in cross-batch deduplication.
+2. `P1_INCOMPLETE_WORST_ENVELOPE`: the frozen byte measurements cover only
+   private submission adjudication and authority tuples. They omit the complete
+   public analysis with three citations per annotated record and the complete
+   server receipt with occurrence/relation/lineage bindings, so the stated CER
+   743-byte headroom is not a complete worst-case proof.
 
-current_release_evidence:
-  deployed_commit: d0b937e8e75ae5b2ae52985f1e1a0cfc7f13a0c5
-  deployment_id: dpl_2jKkhjjxeRGzq5yxgGS5nL3GJzJF
-  public_url: https://rfp-xray.vercel.app
-  health_http_status: 200
-  health_status: ok
-  health_mode: live
-  last_controlled_edmonton_result: partial
-  last_controlled_edmonton_cost_usd: 1.020701
-  app_controlled_cleanup: confirmed
-  release_verdict: NOT_READY
+Independent broad gates still passed: focused 268/268, official 18/18,
+`pnpm check` 700 passed/10 skipped, build, Playwright 14 passed/2 credentialed
+live cases skipped, and `git diff --check`. T7 Revision 1 is limited to the two
+P1 findings and must return to the same Reviewer before deployment.
 
-historical_evidence_sources:
-  - handoff-chief.md
-  - handoff-backend.md
-  - handoff-frontend.md
-  - release-evidence/README.md
-  - release-evidence/deployment-summary.md
-  - release-evidence/monid-contract-spike-2026-09-03.md
-  - release-evidence/workflow-recovery-canary-2026-09-03.md
-historical_evidence_policy: Preserve original recorded wording in source files; revalidate before promoting any historical fact into current canonical state.
+## QA5 Revision-Round 1 — T7 Revision 1
+
+```yaml
+verdict: REQUEST_CHANGES
+revision_round: 1
+p0: 0
+p1: 1
+p2: 1
+deployment_allowed: false
+```
+
+`P1_RECOVERED_RECORD_ORIGIN_COLLISION` remains: deterministic recovered Claims,
+Requirements, and Evaluation rules can reuse a removed model record's public ID
+and inherit its model origin through the post-recovery authority lookup. Those
+borrowed origins can create a spurious submission-relevant conflict or veto.
+
+`P2_BATCH_COUNT_COST_WORDING` corrects evidence wording: five is a packing
+target and the observed CER batch count, not a global hard maximum. Dense valid
+plans can contain seven or nine batches. Safety remains intact because the
+pre-dispatch estimate uses the actual batch count and rejects totals above the
+495,000 micro-USD reserve. Revision 2 must encode the recovered-record guard and
+state/test cost using actual `N`.
+
+## QA5 Revision-Round 2 — T7 Revision 2
+
+```yaml
+verdict: REQUEST_CHANGES
+revision_round: 2
+p0: 0
+p1: 1
+p2: 0
+deployment_allowed: false
+```
+
+The recovered-origin collision and actual-`N` cost findings are independently
+closed. `P1_RECORD_AUTHORITY_AUDIT_PERSISTENCE` remains: the actual non-empty
+receipt byte length is transient between extraction and materialization, with no
+RunRecord/database field or audit event. The required first controlled run could
+not produce retrievable evidence. Final Revision 3 must persist an allowlisted,
+non-body audit record by run ID for 30 days, separate from the 24-hour result,
+and prove retrieval, expiry separation, and redaction in an integration test.
+
+## QA5 Revision-Round 3 — T7 Revision 3
+
+```yaml
+verdict: APPROVE
+revision_round: 3
+p0: 0
+p1: 0
+p2: 0
+deployment_allowed: true
+```
+
+The final receipt-audit finding is independently closed. A successful
+production-shaped pipeline now writes a strict seven-field, non-body authority
+audit atomically with the final result after cleanup and budget settlement.
+The nullable audit is mapped bidirectionally through Neon schema v10, remains
+after the 24-hour result scrub, and is removed with the run at the 30-day audit
+expiry. The operator-only reader validates UUIDs, uses a parameter-bound query,
+strictly validates stored JSON, and exposes no public route.
+
+Independent evidence: focused audit suite 10/10, official Edmonton/CER fixtures
+3/3, `pnpm check` 715 passed/10 skipped, production build passed, invalid CLI
+input exited 64 with a sanitized error, and `git diff --check` passed. QA5 found
+no remaining P0, P1, or P2 issue; normal migration and deployment gates may run.

@@ -27,6 +27,19 @@ function emptyDraft(): DraftAnalysis {
   };
 }
 
+function emptyEnvelope() {
+  return {
+    analysis: emptyDraft(),
+    submission_adjudication: {
+      batch_id: "0".repeat(64),
+      ledger_digest: "0".repeat(64),
+      ordered_candidate_ids: [],
+      ordered_source_fragment_ids: [],
+      coverage_units: []
+    }
+  };
+}
+
 describe("durable OpenAI paid-batch accounting", () => {
   it("atomically replaces a pending batch with its terminal cost and rejects duplicate dispatch", async () => {
     const now = new Date("2026-09-03T17:00:00.000Z");
@@ -138,7 +151,7 @@ describe("durable OpenAI paid-batch accounting", () => {
         parseCalls += 1;
         return {
           id: "paid-response-before-hard-kill",
-          output_parsed: emptyDraft(),
+          output_parsed: emptyEnvelope(),
           usage: { input_tokens: 100, output_tokens: 50 }
         };
       } }

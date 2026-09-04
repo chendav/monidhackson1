@@ -1,0 +1,6 @@
+version: 1
+thresholds:
+  review_at: 3
+  mandatory_at: 5
+  block_local_heuristics_at: 8
+subsystems: []

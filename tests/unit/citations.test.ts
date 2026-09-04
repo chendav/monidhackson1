@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { sha256Hex } from "@/lib/crypto";
-import { assertionTokensSupportedByCitations, verifyCitation } from "@/lib/evidence/citations";
+import {
+  assertionTokensSupportedByCitations,
+  verifyCitation,
+  verifyCitationOnExpectedPage
+} from "@/lib/evidence/citations";
 import { normalizeEvidenceText, type PdfPageIndex } from "@/lib/pdf/page-index";
 
 const documentSha = "a".repeat(64);
@@ -76,6 +80,32 @@ describe("SHA-bound citation verification", () => {
       pdf_page_1based: null,
       verification_method: "manual_required"
     });
+  });
+
+  it("verifies a submission quote only at the server-owned physical page and UTF-16 offsets", () => {
+    const duplicated = documentsWithPages([
+      { number: 1, text: "Bids must be submitted by email." },
+      { number: 2, text: "Bids must be submitted by email." }
+    ]);
+    const quote = "Bids must be submitted by email.";
+    const exact = verifyCitationOnExpectedPage({
+      documentSha256: documentSha,
+      evidenceQuote: quote,
+      expectedPdfPage1Based: 2,
+      evidenceStartUtf16: 0,
+      evidenceEndUtf16: quote.length,
+      section: "Submission"
+    }, duplicated, new Date("2026-09-02T00:00:00Z"));
+    expect(exact.citation).toMatchObject({ verified: true, pdf_page_1based: 2 });
+    expect(exact.receipt.receiptId).toMatch(/^[a-f0-9]{32}$/);
+    const wrongPage = verifyCitationOnExpectedPage({
+      documentSha256: documentSha,
+      evidenceQuote: quote,
+      expectedPdfPage1Based: 3,
+      evidenceStartUtf16: 0,
+      evidenceEndUtf16: quote.length
+    }, duplicated);
+    expect(wrongPage.citation).toMatchObject({ verified: false, pdf_page_1based: null });
   });
 
   it("rejoins a single-letter PDF word fragment only when the complete quote uniquely matches", () => {

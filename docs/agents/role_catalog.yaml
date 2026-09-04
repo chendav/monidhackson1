@@ -21,6 +21,9 @@ profiles:
   researcher:
     role_file: docs/agents/roles/researcher.md
     edits: assigned research-note paths only
+  reframing:
+    role_file: docs/agents/roles/reframing.md
+    edits: reframing reports and heuristic-debt ledger only; no product code or canonical state
   reviewer:
     role_file: docs/agents/roles/reviewer.md
     edits: none by default

@@ -10,3 +10,13 @@ independent_review_required: true
 max_revision_rounds: 3
 full_history_by_default: false
 knowledge_promotion_requires_review: true
+reframing:
+  enabled: true
+  role: reframing
+  repeated_fix_attempts: 2
+  heuristic_debt:
+    review_at: 3
+    mandatory_at: 5
+    block_local_heuristics_at: 8
+  proposal_may_modify_product_code: false
+  falsification_experiment_required: true

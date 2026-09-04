@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { PresignUploadResponse } from "@/contracts";
+import { unresolvedRecordAuthority } from "@/lib/analysis/record-authority";
+import { createRecordAuthorityAudit } from "@/lib/runs/record-authority-audit";
 import { expireDueRuns, expireRun } from "@/lib/runs/expiry";
 import { transitionRun } from "@/lib/runs/state-machine";
 import { InMemoryRunStore } from "@/lib/runs/store";
@@ -30,7 +32,14 @@ describe("cleanup retry and retained audit", () => {
       idempotencyKey: "retention-request", reservedMicroUsd: 499_500,
       now: new Date("2026-09-02T00:00:00Z")
     })).record;
-    const failed = await store.update(created.id, (record) => transitionRun(record, "failed"));
+    const audit = createRecordAuthorityAudit(
+      unresolvedRecordAuthority("retention_fixture"),
+      new Date("2026-09-02T00:30:00Z")
+    );
+    const failed = await store.update(created.id, (record) => ({
+      ...transitionRun(record, "failed"),
+      recordAuthorityAudit: audit
+    }));
     const first = await expireRun(failed, store, storage, new Date("2026-09-02T01:00:00Z"));
     expect(first.status).toBe("cleanup_pending");
     expect(first.cleanupConfirmed).toBe(false);
@@ -48,6 +57,7 @@ describe("cleanup retry and retained audit", () => {
     expect(scrubbed.citationReceipts).toEqual([]);
     expect(scrubbed.cleanupExpectedResourceIds).toEqual([]);
     expect(scrubbed.cleanupReceipts.every((receipt) => receipt.resourceId.startsWith("sha256:"))).toBe(true);
+    expect(scrubbed.recordAuthorityAudit).toEqual(audit);
     expect(scrubbed.auditExpiresAt).toBe("2026-10-02T01:01:00.000Z");
 
     await expireDueRuns(store, storage, new Date("2026-10-02T01:01:00.001Z"));

@@ -5,6 +5,7 @@ import { materializeAnalysis, resolveRiskLineage } from "@/lib/analysis/material
 import { reconcileVersionedFacts } from "@/lib/analysis/reconciliation";
 import { sha256Hex } from "@/lib/crypto";
 import { normalizeEvidenceText, type PdfPageIndex } from "@/lib/pdf/page-index";
+import { verifiedFixtureSubmissionAdjudication } from "../helpers/submission-adjudication";
 
 function index(sha: string, pages: string[]): PdfPageIndex {
   return {
@@ -446,7 +447,7 @@ describe("server-owned materialization and reconciliation", () => {
       ],
       manifests, costs: [], expiresAt: new Date("2026-09-03T00:00:00Z")
     }).result;
-    expect(result.claims.find((claim) => claim.claim_id === "known-term")?.status).toBe("active");
+    expect(result.claims.find((claim) => claim.claim_id === "known-term")?.status).toBe("needs_review");
     expect(result.claims.find((claim) => claim.claim_id === "unknown-term")?.status).toBe("needs_review");
     expect(result.blocking_unknowns).toContain(
       "One or more extracted facts remain unknown and cannot replace source-backed facts."
@@ -580,14 +581,30 @@ describe("server-owned materialization and reconciliation", () => {
     }];
     const validIndex = index(baseSha, ["Submission method: portal.",
       "The bidder must submit a signed form. A bid that fails a mandatory requirement will be non-compliant."]);
+    const validDocument = {
+      name: "base.pdf", sourceUrl: null, index: validIndex,
+      role: "base" as const, amendmentNumber: null
+    };
     const validResult = materializeAnalysis({
       draft: valid,
-      documents: [{ name: "base.pdf", sourceUrl: null, index: validIndex, role: "base", amendmentNumber: null }],
+      documents: [validDocument],
       manifests: [manifests[0]], costs: [], expiresAt: new Date("2026-09-03T00:00:00Z")
+      , submissionAdjudication: verifiedFixtureSubmissionAdjudication(
+        [validDocument],
+        (candidate) => candidate.occurrences.some((occurrence) => occurrence.channel_hint === "portal")
+          ? [{
+              evidenceText: "Submission method: portal.",
+              subjectScope: "whole_bid",
+              modality: "required",
+              channel: "portal"
+            }]
+          : undefined,
+        { defaultOccurrenceDisposition: "other" }
+      )
     }).result;
     expect(validResult.claims.find((claim) => claim.claim_id === "submission-portal")?.status)
-      .toBe("active");
-    expect(validResult.summary.submission_method).toBe("portal");
+      .toBe("needs_review");
+    expect(validResult.summary.submission_method).toBe("Portal");
 
     for (const [badQuote, badMethod] of [
       ["Submission method: bids must not be sent by email; courier delivery is required.", "email"],
@@ -623,6 +640,122 @@ describe("server-owned materialization and reconciliation", () => {
       expect(badResult.claims[0]?.status).toBe("needs_review");
       expect(badResult.summary.submission_method).toBeNull();
     }
+  });
+
+  it.each([
+    ["Bids must not be submitted by email.", null],
+    ["Bids must not be submitted through the CanadaBuys portal.", "Email"]
+  ] as const)("resolves a supported Email claim with %s", (prohibition, expected) => {
+    const affirmative = "Bids must be submitted by email.";
+    const value = addMinimumCoverage(draft([]));
+    value.summary.submission_method = "Email";
+    value.claims = [
+      {
+        claim_id: "affirmative-email", topic: "submission method", claim_text: "Email",
+        claim_type: "source", confidence: 1, document_sha256: baseSha,
+        amendment_number: null, effect: "add", citations: [citation(baseSha, affirmative)],
+        supersedes_claim_ids: []
+      },
+      {
+        claim_id: "prohibited-channel", topic: "submission method", claim_text: prohibition,
+        claim_type: "source", confidence: 1, document_sha256: baseSha,
+        amendment_number: null, effect: "add", citations: [citation(baseSha, prohibition)],
+        supersedes_claim_ids: []
+      }
+    ];
+    const submissionDocument = {
+      name: "base.pdf",
+      sourceUrl: null,
+      index: index(baseSha, [affirmative, prohibition,
+        "The bidder must submit a signed form. A bid that fails a mandatory requirement will be non-compliant."]),
+      role: "base" as const,
+      amendmentNumber: null
+    };
+    const result = materializeAnalysis({
+      draft: value,
+      documents: [submissionDocument],
+      manifests: [manifests[0]],
+      costs: [],
+      submissionAdjudication: verifiedFixtureSubmissionAdjudication(
+        [submissionDocument],
+        (candidate) => {
+          const occurrence = candidate.occurrences[0];
+          if (!occurrence) return undefined;
+          return [{
+            evidenceText: candidate.pdf_page_1based === 1 ? affirmative : prohibition,
+            subjectScope: "whole_bid",
+            modality: candidate.pdf_page_1based === 1 ? "required" : "prohibited",
+            channel: occurrence.channel_hint
+          }];
+        },
+        { defaultOccurrenceDisposition: "other" }
+      ),
+      expiresAt: new Date("2026-09-03T00:00:00Z")
+    }).result;
+
+    expect(result.claims.find((claim) => claim.claim_id === "affirmative-email")?.status)
+      .toBe("needs_review");
+    expect(result.claims.find((claim) => claim.claim_id === "prohibited-channel")?.status)
+      .toBe("needs_review");
+    expect(result.summary.submission_method).toBe(expected);
+  });
+
+  it("lets an exact amendment delete signal veto stale base submission authority without a private amendment relation", () => {
+    const affirmative = "Bids must be submitted by email.";
+    const deletion = "Delete the submission method in its entirety.";
+    const baseDocument = {
+      name: "base.pdf", sourceUrl: null, index: index(baseSha, [affirmative]),
+      role: "base" as const, amendmentNumber: null
+    };
+    const amendmentDocument = {
+      name: "amendment-001.pdf", sourceUrl: null, index: index(amendmentSha, [deletion]),
+      role: "amendment" as const, amendmentNumber: "001"
+    };
+    const value = addMinimumCoverage(draft([]));
+    value.summary.submission_method = "Email";
+    value.claims = [{
+      claim_id: "delete-submission-method",
+      topic: "submission method",
+      claim_text: deletion,
+      claim_type: "source",
+      confidence: 1,
+      document_sha256: amendmentSha,
+      amendment_number: "001",
+      effect: "delete",
+      citations: [citation(amendmentSha, deletion)],
+      supersedes_claim_ids: []
+    }];
+    const packageManifests: DocumentManifest[] = [
+      { ...manifests[0], pages: 1 },
+      {
+        ...manifests[1],
+        source_name: "amendment-001.pdf",
+        pages: 1,
+        amendment_number: "001"
+      }
+    ];
+    const result = materializeAnalysis({
+      draft: value,
+      documents: [baseDocument, amendmentDocument],
+      manifests: packageManifests,
+      costs: [],
+      submissionAdjudication: verifiedFixtureSubmissionAdjudication(
+        [baseDocument, amendmentDocument],
+        (candidate) => candidate.role === "base" && candidate.source_window.includes(affirmative)
+          ? [{
+              evidenceText: affirmative,
+              subjectScope: "whole_bid",
+              modality: "required",
+              channel: "email"
+            }]
+          : undefined,
+        { defaultOccurrenceDisposition: "other" }
+      ),
+      expiresAt: new Date("2026-09-03T00:00:00Z")
+    }).result;
+
+    expect(result.summary.submission_method).toBeNull();
+    expect(result.blocking_unknowns).toContainEqual(expect.stringMatching(/submission method was withheld/i));
   });
 
   it.each([
@@ -797,7 +930,7 @@ describe("server-owned materialization and reconciliation", () => {
     expect(fake.claims.find((claim) => claim.claim_id === "title-Fake Corp")?.status).toBe("needs_review");
     expect(fake.summary.title).toBe("Document-only RFP analysis");
     const real = analyze("Real Contract");
-    expect(real.claims.find((claim) => claim.claim_id === "title-Real Contract")?.status).toBe("active");
+    expect(real.claims.find((claim) => claim.claim_id === "title-Real Contract")?.status).toBe("needs_review");
     expect(real.summary.title).toBe("Real Contract");
 
     const issuerDraft = addMinimumCoverage(draft([]));
@@ -856,7 +989,7 @@ describe("server-owned materialization and reconciliation", () => {
     expect(wrong.claims.find((claim) => claim.claim_id === "closing-EST")?.status).toBe("needs_review");
     expect(wrong.summary.closing_date).toBeNull();
     const correct = analyze("MDT");
-    expect(correct.claims.find((claim) => claim.claim_id === "closing-MDT")?.status).toBe("active");
+    expect(correct.claims.find((claim) => claim.claim_id === "closing-MDT")?.status).toBe("needs_review");
     expect(correct.summary.closing_date).toBe("September 15, 2026 at 14:00 MDT");
   });
 
@@ -902,9 +1035,9 @@ describe("server-owned materialization and reconciliation", () => {
       manifests: [manifests[0], { ...manifests[1], amendment_number: "001", pages: 1 }],
       costs: [], expiresAt: new Date("2026-09-03T00:00:00Z")
     }).result;
-    expect(result.requirements.find((item) => item.id === "closing")?.status).toBe("active");
+    expect(result.requirements.find((item) => item.id === "closing")?.status).toBe("needs_review");
     expect(result.requirements.find((item) => item.id === "questions-old")?.status).toBe("superseded");
-    expect(result.requirements.find((item) => item.id === "questions-new")?.status).toBe("active");
+    expect(result.requirements.find((item) => item.id === "questions-new")?.status).toBe("needs_review");
     expect(result.conflicts).toEqual([]);
   });
 
@@ -943,7 +1076,7 @@ describe("server-owned materialization and reconciliation", () => {
       manifests: [manifests[0], { ...manifests[1], amendment_number: "001", pages: 1 }],
       costs: [], expiresAt: new Date("2026-09-03T00:00:00Z")
     }).result;
-    expect(result.requirements.find((item) => item.id === "closing-old")?.status).toBe("active");
+    expect(result.requirements.find((item) => item.id === "closing-old")?.status).toBe("needs_review");
     expect(result.requirements.find((item) => item.id === "deadline-ambiguous")?.status).toBe("needs_review");
     expect(result.conflicts).toEqual([]);
   });
@@ -1472,7 +1605,7 @@ describe("server-owned materialization and reconciliation", () => {
       manifests: [manifests[0], { ...manifests[1], amendment_number: "001", pages: 1 }],
       costs: [], expiresAt: new Date("2026-09-03T00:00:00Z")
     }).result;
-    expect(result.requirements.find((item) => item.id === "closing")?.status).toBe("active");
+    expect(result.requirements.find((item) => item.id === "closing")?.status).toBe("needs_review");
     expect(result.requirements.find((item) => item.id === "fake-scope")?.status).toBe("needs_review");
   });
 
@@ -1582,7 +1715,7 @@ describe("server-owned materialization and reconciliation", () => {
       manifests: [manifests[0], { ...manifests[1], amendment_number: "001", pages: 1 }],
       costs: [], expiresAt: new Date("2026-09-03T00:00:00Z")
     }).result;
-    expect(result.requirements.find((item) => item.id === "deadline-current")?.status).toBe("active");
+    expect(result.requirements.find((item) => item.id === "deadline-current")?.status).toBe("needs_review");
     expect(result.requirements.find((item) => item.id === "deadline-fake")?.status).toBe("needs_review");
   });
 
@@ -2125,7 +2258,7 @@ describe("server-owned materialization and reconciliation", () => {
       costs: [], expiresAt: new Date("2026-09-03T00:00:00Z")
     }).result;
     expect(result.requirements.find((requirement) => requirement.id === "old-closing")?.status).toBe("superseded");
-    expect(result.requirements.find((requirement) => requirement.id === "new-closing")?.status).toBe("active");
+    expect(result.requirements.find((requirement) => requirement.id === "new-closing")?.status).toBe("needs_review");
     expect(result.risks).toEqual([]);
   });
 
@@ -2170,7 +2303,7 @@ describe("server-owned materialization and reconciliation", () => {
       costs: [], expiresAt: new Date("2026-09-03T00:00:00Z")
     }).result;
     expect(result.requirements.find((item) => item.id === "old-closing-drift")?.status).toBe("superseded");
-    expect(result.requirements.find((item) => item.id === "new-closing-drift")?.status).toBe("active");
+    expect(result.requirements.find((item) => item.id === "new-closing-drift")?.status).toBe("needs_review");
     expect(result.risks.find((risk) => risk.id === "late-bid-topic-drift")).toBeUndefined();
   });
 
@@ -2219,7 +2352,7 @@ describe("server-owned materialization and reconciliation", () => {
     expect(result.requirements.find((item) => item.id === "old-coverage")?.status).toBe("superseded");
     expect(result.requirements.find((item) => item.id === "new-coverage")?.status).toBe("active");
     expect(result.risks.find((risk) => risk.id === "old-coverage-risk")).toBeUndefined();
-    expect(result.risks.find((risk) => risk.id === "unrelated-ceiling-risk")).toBeDefined();
+    expect(result.risks.find((risk) => risk.id === "unrelated-ceiling-risk")).toBeUndefined();
   });
 
   it("reconciles one fact lineage across claims and requirements", () => {
@@ -2398,7 +2531,7 @@ describe("server-owned materialization and reconciliation", () => {
     expect(result.risks.find((risk) => risk.id === "certificate-hallucinated-action"))
       .toBeUndefined();
     expect(result.risks.find((risk) => risk.id === "ambiguous-certificate-deadline"))
-      .toBeDefined();
+      .toBeUndefined();
     expect(result.blocking_unknowns).toContain(
       "One or more risks share a superseded scalar but have ambiguous source lineage and require review."
     );
@@ -2446,7 +2579,7 @@ describe("server-owned materialization and reconciliation", () => {
     }).result;
     expect(questionResult.requirements.find((item) => item.id === "old-question-wide")?.status)
       .toBe("superseded");
-    expect(questionResult.risks.find((risk) => risk.id === "closing-risk-wide")).toBeDefined();
+    expect(questionResult.risks.find((risk) => risk.id === "closing-risk-wide")).toBeUndefined();
 
     const closingBaseQuote = "Closing date is September 1, 2026 at 14:00. " +
       "Bids received after the closing time will be rejected.";
@@ -2498,7 +2631,7 @@ describe("server-owned materialization and reconciliation", () => {
     }).result;
     expect(closingResult.requirements.find((item) => item.id === "old-time-wide")?.status)
       .toBe("superseded");
-    expect(closingResult.risks.find((risk) => risk.id === "generic-late-risk")).toBeDefined();
+    expect(closingResult.risks.find((risk) => risk.id === "generic-late-risk")).toBeUndefined();
     expect(closingResult.risks.find((risk) => risk.id === "explicit-old-time-risk")).toBeUndefined();
   });
 
@@ -2553,7 +2686,7 @@ describe("server-owned materialization and reconciliation", () => {
         costs: [], expiresAt: new Date("2026-09-03T00:00:00Z")
       }).result;
       expect(result.requirements.find((item) => item.id === "old-closing")?.status).toBe("superseded");
-      expect(result.requirements.find((item) => item.id === "new-closing")?.status).toBe("active");
+      expect(result.requirements.find((item) => item.id === "new-closing")?.status).toBe("needs_review");
       expect(result.risks).toEqual([]);
     }
   );
@@ -2797,7 +2930,7 @@ describe("server-owned materialization and reconciliation", () => {
     expect(result.requirements.find((item) => item.id === "cross-document-closing-old")?.status)
       .toBe("superseded");
     expect(result.requirements.find((item) => item.id === "cross-document-closing-new")?.status)
-      .toBe("active");
+      .toBe("needs_review");
     expect(result.risks.find((risk) => risk.id === "cross-document-stale-risk"))
       .toBeUndefined();
   });
@@ -2982,9 +3115,9 @@ describe("server-owned materialization and reconciliation", () => {
       text: claim.claim_text,
       status: claim.status
     }]))).toEqual({
-      "cover-title": { text: "Repair & Maintenance on various File Bays", status: "active" },
-      "cover-number": { text: "100022184-A", status: "active" },
-      "cover-issuer": { text: "Employment and Social Development Canada", status: "active" }
+      "cover-title": { text: "Repair & Maintenance on various File Bays", status: "needs_review" },
+      "cover-number": { text: "100022184-A", status: "needs_review" },
+      "cover-issuer": { text: "Employment and Social Development Canada", status: "needs_review" }
     });
     expect(result.summary).toMatchObject({
       title: "Repair & Maintenance on various File Bays",
@@ -3003,17 +3136,37 @@ describe("server-owned materialization and reconciliation", () => {
       amendment_number: null, effect: "add", citations: [citation(baseSha, instruction)],
       supersedes_claim_ids: []
     }];
+    const submissionDocument = {
+      name: "base.pdf",
+      sourceUrl: null,
+      index: index(baseSha, [instruction,
+        "The bidder must submit a signed form. A bid that fails a mandatory requirement will be non-compliant."]),
+      role: "base" as const,
+      amendmentNumber: null
+    };
     const result = materializeAnalysis({
       draft: value,
-      documents: [{ name: "base.pdf", sourceUrl: null,
-        index: index(baseSha, [instruction,
-          "The bidder must submit a signed form. A bid that fails a mandatory requirement will be non-compliant."]),
-        role: "base", amendmentNumber: null }],
-      manifests: [manifests[0]], costs: [], expiresAt: new Date("2026-09-03T00:00:00Z")
+      documents: [submissionDocument],
+      manifests: [manifests[0]],
+      costs: [],
+      submissionAdjudication: verifiedFixtureSubmissionAdjudication(
+        [submissionDocument],
+        (candidate) => candidate.occurrences.some((occurrence) => occurrence.channel_hint === "email")
+          ? [{
+              evidenceText: instruction,
+              subjectScope: "whole_bid",
+              modality: "required",
+              channel: "email"
+            }]
+          : undefined,
+        { defaultOccurrenceDisposition: "other" }
+      ),
+      expiresAt: new Date("2026-09-03T00:00:00Z")
     }).result;
 
-    expect(result.claims[0]).toMatchObject({ claim_id: "cover-email", status: "active" });
-    expect(result.summary.submission_method).toBe("email");
+    expect(result.claims.find((claim) => claim.claim_id === "cover-email"))
+      .toMatchObject({ status: "needs_review" });
+    expect(result.summary.submission_method).toBe("Email");
   });
 
   it("uses a sufficient verified citation subset and discloses rejected extras", () => {
@@ -3035,7 +3188,7 @@ describe("server-owned materialization and reconciliation", () => {
       manifests: [manifests[0]], costs: [], expiresAt: new Date("2026-09-03T00:00:00Z")
     }).result;
 
-    expect(result.claims[0]).toMatchObject({ claim_id: "title-with-extra", status: "active" });
+    expect(result.claims[0]).toMatchObject({ claim_id: "title-with-extra", status: "needs_review" });
     expect(result.summary.title).toBe("Real Contract");
     expect(result.quality.warnings).toContain(
       "1 model-supplied citation candidate(s) could not be independently located and were omitted."

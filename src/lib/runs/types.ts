@@ -8,6 +8,7 @@ import type {
   RunStatusResponse
 } from "@/contracts";
 import type { QuoteVerificationReceipt } from "@/lib/evidence/citations";
+import type { RecordAuthorityAudit } from "@/lib/runs/record-authority-audit";
 
 export type CleanupControlScope = "application" | "provider";
 export type CleanupReceiptStatus = "deleted" | "failed" | "unknown";
@@ -95,6 +96,7 @@ export interface RunRecord {
   costMicroUsd: number;
   reservedMicroUsd: number;
   result: AnalysisResult | null;
+  recordAuthorityAudit: RecordAuthorityAudit | null;
   error: RunFailure | null;
   workflowRunId: string | null;
   analysisDispatchClaimId: string | null;

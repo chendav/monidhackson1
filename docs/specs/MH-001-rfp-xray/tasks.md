@@ -91,7 +91,7 @@ exclude_paths: [src/app/**, src/components/**, drizzle/**, docs/agent_knowledge/
 edits_allowed: true
 acceptance: [AC-4, AC-5, AC-10]
 handoff: handoff-backend.md
-status: in_progress
+status: completed_not_accepted_revision_loop_exhausted
 ```
 
 ## QA2 Edmonton redesign review
@@ -106,7 +106,97 @@ exclude_paths: []
 edits_allowed: false
 acceptance: [AC-4, AC-5, AC-10, AC-11]
 handoff: qa_report.md
-status: pending_waiting_for_T4_handoff
+status: completed_request_changes_redesign_required
+```
+
+## T5 Submission relation ambiguity redesign
+
+```yaml
+id: T5
+owner_profile: backend
+objective: Replace surface-form completeness assumptions with a conservative unresolved-evidence ambiguity fence so parser uncertainty cannot prove a different submission channel unique.
+depends_on: [QA2]
+include_paths: [src/lib/analysis/submission-channel.ts, src/lib/analysis/source-anchors.ts, src/lib/analysis/materialize.ts, tests/unit/closed-template-recovery.test.ts, tests/unit/core-field-recovery-materialize.test.ts, tests/unit/summary-recovery.test.ts, tests/unit/materialize-reconciliation.test.ts]
+exclude_paths: [src/app/**, src/components/**, drizzle/**, docs/agent_knowledge/**]
+edits_allowed: true
+acceptance: [AC-4, AC-5, AC-10]
+handoff: handoff-backend.md
+status: completed_not_accepted_architectural_failure
+```
+
+## QA3 Submission relation redesign review
+
+```yaml
+id: QA3
+owner_profile: reviewer
+objective: Independently verify T5 publication, possibility, prohibition, and unresolved-evidence semantics plus all Edmonton regressions.
+depends_on: [T5]
+include_paths: [src/lib/analysis/**, tests/golden/official-fixture-audit.test.ts, tests/unit/closed-template-recovery.test.ts, tests/unit/core-field-recovery-materialize.test.ts, tests/unit/summary-recovery.test.ts, tests/unit/materialize-reconciliation.test.ts]
+exclude_paths: []
+edits_allowed: false
+acceptance: [AC-4, AC-5, AC-10, AC-11]
+handoff: qa_report.md
+status: completed_request_changes
+```
+
+## T6 Agent-semantic submission adjudication
+
+```yaml
+id: T6
+owner_profile: backend
+objective: Replace deterministic English relation parsing with Agent adjudication over a complete high-recall source candidate ledger while keeping citation, coverage, conflict, and publication gates deterministic.
+depends_on: [QA3]
+include_paths: [src/lib/analysis/**, src/lib/providers/**, src/lib/evidence/**, src/lib/pipeline.ts, tests/unit/**, tests/integration/**, tests/golden/**]
+exclude_paths: [src/app/page.tsx, src/components/**, src/app/globals.css, drizzle/**, docs/agent_knowledge/**]
+edits_allowed: true
+acceptance: [AC-2, AC-4, AC-5, AC-9, AC-10]
+handoff: handoff-backend.md
+status: completed_not_accepted_review_exhausted
+```
+
+## QA4 Agent-semantic review
+
+```yaml
+id: QA4
+owner_profile: reviewer
+objective: Independently verify candidate completeness, Agent adjudication, deterministic quote/page coverage, disagreement handling, cost bounds, and final publication safety.
+depends_on: [T6]
+include_paths: [src/lib/analysis/**, src/lib/providers/**, src/lib/evidence/**, tests/**]
+exclude_paths: []
+edits_allowed: false
+acceptance: [AC-2, AC-4, AC-5, AC-9, AC-10, AC-11]
+handoff: qa_report.md
+status: completed_request_changes_exhausted
+```
+
+## T7 Record-bound Agent semantic authority
+
+```yaml
+id: T7
+owner_profile: backend
+objective: Bind every model-authored public evidence record to an inline Agent submission-relevance decision and verified private relations so Draft output cannot bypass submission authority through an arbitrary collection or vocabulary.
+depends_on: [QA4]
+include_paths: [src/lib/analysis/**, src/lib/providers/**, src/lib/evidence/**, src/lib/pipeline.ts, tests/unit/**, tests/integration/**, tests/golden/**]
+exclude_paths: [src/app/page.tsx, src/components/**, src/app/globals.css, drizzle/**, docs/agent_knowledge/**]
+edits_allowed: true
+acceptance: [AC-2, AC-4, AC-5, AC-9, AC-10]
+handoff: handoff-backend.md
+status: completed_accepted
+```
+
+## QA5 Record-bound authority review
+
+```yaml
+id: QA5
+owner_profile: reviewer
+objective: Independently verify one-to-one semantic annotation for every model record, relation/citation binding, collection-independent veto, and all prior T6 regressions.
+depends_on: [T7]
+include_paths: [src/lib/analysis/**, src/lib/providers/**, src/lib/evidence/**, tests/**]
+exclude_paths: []
+edits_allowed: false
+acceptance: [AC-2, AC-4, AC-5, AC-9, AC-10, AC-11]
+handoff: qa_report.md
+status: completed_approve
 ```
 
 ## EXT-1 Production evidence and publication
@@ -115,18 +205,17 @@ status: pending_waiting_for_T4_handoff
 id: EXT-1
 owner_profile: chief
 objective: Verify the accepted build with controlled production runs, citations, cost, latency, video, contest submission, and publication evidence.
-depends_on: [QA2]
+depends_on: [QA5]
 include_paths: [docs/specs/MH-001-rfp-xray/**, videos/rfp-xray-launch/**]
 exclude_paths: [src/**, tests/**, drizzle/**]
 edits_allowed: true
 acceptance: [AC-3, AC-4, AC-5, AC-6, AC-8, AC-9, AC-10, AC-11]
 handoff: handoff.md
-status: waiting_for_QA2
+status: in_progress
 confirmed_partial_evidence:
   - Production health is HTTP 200 and reports the database, storage, Workflow, Monid, and OpenAI gates ready.
   - The last controlled Edmonton run ended partial, cost USD 1.020701, and completed app-controlled cleanup.
 open_gates:
-  - Accepted T4 implementation and independent QA2 PASS.
   - A new controlled Edmonton run that reaches READY and passes the golden facts.
   - The CER main-plus-three-amendment production campaign.
   - Independent click-through of at least 12 high-risk production citations.

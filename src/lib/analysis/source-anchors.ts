@@ -146,6 +146,307 @@ export function recoverSummarySectionAnchors(
   return recovered;
 }
 
+function singleUnamendedBaseDocument(documents: SourceAnchorDocument[]) {
+  const baseDocuments = documents.filter((document) => document.role === "base");
+  return baseDocuments.length === 1 && documents.length === 1 &&
+    baseDocuments[0].amendmentNumber === null
+    ? baseDocuments[0]
+    : null;
+}
+
+function uniqueLineIndex(lines: string[], pattern: RegExp) {
+  const matches = lines.flatMap((line, index) => pattern.test(line) ? [index] : []);
+  return matches.length === 1 ? matches[0] : null;
+}
+
+function exactCoverField(line: string, pattern: RegExp) {
+  const match = pattern.exec(line);
+  const value = match?.[1] ? displayText(match[1]) : "";
+  return value || null;
+}
+
+const COVER_LABEL_LIKE_LINE = /^[\p{L}][\p{L}\p{N}&/()' .-]{0,80}:\s*/u;
+
+/**
+ * Recover only the three closed, labelled identity fields used by the Canadian RFP
+ * cover template. The template must be unambiguous on physical page 1 and
+ * must be the only base document in an unamended package.
+ */
+export function recoverStrictCoverAnchors(
+  _draft: DraftAnalysis,
+  documents: SourceAnchorDocument[]
+): DraftAnalysis["claims"] {
+  const document = singleUnamendedBaseDocument(documents);
+  if (!document) return [];
+  const coverPages = document.index.pages.filter((page) => page.pdfPage1Based === 1);
+  if (coverPages.length !== 1) return [];
+
+  const page = coverPages[0];
+  const lines = page.text.split(/\r?\n/).map((line) => displayText(line));
+  const returnBidsIndex = uniqueLineIndex(lines, /^return bids to:\s*$/i);
+  const rfpIndex = uniqueLineIndex(lines, /^request for proposal\s*$/i);
+  const proposalToIndex = uniqueLineIndex(lines, /^proposal to:\s*\S.*$/i);
+  const offerBoundaryIndex = uniqueLineIndex(lines, /^we hereby offer\b/i);
+  const titleIndex = uniqueLineIndex(lines, /^title:\s*\S.*$/i);
+  const solicitationIndex = uniqueLineIndex(
+    lines,
+    /^solicitation no\.:\s*\S.*?\s+date:\s*.*$/i
+  );
+  if ([returnBidsIndex, rfpIndex, proposalToIndex, offerBoundaryIndex,
+    titleIndex, solicitationIndex].some((index) => index === null)) return [];
+
+  const ordered = [returnBidsIndex!, rfpIndex!, proposalToIndex!,
+    offerBoundaryIndex!, titleIndex!, solicitationIndex!];
+  if (!ordered.every((index, position) => position === 0 || ordered[position - 1] < index)) {
+    return [];
+  }
+
+  const issuerLines = lines.slice(proposalToIndex!, offerBoundaryIndex!);
+  const issuerFirst = exactCoverField(issuerLines[0], /^proposal to:\s*(.+)$/i);
+  const issuerContinuation = issuerLines.slice(1);
+  if (!issuerFirst || issuerContinuation.length > 2 || issuerContinuation.some((line) =>
+    !line || COVER_LABEL_LIKE_LINE.test(line)
+  )) return [];
+  const issuer = displayText([issuerFirst, ...issuerContinuation].join(" "));
+
+  const title = exactCoverField(lines[titleIndex!], /^title:\s*(.+)$/i);
+  const solicitationNumber = exactCoverField(
+    lines[solicitationIndex!],
+    /^solicitation no\.:\s*(.+?)\s+date:\s*.*$/i
+  );
+  if (!title || !solicitationNumber || title.length > 500 || issuer.length > 500 ||
+    solicitationNumber.length > 200 || !/^[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(solicitationNumber)) {
+    return [];
+  }
+
+  const documentPrefix = document.index.documentSha256.slice(0, 12);
+  const sourceClaim = (
+    suffix: string,
+    topic: string,
+    value: string,
+    quote: string,
+    section: string
+  ): DraftAnalysis["claims"][number] => ({
+    claim_id: `server-anchor-${documentPrefix}-cover-${suffix}`,
+    topic,
+    claim_text: value,
+    claim_type: "source",
+    confidence: 1,
+    document_sha256: document.index.documentSha256,
+    amendment_number: document.amendmentNumber,
+    effect: "add",
+    citations: [{
+      document_sha256: document.index.documentSha256,
+      chunk_id: null,
+      evidence_quote: quote,
+      section
+    }],
+    supersedes_claim_ids: []
+  });
+
+  const issuerQuote = displayText(lines.slice(proposalToIndex!, offerBoundaryIndex!).join(" "));
+  const titleQuote = displayText(lines[titleIndex!]);
+  const solicitationQuote = `Solicitation No.: ${solicitationNumber}`;
+  if ([issuerQuote, titleQuote, solicitationQuote].some((quote) => quote.length > 500)) {
+    return [];
+  }
+
+  return [
+    sourceClaim("title", "solicitation title", title, titleQuote, "Cover - Title"),
+    sourceClaim(
+      "solicitation-number",
+      "solicitation number",
+      solicitationNumber,
+      solicitationQuote,
+      "Cover - Solicitation No."
+    ),
+    sourceClaim("issuer", "issuer", issuer, issuerQuote, "Cover - Proposal To")
+  ];
+}
+
+const STRUCTURAL_SECTION_HEADING = /^\s*(\d+(?:\.\d+)*)(\.)?\s+(\S.*)$/;
+const NAMED_SECTION_BOUNDARY = /^\s*(?:part\s+\d+\b|annex\b|appendix\b)/i;
+function topLevelDottedLineIsListItem(punctuation: string | undefined, title: string) {
+  if (punctuation !== ".") return false;
+  const words = title.trim().split(/\s+/);
+  const lexicalWords = words.filter((word) => /[a-z]/i.test(word));
+  const titleLike = lexicalWords.length > 0 && lexicalWords.every((word) =>
+    /^[A-Z][A-Za-z'/-]*$/.test(word) || /^(?:and|or|of|the|to|for|in|on|with)$/i.test(word)
+  );
+  const sentenceLike = /\b(?:must|shall|will|should|may|can|is|are|was|were|has|have|requires?|submit(?:s|ted)?|send(?:s|sent)?|provide(?:s|d)?)\b/i
+    .test(title) || /[.!?;:]$/.test(title);
+  return sentenceLike && !titleLike;
+}
+
+function boundedSectionLines(
+  lines: string[],
+  headingIndex: number,
+  root: string
+): Array<{ text: string; section: string }> {
+  const body: Array<{ text: string; section: string }> = [];
+  const rootDepth = sectionDepth(root);
+  let section = root;
+  for (const rawLine of lines.slice(headingIndex + 1)) {
+    if (NAMED_SECTION_BOUNDARY.test(rawLine)) break;
+    const heading = STRUCTURAL_SECTION_HEADING.exec(rawLine);
+    if (heading) {
+      const number = heading[1];
+      if (!number.includes(".") && topLevelDottedLineIsListItem(heading[2], heading[3])) {
+        body.push({ text: displayText(heading[3]), section });
+        continue;
+      }
+      if (!number.startsWith(`${root}.`) || sectionDepth(number) <= rootDepth) break;
+      section = number;
+      continue;
+    }
+    const text = displayText(rawLine);
+    if (text) body.push({ text, section });
+  }
+  return body;
+}
+
+/**
+ * Retained as a compatibility seam for callers and historical tests. Source
+ * anchors no longer interpret English submission semantics; only the verified
+ * private Agent ledger can authorize a submission method.
+ */
+export function recoverSubmissionMethodAnchors(
+  _draft: DraftAnalysis,
+  _documents: SourceAnchorDocument[]
+): DraftAnalysis["claims"] {
+  void _draft;
+  void _documents;
+  return [];
+}
+
+interface EvaluationSentence {
+  text: string;
+  section: string;
+}
+
+const NUMBERED_BASIS_OF_SELECTION_HEADING =
+  /^\s*(\d+(?:\.\d+)+)\.?\s+basis of selection\s*$/i;
+const NON_DEFINITIVE_EVALUATION_SECTION =
+  /\b(?:if|unless|provided that|assuming|pending|subject to|proposed|draft|potential|anticipated|example|for example|for instance|illustration|hypothetical|previously|formerly|historically|prior version|used to|not|never|no longer|cannot|may|might|could|would|should)\b/i;
+const CALCULATED_SELECTION_SECTION =
+  /\b(?:formula|calculation|calculate|points? awarded|price points?|score calculation|weighted|weighting|ratio|divide(?:d)? by|multipl(?:y|ied|ier))\b/i;
+const PERCENTAGE_SELECTION_SECTION =
+  /\b(?:technical|financial|price)\b[^.!?\n]{0,100}\b\d+(?:\.\d+)?\s*(?:%|percent\b|per cent\b)|\b\d+(?:\.\d+)?\s*(?:%|percent\b|per cent\b)[^.!?\n]{0,100}\b(?:technical|financial|price)\b/i;
+
+function completeEvaluationSentences(lines: Array<{ text: string; section: string }>) {
+  const groups: Array<{ section: string; lines: string[] }> = [];
+  for (const line of lines) {
+    const current = groups.at(-1);
+    if (!current || current.section !== line.section) {
+      groups.push({ section: line.section, lines: [line.text] });
+    } else {
+      current.lines.push(line.text);
+    }
+  }
+  return groups.flatMap((group): EvaluationSentence[] => displayText(group.lines.join(" "))
+    .split(/(?<=[.!?])\s+(?=[A-Z])/u)
+    .map((text) => text.trim())
+    .filter((text) => text.length >= 24 && text.length <= 500 && /[.!?]$/.test(text))
+    .map((text) => ({ text, section: group.section })));
+}
+
+function selectionSignatures(value: string) {
+  const signatures = new Set<string>();
+  if (/\blowest evaluated (?:total )?price\b/i.test(value)) {
+    signatures.add("lowest-evaluated-price");
+  }
+  if (/\blowest (?!evaluated\b)(?:total )?price\b/i.test(value)) signatures.add("lowest-price");
+  if (/\bhighest combined rating\b/i.test(value)) signatures.add("highest-combined-rating");
+  if (/\bbest value\b/i.test(value)) signatures.add("best-value");
+  if (/\bhighest (?:technical )?score\b/i.test(value)) signatures.add("highest-score");
+  return signatures;
+}
+
+/**
+ * Recover Edmonton-style evaluation gates only from one complete, affirmative
+ * Basis of Selection section. This deliberately does not infer weights,
+ * thresholds, amendment operations, or selection formulas.
+ */
+export function recoverBasisOfSelectionEvaluationAnchors(
+  _draft: DraftAnalysis,
+  documents: SourceAnchorDocument[]
+): DraftAnalysis["evaluation"]["rules"] {
+  const document = singleUnamendedBaseDocument(documents);
+  if (!document) return [];
+
+  const candidates = document.index.pages.flatMap((page) => {
+    if (/(?:^|\n)\s*(?:table of )?contents\s*(?:\n|$)/i.test(page.text)) return [];
+    const lines = page.text.split(/\r?\n/);
+    return lines.flatMap((line, lineIndex) => {
+      const heading = NUMBERED_BASIS_OF_SELECTION_HEADING.exec(line);
+      return heading ? [{ page, lines, lineIndex, number: heading[1] }] : [];
+    });
+  });
+  if (candidates.length !== 1) return [];
+
+  const candidate = candidates[0];
+  const body = boundedSectionLines(candidate.lines, candidate.lineIndex, candidate.number);
+  const sectionText = displayText(body.map((line) => line.text).join(" "));
+  if (!sectionText || NON_DEFINITIVE_EVALUATION_SECTION.test(sectionText) ||
+    CALCULATED_SELECTION_SECTION.test(sectionText) ||
+    PERCENTAGE_SELECTION_SECTION.test(sectionText)) return [];
+
+  const signatures = selectionSignatures(sectionText);
+  if (signatures.size > 1 ||
+    (signatures.size === 1 && !signatures.has("lowest-evaluated-price"))) return [];
+  const sentences = completeEvaluationSentences(body);
+  const mandatory = sentences.filter((sentence) =>
+    /^(?:a|the) (?:bid|proposal|tender|offer) must comply with the requirements of the (?:bid solicitation|solicitation|tender) and meet all mandatory technical evaluation criteria to be declared responsive\.$/i
+      .test(sentence.text)
+  );
+  const selection = sentences.filter((sentence) =>
+    /^the responsive (?:bid|proposal|tender|offer) with the lowest evaluated (?:total )?price will be recommended for award of (?:a|the) contract\.$/i
+      .test(sentence.text)
+  );
+  const decisionSentences = sentences.filter((sentence) =>
+    /\b(?:award(?:ed|ing)?|selection|select(?:ed|ion)?|recommend(?:ed|ation)?|rank(?:ed|ing)?)\b/i
+      .test(sentence.text)
+  );
+  if (mandatory.length !== 1 || selection.length > 1 || decisionSentences.length > 1 ||
+    (selection.length === 1 && (signatures.size !== 1 || decisionSentences.length !== 1 ||
+      decisionSentences[0].text !== selection[0].text)) ||
+    (selection.length === 0 && decisionSentences.length !== 0)) return [];
+
+  const documentPrefix = document.index.documentSha256.slice(0, 12);
+  const rule = (
+    suffix: string,
+    topic: string,
+    field: DraftAnalysis["evaluation"]["rules"][number]["field"],
+    value: string,
+    sentence: EvaluationSentence
+  ): DraftAnalysis["evaluation"]["rules"][number] => ({
+    id: `server-anchor-${documentPrefix}-p${candidate.page.pdfPage1Based}-evaluation-${suffix}`,
+    topic,
+    document_sha256: document.index.documentSha256,
+    amendment_number: document.amendmentNumber,
+    effect: "add",
+    field,
+    value,
+    citations: [{
+      document_sha256: document.index.documentSha256,
+      chunk_id: null,
+      evidence_quote: sentence.text,
+      section: sentence.section
+    }]
+  });
+
+  return [
+    rule("mandatory-gate", "mandatory evaluation gate", "mandatory_gate", "true", mandatory[0]),
+    ...(selection.length === 1 ? [rule(
+      "selection-method",
+      "award selection method",
+      "selection_method",
+      "Lowest evaluated price",
+      selection[0]
+    )] : [])
+  ];
+}
+
 function clauseThroughFirstBoundary(value: string) {
   const boundedResources = /\b(?:propose|provide)\s+up to\s+\w+\s*\(\s*\d+\s*\)\s+resources?\s+and\s+provide\s+detailed\s+resumes?\s+for\s+each\b/i.exec(value);
   if (boundedResources) {

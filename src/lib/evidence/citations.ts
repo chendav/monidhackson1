@@ -36,6 +36,12 @@ export interface CitationVerification {
   receipt: QuoteVerificationReceipt;
 }
 
+export interface ExpectedPageCitationCandidate extends CitationCandidate {
+  expectedPdfPage1Based: number;
+  evidenceStartUtf16: number;
+  evidenceEndUtf16: number;
+}
+
 const MONTH_NUMBER = new Map([
   ["january", 1], ["jan", 1], ["february", 2], ["feb", 2],
   ["march", 3], ["mar", 3], ["april", 4], ["apr", 4],
@@ -344,6 +350,76 @@ export function verifyCitation(
     createdAt: now.toISOString()
   };
   return { citation, receipt };
+}
+
+/**
+ * Submission adjudication is already bound to a server-owned PDF.js page and
+ * UTF-16 offsets. It must never use the ordinary cross-page quote search or
+ * normalization repair: the authoritative page slice either matches exactly
+ * or the evidence is rejected.
+ */
+export function verifyCitationOnExpectedPage(
+  candidate: ExpectedPageCitationCandidate,
+  documents: CitationDocument[],
+  now = new Date()
+): CitationVerification {
+  const document = documents.find(
+    (item) => item.index.documentSha256 === candidate.documentSha256.toLowerCase()
+  );
+  const page = document?.index.pages.find(
+    (item) => item.pdfPage1Based === candidate.expectedPdfPage1Based
+  );
+  const quote = candidate.evidenceQuote;
+  const offsetsValid = Number.isSafeInteger(candidate.evidenceStartUtf16) &&
+    Number.isSafeInteger(candidate.evidenceEndUtf16) &&
+    candidate.evidenceStartUtf16 >= 0 &&
+    candidate.evidenceEndUtf16 > candidate.evidenceStartUtf16;
+  const exact = Boolean(page && offsetsValid &&
+    page.text.slice(candidate.evidenceStartUtf16, candidate.evidenceEndUtf16) === quote);
+  const boundedQuote = quote.slice(0, 500);
+  const citation: Citation = {
+    document_sha256: candidate.documentSha256.toLowerCase(),
+    document_name: document?.name ?? "Unknown document",
+    source_url: document?.sourceUrl ?? null,
+    pdf_page_1based: exact ? page!.pdfPage1Based : null,
+    printed_page_label: exact ? page!.printedPageLabel : null,
+    section: candidate.section?.trim() || null,
+    evidence_quote: boundedQuote || "No verifiable quote supplied.",
+    verified: exact,
+    verification_method: exact ? "exact" : "manual_required"
+  };
+  const receipt: QuoteVerificationReceipt = {
+    // Bind the receipt deterministically to the exact page slice. Ordinary
+    // citation receipts retain UUIDs; this private path must be byte-stable.
+    receiptId: sha256Hex(stableExpectedPageReceipt({
+      documentSha256: candidate.documentSha256.toLowerCase(),
+      representationSha256: document?.index.representationSha256 ?? sha256Hex("missing-document"),
+      pdfPage1Based: candidate.expectedPdfPage1Based,
+      evidenceStartUtf16: candidate.evidenceStartUtf16,
+      evidenceEndUtf16: candidate.evidenceEndUtf16,
+      evidenceQuote: quote
+    })).slice(0, 32),
+    documentSha256: candidate.documentSha256.toLowerCase(),
+    representationSha256: document?.index.representationSha256 ?? sha256Hex("missing-document"),
+    fragmentSha256: sha256Hex(quote),
+    pdfPage1Based: exact ? page!.pdfPage1Based : null,
+    method: exact ? "exact" : "manual_required",
+    verifierVersion: PAGE_INDEX_VERSION,
+    verified: exact,
+    createdAt: now.toISOString()
+  };
+  return { citation, receipt };
+}
+
+function stableExpectedPageReceipt(value: {
+  documentSha256: string;
+  representationSha256: string;
+  pdfPage1Based: number;
+  evidenceStartUtf16: number;
+  evidenceEndUtf16: number;
+  evidenceQuote: string;
+}) {
+  return JSON.stringify(value, Object.keys(value).sort());
 }
 
 export function verifyCitationBatch(

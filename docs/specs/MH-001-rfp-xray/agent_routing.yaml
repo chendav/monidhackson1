@@ -3,14 +3,14 @@ chief_profile: chief
 chief_tasks: [T1, REV-1, EXT-1]
 implementers:
   - profile: backend
-    tasks: [T2, T4]
+    tasks: [T2, T4, T5, T6, T7]
   - profile: frontend
     tasks: [T3]
 reviewer:
   profile: reviewer
   independent_from: [backend, frontend]
-  tasks: [QA1, QA2]
-current_sequence: [T4, QA2, EXT-1]
+  tasks: [QA1, QA2, QA3, QA4, QA5]
+current_sequence: [T7, QA5, EXT-1]
 parallel_groups:
   - [T1]
   - [T2, T3]
@@ -18,4 +18,8 @@ parallel_groups:
   - [REV-1]
   - [T4]
   - [QA2]
+  - [T5]
+  - [QA3]
+  - [T7]
+  - [QA5]
   - [EXT-1]

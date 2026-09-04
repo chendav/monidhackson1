@@ -163,6 +163,7 @@ export function newRunRecord(input: CreateRunRecordInput): RunRecord {
     costMicroUsd: 0,
     reservedMicroUsd: input.reservedMicroUsd,
     result: null,
+    recordAuthorityAudit: null,
     error: null,
     workflowRunId: null,
     analysisDispatchClaimId: null,

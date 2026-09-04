@@ -53,19 +53,21 @@ export function answerFromPersistedEvidence(question: string, result: AnalysisRe
     };
   }
 
+  const hasResolvedSubmissionAuthority = result.summary.submission_method !== null;
   const units: AnswerUnit[] = [
     ...result.claims
-      .filter((claim) => claim.status !== "superseded")
+      .filter((claim) => hasResolvedSubmissionAuthority && claim.status === "active")
       .map((claim) => ({ text: claim.claim_text, citations: claim.citations, weight: 1.2 })),
     ...result.requirements
-      .filter((requirement) => requirement.status !== "superseded")
+      .filter((requirement) => requirement.status === "active" &&
+        (hasResolvedSubmissionAuthority || requirement.category !== "submission"))
       .map((requirement) => ({ text: requirement.text, citations: requirement.citations, weight: 1.4 })),
-    ...result.risks.map((risk) => ({
+    ...result.risks.filter(() => hasResolvedSubmissionAuthority).map((risk) => ({
       text: `${risk.finding} ${risk.impact} ${risk.recommended_action}`,
       citations: risk.citations,
       weight: 1.1
     })),
-    ...result.conflicts.map((conflict) => ({
+    ...result.conflicts.filter(() => hasResolvedSubmissionAuthority).map((conflict) => ({
       text: `${conflict.topic}: ${conflict.candidate_values.join(" versus ")}. ${conflict.safe_answer}`,
       citations: conflict.citations,
       weight: 1.5

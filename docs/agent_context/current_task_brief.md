@@ -2,10 +2,10 @@
 
 - Task ID: MH-001
 - Title: RFP X-Ray contest MVP
-- Status: active; production is live, but the Edmonton analysis candidate is under
-  `REQUEST_CHANGES`
+- Status: active; T7 is independently accepted and the release is entering
+  migration, deployment, and controlled production validation
 - Chief owner: chief
-- Updated: 2026-09-03
+- Updated: 2026-09-04
 - Active packet: `docs/specs/MH-001-rfp-xray/`
 
 ## Outcome
@@ -49,20 +49,18 @@ cost. The product is document-only and does not search for tenders.
 
 ## Current Phase
 
-- `main` and `origin/main` are at `d0b937e8e75ae5b2ae52985f1e1a0cfc7f13a0c5`;
-  the working tree contains an uncommitted Edmonton core-field recovery delta.
-- Production at `https://rfp-xray.vercel.app` reports live health with database,
-  storage, Workflow, Monid, and OpenAI gates ready.
+- `main` and `origin/main` include governance commit `2a5f8d9`; the working tree
+  contains the uncommitted T6 Agent-semantic redesign.
+- Production at `https://rfp-xray.vercel.app` is deliberately fail-closed because
+  the old deployment's Workflow/provider attestations expired; database,
+  storage, and maintenance remain ready. Refresh after the accepted deployment.
 - The last controlled Edmonton run reached `partial`, not READY. It cost
   USD 1.020701, completed controlled cleanup, and recovered requirements,
   security facts, M1-M4, and the Annex D/E conflict, but evaluation and several
   executive fields were absent.
-- Focused official/unit checks pass 46/46, but independent review currently
-  returns `REQUEST_CHANGES` (source reviewer wording: `REVISE`) with two P1
-  submission-channel ambiguity defects and one P2 classifier-drift concern.
-- The refreshed Chief Agent rules are active. This legacy review sequence is
-  treated as having reached the three-round ceiling; the next implementation
-  must be a bounded classifier redesign, not another unstructured patch loop.
+- T7 record-bound Agent authority and its sanitized 30-day receipt audit passed
+  independent QA5 Revision 3 with `APPROVE`, P0=0/P1=0/P2=0. Root reruns passed
+  715 tests, official fixtures 3/3, production build, and Playwright 14/14.
 
 ## Owners
 
@@ -74,7 +72,7 @@ cost. The product is document-only and does not search for tenders.
 
 ## Immediate Next Action
 
-Replace the duplicated submission-channel heuristics with one shared classifier
-that distinguishes publishable evidence from possible ambiguity. Re-run focused
-and full regression gates, obtain an independent `PASS`, then deploy once and
-repeat the controlled Edmonton run before starting the CER campaign.
+Commit and push the accepted candidate, apply schema v10 migration, deploy and
+bind fresh runtime/provider attestations, then run one controlled Edmonton pilot.
+Only a READY pilot that passes golden, cleanup, cost, latency, and receipt-audit
+checks can authorize the remaining campaign.

@@ -19,9 +19,9 @@ import type {
   RunRecord
 } from "@/lib/runs/types";
 
-type RunRow = typeof runs.$inferSelect;
+export type RunRow = typeof runs.$inferSelect;
 
-function toRow(record: RunRecord): typeof runs.$inferInsert {
+export function runRecordToRow(record: RunRecord): typeof runs.$inferInsert {
   return {
     id: record.id,
     ownerId: record.ownerId,
@@ -45,6 +45,7 @@ function toRow(record: RunRecord): typeof runs.$inferInsert {
     costMicroUsd: record.costMicroUsd,
     reservedMicroUsd: record.reservedMicroUsd,
     result: record.result,
+    recordAuthorityAudit: record.recordAuthorityAudit,
     error: record.error,
     workflowRunId: record.workflowRunId,
     analysisDispatchClaimId: record.analysisDispatchClaimId,
@@ -83,7 +84,7 @@ function toRow(record: RunRecord): typeof runs.$inferInsert {
   };
 }
 
-function fromRow(row: RunRow): RunRecord {
+export function runRowToRecord(row: RunRow): RunRecord {
   return {
     id: row.id,
     ownerId: row.ownerId,
@@ -108,6 +109,7 @@ function fromRow(row: RunRow): RunRecord {
     costMicroUsd: row.costMicroUsd,
     reservedMicroUsd: row.reservedMicroUsd,
     result: row.result,
+    recordAuthorityAudit: row.recordAuthorityAudit,
     error: row.error,
     workflowRunId: row.workflowRunId,
     analysisDispatchClaimId: row.analysisDispatchClaimId,
@@ -153,16 +155,16 @@ export class NeonRunStore implements RunStore {
     const candidate = newRunRecord(input);
     const inserted = await this.db
       .insert(runs)
-      .values(toRow(candidate))
+      .values(runRecordToRow(candidate))
       .onConflictDoNothing()
       .returning();
-    if (inserted[0]) return { record: fromRow(inserted[0]), created: true };
+    if (inserted[0]) return { record: runRowToRecord(inserted[0]), created: true };
     if (input.idempotencyKey) {
       const existing = await this.db.query.runs.findFirst({
         where: and(eq(runs.ownerId, input.ownerId), eq(runs.idempotencyKey, input.idempotencyKey))
       });
       if (existing) {
-        const record = fromRow(existing);
+        const record = runRowToRecord(existing);
         if (record.requestHash !== candidate.requestHash) {
           throw new AppError(
             "ANALYSIS_INCOMPLETE",
@@ -193,7 +195,7 @@ export class NeonRunStore implements RunStore {
 
   async get(id: string): Promise<RunRecord | undefined> {
     const row = await this.db.query.runs.findFirst({ where: eq(runs.id, id) });
-    return row ? fromRow(row) : undefined;
+    return row ? runRowToRecord(row) : undefined;
   }
 
   async update(
@@ -224,10 +226,10 @@ export class NeonRunStore implements RunStore {
         : and(eq(runs.id, id), eq(runs.version, current.version));
       const [updated] = await this.db
         .update(runs)
-        .set(toRow(next))
+        .set(runRecordToRow(next))
         .where(guard)
         .returning();
-      if (updated) return fromRow(updated);
+      if (updated) return runRowToRecord(updated);
     }
     throw new AppError("ANALYSIS_INCOMPLETE", "The run was updated concurrently; retry the operation.", {
       httpStatus: 409,
@@ -257,7 +259,7 @@ export class NeonRunStore implements RunStore {
       const next = { ...mutated, version: current.version + 1 };
       const [updated] = await this.db
         .update(runs)
-        .set(toRow(next))
+        .set(runRecordToRow(next))
         .where(and(
           eq(runs.id, id),
           eq(runs.version, current.version),
@@ -265,7 +267,7 @@ export class NeonRunStore implements RunStore {
           lte(runs.processingLeaseExpiresAt, expiredAt)
         ))
         .returning();
-      if (updated) return { applied: true, record: fromRow(updated) };
+      if (updated) return { applied: true, record: runRowToRecord(updated) };
       // A heartbeat or terminal transition may have won after the stale read.
       // Re-read and return an explicit no-op rather than allowing callers to
       // infer success from fields that can legitimately be null.
@@ -305,7 +307,7 @@ export class NeonRunStore implements RunStore {
       }
       return null;
     }
-    return { record: fromRow(claimed), admissionLeaseId };
+    return { record: runRowToRecord(claimed), admissionLeaseId };
   }
 
   async claimProcessing(id: string, now = new Date(), leaseMs = PROCESSING_LEASE_MS) {
@@ -343,7 +345,7 @@ export class NeonRunStore implements RunStore {
       }
       return null;
     }
-    const record = fromRow(claimed);
+    const record = runRowToRecord(claimed);
     return { record, leaseId, fence: record.processingFence };
   }
 
@@ -367,7 +369,7 @@ export class NeonRunStore implements RunStore {
         inArray(runs.status, [...LEASED_RUN_STATUSES])
       ))
       .returning();
-    return updated ? fromRow(updated) : null;
+    return updated ? runRowToRecord(updated) : null;
   }
 
   async claimAnalysisDispatch(
@@ -400,7 +402,7 @@ export class NeonRunStore implements RunStore {
       }
       return null;
     }
-    return { record: fromRow(claimed), analysisDispatchClaimId };
+    return { record: runRowToRecord(claimed), analysisDispatchClaimId };
   }
 
   async settleAnalysisDispatch(
@@ -430,7 +432,7 @@ export class NeonRunStore implements RunStore {
         eq(runs.analysisDispatchStatus, "dispatching")
       ))
       .returning();
-    return updated ? fromRow(updated) : null;
+    return updated ? runRowToRecord(updated) : null;
   }
 
   async claimCleanupRetry(id: string, now = new Date()) {
@@ -457,7 +459,7 @@ export class NeonRunStore implements RunStore {
       }
       return null;
     }
-    return { record: fromRow(claimed), cleanupRetryClaimId };
+    return { record: runRowToRecord(claimed), cleanupRetryClaimId };
   }
 
   async settleCleanupRetryDispatch(
@@ -484,7 +486,7 @@ export class NeonRunStore implements RunStore {
         eq(runs.cleanupRetryClaimId, cleanupRetryClaimId)
       ))
       .returning();
-    return updated ? fromRow(updated) : null;
+    return updated ? runRowToRecord(updated) : null;
   }
 
   async remove(id: string): Promise<void> {
@@ -493,7 +495,7 @@ export class NeonRunStore implements RunStore {
 
   async listExpired(now = new Date()): Promise<RunRecord[]> {
     const rows = await this.db.select().from(runs).where(lte(runs.expiresAt, now));
-    return rows.map(fromRow);
+    return rows.map(runRowToRecord);
   }
 
   async listUnscheduledQueued(before: Date, limit = 20): Promise<RunRecord[]> {
@@ -507,7 +509,7 @@ export class NeonRunStore implements RunStore {
       ))
       .orderBy(asc(runs.updatedAt), asc(runs.id))
       .limit(boundedLimit);
-    return rows.map(fromRow);
+    return rows.map(runRowToRecord);
   }
 
   async listCleanupCandidates(now = new Date(), limit = 100): Promise<RunRecord[]> {
@@ -549,6 +551,6 @@ export class NeonRunStore implements RunStore {
       ))
       .orderBy(asc(runs.updatedAt), asc(runs.id))
       .limit(boundedLimit);
-    return rows.map(fromRow);
+    return rows.map(runRowToRecord);
   }
 }

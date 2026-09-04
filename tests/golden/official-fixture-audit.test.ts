@@ -3,7 +3,17 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 import type { Citation } from "@/contracts";
 import type { DraftAnalysis } from "@/lib/analysis/draft";
-import { recoverSecurityRequirementAnchors } from "@/lib/analysis/source-anchors";
+import { materializeAnalysis } from "@/lib/analysis/materialize";
+import {
+  MAX_RECORD_AUTHORITY_RECEIPT_BYTES,
+  verifyRecordAuthorities
+} from "@/lib/analysis/record-authority";
+import {
+  recoverBasisOfSelectionEvaluationAnchors,
+  recoverSecurityRequirementAnchors,
+  recoverSubmissionMethodAnchors,
+  recoverStrictCoverAnchors
+} from "@/lib/analysis/source-anchors";
 import { verifyCitation, type CitationDocument } from "@/lib/evidence/citations";
 import {
   CER_DOCUMENTS,
@@ -22,9 +32,21 @@ import {
   EDMONTON_WIDGETS
 } from "@/lib/fixtures/edmonton";
 import { buildPdfPageIndex, normalizeEvidenceText, type PdfPageIndex } from "@/lib/pdf/page-index";
+import { discoverSubmissionCandidateLedger } from "@/lib/analysis/submission-channel";
+import { getConfig } from "@/lib/config";
+import { mergeDrafts, prepareExtractionPlan } from "@/lib/providers/openai";
+import { verifiedFixtureSubmissionAdjudication } from "../helpers/submission-adjudication";
 
 const fixtureDirectory = process.env.RFP_XRAY_FIXTURE_DIR;
 const auditIt = fixtureDirectory ? it : it.skip;
+
+function modelPlanConfig() {
+  return getConfig({
+    NODE_ENV: "test",
+    OPENAI_API_KEY: "test-key",
+    SESSION_SIGNING_SECRET: "test-session-signing-secret-that-is-long-enough"
+  });
+}
 
 function allEdmontonCitations(): Citation[] {
   const result = createEdmontonSampleResult();
@@ -37,14 +59,41 @@ function allEdmontonCitations(): Citation[] {
   ];
 }
 
-function emptyDraft(): DraftAnalysis {
+function emptyDraft(records: Partial<DraftAnalysis> = {}): DraftAnalysis {
   return {
     summary: {
       title: "", solicitation_number: null, issuer: null, closing_date: null,
       overview: "", scope: [], submission_method: null, current_selection_method: null
     },
     claims: [], requirements: [], evaluation: { rules: [] }, risks: [],
-    clarification_questions: [], blocking_unknowns: []
+    clarification_questions: [], blocking_unknowns: [], ...records
+  };
+}
+
+function representativeRequirement(options: {
+  id: string;
+  topic: string;
+  category: DraftAnalysis["requirements"][number]["category"];
+  quote: string;
+  documentSha256: string;
+  amendmentNumber: string | null;
+}) {
+  return {
+    id: options.id,
+    topic: options.topic,
+    category: options.category,
+    text: options.quote,
+    evidence_needed: null,
+    consequence: null,
+    document_sha256: options.documentSha256,
+    amendment_number: options.amendmentNumber,
+    effect: "add" as const,
+    citations: [{
+      document_sha256: options.documentSha256,
+      chunk_id: null,
+      evidence_quote: options.quote,
+      section: null
+    }]
   };
 }
 
@@ -100,13 +149,205 @@ describe("optional official-PDF local audit (PDFs are never committed)", () => {
     expect(index.pages[16].normalizedText).toContain("attached at annex d");
     expect(index.pages[42].normalizedText).toContain(normalizeEvidenceText("ANNEX “ E ” - SECURITY REQUIREMENTS CHECK LIST"));
 
-    const recoveredSecurity = recoverSecurityRequirementAnchors(emptyDraft(), [{
+    const sourceDocument = {
       name: "edmonton-100022184-A.pdf",
       sourceUrl: EDMONTON_SOURCE_URL,
       index,
-      role: "base",
+      role: "base" as const,
       amendmentNumber: null
-    }]);
+    };
+    const recoveredCover = recoverStrictCoverAnchors(emptyDraft(), [sourceDocument]);
+    expect(Object.fromEntries(recoveredCover.map((claim) => [claim.topic, claim.claim_text])))
+      .toEqual({
+        "solicitation title": "Repair & Maintenance on various File Bays",
+        "solicitation number": "100022184-A",
+        issuer: "Employment and Social Development Canada"
+      });
+    expect(recoveredCover.every((claim) => claim.citations[0].evidence_quote.length <= 500))
+      .toBe(true);
+
+    const recoveredSubmission = recoverSubmissionMethodAnchors(emptyDraft(), [sourceDocument]);
+    expect(recoveredSubmission).toEqual([]);
+
+    const submissionClause = "send its bid only to the e-mail address specified on Page 1;";
+    const submissionLedger = discoverSubmissionCandidateLedger([sourceDocument]);
+    expect(submissionLedger.candidates).toHaveLength(81);
+    expect(submissionLedger.ledger_digest)
+      .toBe("4c1d63de591108e88f9c55dec04b8c1e3449cd8337e4d358add4164e762b1734");
+    expect(submissionLedger.capacity_exceeded).toBe(false);
+    const submissionAdjudication = verifiedFixtureSubmissionAdjudication(
+      [sourceDocument],
+      (candidate) => candidate.pdf_page_1based === 6 &&
+        candidate.source_window.includes(submissionClause) &&
+        candidate.occurrences.some((occurrence) => occurrence.channel_hint === "email")
+        ? [{
+            evidenceText: submissionClause,
+            subjectScope: "whole_bid",
+            modality: "required",
+            channel: "email"
+          }]
+        : undefined,
+      { defaultOccurrenceDisposition: "other" }
+    );
+    expect(submissionAdjudication).toMatchObject({
+      complete: true,
+      expected_candidate_count: 81,
+      verified_candidate_count: 81,
+      unresolved_reasons: []
+    });
+    const extractionPlan = prepareExtractionPlan([{
+      document_sha256: EDMONTON_SHA256,
+      document_name: sourceDocument.name,
+      role: "base",
+      amendment_number: null,
+      parsed_markdown: index.pages.map((page) => page.text).join("\n"),
+      evidence_chunks: index.chunks,
+      submission_ledger: submissionLedger
+    }], modelPlanConfig());
+    expect(extractionPlan.packingComplete).toBe(true);
+    expect(extractionPlan.inputs).toHaveLength(3);
+    expect(extractionPlan.inputs.every((input) =>
+      new TextEncoder().encode(input).byteLength <= 140_000
+    )).toBe(true);
+    expect(extractionPlan.bindings.flatMap((binding) => binding.ordered_candidate_ids).toSorted())
+      .toEqual(submissionLedger.candidates.map((candidate) => candidate.candidate_id).toSorted());
+    expect(extractionPlan.controlPlaneOutputUpperBoundBytes).toEqual([8617, 9553, 9907]);
+    expect(extractionPlan.controlPlaneOutputUpperBoundBytes.reduce((sum, bytes) => sum + bytes, 0))
+      .toBe(28_077);
+    expect(extractionPlan.controlPlaneOutputPreflightInputs.every((item) =>
+      (JSON.parse(item) as { record_authority: { r: unknown[] } }).record_authority.r.length === 40
+    )).toBe(true);
+    expect(Math.min(...extractionPlan.controlPlaneOutputUpperBoundBytes.map((bytes) =>
+      Math.floor(50_000 / extractionPlan.inputs.length) - bytes
+    ))).toBe(6_759);
+    expect(50_000 - extractionPlan.controlPlaneOutputUpperBoundBytes.reduce((sum, bytes) => sum + bytes, 0))
+      .toBe(21_923);
+    const emptyAuthorityReceipt = verifyRecordAuthorities({
+      batches: extractionPlan.bindings.map((binding) => ({
+        binding,
+        draft: emptyDraft(),
+        authority: { v: 1, r: [] }
+      })),
+      ledger: submissionLedger,
+      submission: submissionAdjudication,
+      documents: [sourceDocument],
+      mergedDraft: emptyDraft()
+    });
+    expect(emptyAuthorityReceipt).toMatchObject({ complete: true, package_veto: false });
+    expect(emptyAuthorityReceipt.receipt_byte_length).toBe(143);
+    expect(MAX_RECORD_AUTHORITY_RECEIPT_BYTES - emptyAuthorityReceipt.receipt_byte_length)
+      .toBe(262_001);
+    const representativeDrafts: DraftAnalysis[] = [
+      emptyDraft({ claims: [{
+        claim_id: "representative-email",
+        topic: "whole-bid submission method",
+        claim_text: submissionClause,
+        claim_type: "source",
+        confidence: 1,
+        document_sha256: EDMONTON_SHA256,
+        amendment_number: null,
+        effect: "add",
+        citations: [{
+          document_sha256: EDMONTON_SHA256,
+          chunk_id: null,
+          evidence_quote: submissionClause,
+          section: "2.1.4"
+        }],
+        supersedes_claim_ids: []
+      }] }),
+      emptyDraft({ requirements: [representativeRequirement({
+        id: "representative-selection",
+        topic: "basis of selection",
+        category: "financial",
+        quote: "The responsive bid with the lowest evaluated price will be recommended for award of\na contract.",
+        documentSha256: EDMONTON_SHA256,
+        amendmentNumber: null
+      })] }),
+      emptyDraft({ requirements: [representativeRequirement({
+        id: "representative-security",
+        topic: "contract security",
+        category: "security",
+        quote: "The Contractor must, at all times during the performance of the Contract, hold a valid Designated Organization\nScreening (DOS)",
+        documentSha256: EDMONTON_SHA256,
+        amendmentNumber: null
+      })] })
+    ];
+    const representativeReceipt = verifyRecordAuthorities({
+      batches: extractionPlan.bindings.map((binding, index) => ({
+        binding,
+        draft: representativeDrafts[index]!,
+        authority: { v: 1, r: [[index === 0 ? "c" : "q", 0, index === 0 ? "s" : "n"]] }
+      })),
+      ledger: submissionLedger,
+      submission: submissionAdjudication,
+      documents: [sourceDocument],
+      mergedDraft: mergeDrafts(representativeDrafts)
+    });
+    expect(representativeReceipt).toMatchObject({ complete: true, package_veto: false });
+    expect(representativeReceipt.receipt_byte_length).toBe(3_806);
+    expect(MAX_RECORD_AUTHORITY_RECEIPT_BYTES - representativeReceipt.receipt_byte_length)
+      .toBe(258_338);
+
+    const recoveredEvaluation = recoverBasisOfSelectionEvaluationAnchors(
+      emptyDraft(),
+      [sourceDocument]
+    );
+    expect(recoveredEvaluation.map((rule) => ({ field: rule.field, value: rule.value })))
+      .toEqual([
+        { field: "mandatory_gate", value: "true" },
+        { field: "selection_method", value: "Lowest evaluated price" }
+      ]);
+    expect(recoveredEvaluation.every((rule) =>
+      rule.citations[0].evidence_quote.length <= 500 &&
+      !/70%|30%|combined rating/i.test(rule.citations[0].evidence_quote)
+    )).toBe(true);
+
+    const materialized = materializeAnalysis({
+      draft: emptyDraft(),
+      submissionAdjudication,
+      documents: [sourceDocument],
+      manifests: [{
+        document_id: crypto.randomUUID(),
+        role: "base",
+        source_type: "url",
+        source_name: sourceDocument.name,
+        source_url: EDMONTON_SOURCE_URL,
+        sha256: EDMONTON_SHA256,
+        pages: EDMONTON_PAGES,
+        language: "en",
+        solicitation_number: "100022184-A",
+        amendment_number: null,
+        status: "active",
+        cleanup_status: "deleted"
+      }],
+      costs: [],
+      generatedAt: new Date("2026-09-03T00:00:00.000Z"),
+      expiresAt: new Date("2026-09-04T00:00:00.000Z")
+    }).result;
+    expect(materialized.summary).toMatchObject({
+      title: "Repair & Maintenance on various File Bays",
+      solicitation_number: "100022184-A",
+      issuer: "Employment and Social Development Canada",
+      submission_method: "Email",
+      current_selection_method: "Lowest evaluated price"
+    });
+    expect(materialized.evaluation).toMatchObject({
+      mandatory_gate: true,
+      rated_threshold: null,
+      technical_weight: null,
+      financial_weight: null,
+      selection_method: "Lowest evaluated price"
+    });
+    expect(materialized.evaluation.citations.map((citation) => citation.pdf_page_1based))
+      .toEqual([14, 14]);
+    expect(materialized.claims.find((claim) =>
+      claim.status === "active" && claim.claim_text === "Email"
+    )?.citations).toEqual([
+      expect.objectContaining({ verified: true, pdf_page_1based: 6, section: "2.1.4" })
+    ]);
+    expect(materialized.decision_readiness).toBe("needs_clarification");
+
+    const recoveredSecurity = recoverSecurityRequirementAnchors(emptyDraft(), [sourceDocument]);
     expect(recoveredSecurity).toHaveLength(4);
     expect(recoveredSecurity.map((requirement) => requirement.citations[0].section))
       .toEqual(["5.2.2", "6.1", "7.3.1", "7.3.1"]);
@@ -172,6 +413,117 @@ describe("optional official-PDF local audit (PDFs are never committed)", () => {
     const amendment001 = indexes.get(CER_DOCUMENTS[1].sha256)!;
     const amendment002 = indexes.get(CER_DOCUMENTS[2].sha256)!;
     const amendment003 = indexes.get(CER_DOCUMENTS[3].sha256)!;
+
+    const candidateDocuments = CER_DOCUMENTS.map((document) => ({
+      name: document.name,
+      sourceUrl: document.url,
+      index: indexes.get(document.sha256)!,
+      role: document.role,
+      amendmentNumber: document.amendment
+    }));
+    const submissionLedger = discoverSubmissionCandidateLedger(candidateDocuments);
+    expect(submissionLedger).toMatchObject({
+      ledger_digest: "c617540f1566a464037e48efa2fe16043d56ea58a5cf21191db8a937afe0adc5",
+      expected_page_count: 75,
+      covered_page_count: 75,
+      metadata_complete: true,
+      capacity_exceeded: false
+    });
+    expect(submissionLedger.candidates).toHaveLength(107);
+    const extractionPlan = prepareExtractionPlan(CER_DOCUMENTS.map((document, index) => ({
+      document_sha256: document.sha256,
+      document_name: document.name,
+      role: document.role,
+      amendment_number: document.amendment,
+      parsed_markdown: indexes.get(document.sha256)!.pages.map((page) => page.text).join("\n"),
+      evidence_chunks: indexes.get(document.sha256)!.chunks,
+      submission_ledger: index === 0 ? submissionLedger : undefined
+    })), modelPlanConfig());
+    expect(extractionPlan.packingComplete).toBe(true);
+    expect(extractionPlan.inputs).toHaveLength(5);
+    expect(extractionPlan.inputs.every((input) =>
+      new TextEncoder().encode(input).byteLength <= 140_000
+    )).toBe(true);
+    expect(extractionPlan.bindings.flatMap((binding) => binding.ordered_candidate_ids).toSorted())
+      .toEqual(submissionLedger.candidates.map((candidate) => candidate.candidate_id).toSorted());
+    expect(extractionPlan.controlPlaneOutputUpperBoundBytes).toEqual([7533, 7455, 7759, 8237, 9257]);
+    expect(extractionPlan.controlPlaneOutputUpperBoundBytes.reduce((sum, bytes) => sum + bytes, 0))
+      .toBe(40_241);
+    expect(extractionPlan.controlPlaneOutputPreflightInputs.every((item) =>
+      (JSON.parse(item) as { record_authority: { r: unknown[] } }).record_authority.r.length === 40
+    )).toBe(true);
+    expect(Math.min(...extractionPlan.controlPlaneOutputUpperBoundBytes.map((bytes) =>
+      Math.floor(50_000 / extractionPlan.inputs.length) - bytes
+    ))).toBe(743);
+    expect(50_000 - extractionPlan.controlPlaneOutputUpperBoundBytes.reduce((sum, bytes) => sum + bytes, 0))
+      .toBe(9_759);
+    const submissionAdjudication = verifiedFixtureSubmissionAdjudication(
+      candidateDocuments,
+      () => undefined,
+      { defaultOccurrenceDisposition: "other" }
+    );
+    const emptyAuthorityReceipt = verifyRecordAuthorities({
+      batches: extractionPlan.bindings.map((binding) => ({
+        binding,
+        draft: emptyDraft(),
+        authority: { v: 1, r: [] }
+      })),
+      ledger: submissionLedger,
+      submission: submissionAdjudication,
+      documents: candidateDocuments,
+      mergedDraft: emptyDraft()
+    });
+    expect(emptyAuthorityReceipt).toMatchObject({ complete: true, package_veto: false });
+    expect(emptyAuthorityReceipt.receipt_byte_length).toBe(143);
+    expect(MAX_RECORD_AUTHORITY_RECEIPT_BYTES - emptyAuthorityReceipt.receipt_byte_length)
+      .toBe(262_001);
+    const representativeQuotes = [
+      {
+        id: "representative-cer-mandatory", topic: "mandatory evaluation", category: "mandatory" as const,
+        quote: "Canada will declare any offer that fails to\nmeet all mandatory solicitation requirements non-compliant.", document: CER_DOCUMENTS[0]
+      },
+      {
+        id: "representative-cer-basis", topic: "basis replacement", category: "financial" as const,
+        quote: "Annex Basis of Payment included in this solicitation amendment cancels and supersedes the\nprevious Annex Basis of Payment identified for Request for Proposal.", document: CER_DOCUMENTS[1]
+      },
+      {
+        id: "representative-cer-revision", topic: "amendment continuity", category: "contractual" as const,
+        quote: "The referenced document is hereby revised;\nunless otherwise indicated, all other terms and\nconditions remain the same.", document: CER_DOCUMENTS[2]
+      },
+      {
+        id: "representative-cer-horizon", topic: "forecast horizon", category: "delivery" as const,
+        quote: "The CER requires the initial annual basis projections to extend to 2050 for the first contract year, with\nsubsequent contract periods potentially requiring projections to extend to 2055 or 2060.", document: CER_DOCUMENTS[3]
+      },
+      {
+        id: "representative-cer-m3", topic: "M3 compliance", category: "mandatory" as const,
+        quote: "Any requirement marked \"No\" or left blank will result in the bid being declared non-responsive.", document: CER_DOCUMENTS[3]
+      }
+    ];
+    const representativeDrafts = representativeQuotes.map((item) => emptyDraft({
+      requirements: [representativeRequirement({
+        id: item.id,
+        topic: item.topic,
+        category: item.category,
+        quote: item.quote,
+        documentSha256: item.document.sha256,
+        amendmentNumber: item.document.amendment
+      })]
+    }));
+    const representativeReceipt = verifyRecordAuthorities({
+      batches: extractionPlan.bindings.map((binding, index) => ({
+        binding,
+        draft: representativeDrafts[index]!,
+        authority: { v: 1, r: [["q", 0, "n"]] }
+      })),
+      ledger: submissionLedger,
+      submission: submissionAdjudication,
+      documents: candidateDocuments,
+      mergedDraft: mergeDrafts(representativeDrafts)
+    });
+    expect(representativeReceipt).toMatchObject({ complete: true, package_veto: false });
+    expect(representativeReceipt.receipt_byte_length).toBe(5_998);
+    expect(MAX_RECORD_AUTHORITY_RECEIPT_BYTES - representativeReceipt.receipt_byte_length)
+      .toBe(256_146);
 
     expect(base.pages[8].normalizedText).toContain("fails to meet all mandatory solicitation requirements non-compliant");
     expect(base.pages[10].normalizedText).toContain("minimum of fifty (50) points");

@@ -43,19 +43,26 @@ regression_checks:
 
 review:
   required: true
-  verdict: pending
-  pending_review_task: QA2
-  starts_after: T4 handoff exists and implementation checks are recorded
+  verdict: APPROVE
+  active_review_task: QA5
+  revision_round: 3
+  starts_after: T7 handoff exists and implementation checks are recorded
+  implementation_handoff: handoff-backend.md T7 QA5 Revision 3
+  active_failures: []
+  p0: 0
+  p1: 0
+  p2: 0
+  deployment_allowed: true
   previous_review:
-    task: legacy_core_field_delta
+    task: QA4
     verdict: REQUEST_CHANGES
-    source_verdict: REVISE
     revision_round: 3
     p0: 0
-    p1: 2
-    p2: 1
-    disposition: redesign_or_human
+    p1: 1
+    p2: 0
+    disposition: architectural_redesign
     failed_acceptance: [AC-4, AC-5, AC-11]
+    implementation_handoff: handoff-backend.md Revision 18
   rule: Missing implementation handoff or evidence cannot produce PASS.
 
 max_revision_rounds: 3
@@ -82,5 +89,5 @@ current_release_evidence:
 
 release:
   status: NOT_READY
-  next_gate: Complete T4, create its handoff, obtain QA2 PASS, deploy once, and rerun Edmonton to READY.
+  next_gate: Run root release checks, migrate and deploy the accepted build, attest it, then rerun Edmonton to READY.
   remaining_after_edmonton: CER campaign, 12-citation review, final video, contest submission, and five publications.

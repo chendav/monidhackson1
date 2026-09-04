@@ -16,6 +16,8 @@ export interface VersionedFact {
   effect: "add" | "replace" | "delete";
   citations: Citation[];
   supersedesIds?: string[];
+  /** Private T7 lineage; stripped before the public result is parsed. */
+  contributingOriginRecordKeys?: string[];
 }
 
 export interface ReconciledFact extends VersionedFact {
@@ -469,6 +471,10 @@ function mutationActionScopes(fact: VersionedFact) {
   });
 }
 
+export interface ReconciledConflict extends Conflict {
+  contributingOriginRecordKeys: string[];
+}
+
 function deadlineTupleMatchesAuthoritativeSource(fact: VersionedFact, groundedKey: string) {
   const temporal = (value: string) => [...extractAssertionTokens(value)].filter((token) =>
     /^(?:date|time|timezone|utc-offset):/.test(token)
@@ -768,11 +774,11 @@ function conflictSafeAnswer(candidates: VersionedFact[]) {
 
 export function reconcileVersionedFacts(input: VersionedFact[]): {
   facts: ReconciledFact[];
-  conflicts: Conflict[];
+  conflicts: ReconciledConflict[];
   unauthorizedMutationIds: string[];
 } {
   const result = new Map<string, ReconciledFact>();
-  const conflicts: Conflict[] = [];
+  const conflicts: ReconciledConflict[] = [];
   const unauthorizedMutationIds = new Set(input
     .filter((fact) => fact.effect !== "add" && !mutationIsSourceAuthorized(fact, input))
     .map((fact) => fact.id));
@@ -780,7 +786,7 @@ export function reconcileVersionedFacts(input: VersionedFact[]): {
   for (const unsortedFacts of groupedFacts(input).values()) {
     const facts = [...unsortedFacts].sort(compareFacts);
     let active: ReconciledFact[] = [];
-    let currentConflict: Conflict | null = null;
+    let currentConflict: ReconciledConflict | null = null;
     for (let cursor = 0; cursor < facts.length; ) {
       const stage: VersionedFact[] = [facts[cursor]];
       cursor += 1;
@@ -822,7 +828,10 @@ export function reconcileVersionedFacts(input: VersionedFact[]): {
           status: "conflicted",
           candidate_values: [...distinctValues.values()],
           safe_answer: conflictSafeAnswer(candidates),
-          citations: deduplicateCitations(candidates.flatMap((fact) => fact.citations))
+          citations: deduplicateCitations(candidates.flatMap((fact) => fact.citations)),
+          contributingOriginRecordKeys: [...new Set(candidates.flatMap((fact) =>
+            fact.contributingOriginRecordKeys ?? []
+          ))]
         };
       } else {
         for (const fact of candidates) {
@@ -854,7 +863,10 @@ export function reconcileVersionedFacts(input: VersionedFact[]): {
         status: "conflicted",
         candidate_values: [...distinctValues.values()],
         safe_answer: conflictSafeAnswer(active),
-        citations: deduplicateCitations(active.flatMap((fact) => fact.citations))
+        citations: deduplicateCitations(active.flatMap((fact) => fact.citations)),
+        contributingOriginRecordKeys: [...new Set(active.flatMap((fact) =>
+          fact.contributingOriginRecordKeys ?? []
+        ))]
       };
       active = active.map((fact) => ({ ...fact, status: "conflicted" }));
     }

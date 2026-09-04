@@ -64,6 +64,13 @@
       "when": 1788393608000,
       "tag": "0008_cleanup_retry_dedupe",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1788393609000,
+      "tag": "0009_record_authority_audit",
+      "breakpoints": true
     }
   ]
 }

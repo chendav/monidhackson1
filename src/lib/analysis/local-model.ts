@@ -1,4 +1,9 @@
 import type { DraftAnalysis } from "@/lib/analysis/draft";
+import {
+  discoverSubmissionCandidateLedger,
+  unresolvedSubmissionAdjudication
+} from "@/lib/analysis/submission-channel";
+import { unresolvedRecordAuthority } from "@/lib/analysis/record-authority";
 import type {
   AnalysisModel,
   ExtractionCallResult,
@@ -98,6 +103,12 @@ export class LocalDeterministicModel implements AnalysisModel {
     };
     return {
       analysis: draft,
+      submissionAdjudication: unresolvedSubmissionAdjudication(
+        documents.find((document) => document.submission_ledger)?.submission_ledger ??
+          discoverSubmissionCandidateLedger([]),
+        "semantic_uncertainty"
+      ),
+      recordAuthority: unresolvedRecordAuthority("local_model"),
       latencyMs: Math.round(performance.now() - started),
       responseId: "local-deterministic",
       inputTokens: null,
