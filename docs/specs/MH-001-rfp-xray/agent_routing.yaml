@@ -1,14 +1,21 @@
 task_id: MH-001
 chief_profile: chief
+chief_tasks: [T1, REV-1, EXT-1]
 implementers:
   - profile: backend
-    tasks: [T2]
+    tasks: [T2, T4]
   - profile: frontend
     tasks: [T3]
 reviewer:
   profile: reviewer
   independent_from: [backend, frontend]
+  tasks: [QA1, QA2]
+current_sequence: [T4, QA2, EXT-1]
 parallel_groups:
   - [T1]
   - [T2, T3]
   - [QA1]
+  - [REV-1]
+  - [T4]
+  - [QA2]
+  - [EXT-1]

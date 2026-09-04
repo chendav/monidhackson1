@@ -4,6 +4,8 @@ Updated: 2026-09-03
 
 | ID | Fragile behavior | Required check | Last result |
 |---|---|---|---|
+| QR-56 | A possible alternate whole-bid channel is dropped because prose is permissive, deadline-qualified, or conditionally rejected | Shared submission-channel classifier tests plus source-anchor and materialization collision tests | open: focused legacy suite passes 46/46, but Reviewer found missing `may`, `not later than`, and conditional-rejection ambiguity cases |
+| QR-57 | Reviewer output or revision control falls back to legacy free-form labels and unlimited loops | Validate task packet fields, exact verdict vocabulary, round counter, and exhausted-loop disposition | pass: bootstrap active, packet/YAML structure valid, and independent governance review PASS with P0/P1/P2=0 |
 | QR-1 | Edmonton PDF has 55 physical pages although the printed body ends at 47 | Golden page/form audit test | pass: 55 pages, 221 fields, 231 widgets |
 | QR-2 | M3 means up to three resources, not exactly three | Edmonton mandatory golden test | pass |
 | QR-3 | Blank pricing placeholders are unknown, never zero | Edmonton pricing golden test | pass for p40-p42 |
