@@ -4,9 +4,10 @@ Updated: 2026-09-04
 
 ## Confirmed
 
-- The repository is on `main`; `HEAD` and `origin/main` are commit `885404f`.
+- The repository is on `main`; `HEAD` and `origin/main` are commit
+  `40f425c596a1a91c216d49178ff61e065334b676`.
 - The public application is `https://rfp-xray.vercel.app`, deployment
-  `dpl_7wWdF8MR2XfzV2EebDLWTPN1AfGn`. Schema v10 is migrated and fresh runtime
+  `dpl_563oYhacTDPjn4XSSB3vT6DLF7zx`. Schema v10 is migrated and fresh runtime
   and provider attestations make health report `status=ok`, `mode=live`.
 - Production compute is Vercel Web/API/Workflow; durable application state is
   Neon; Railway provides private S3-compatible temporary storage and one
@@ -47,6 +48,12 @@ Updated: 2026-09-04
   Email. It had 84 records, four rejected citations, and an 88865-byte v2
   receipt. T9 makes the complete all-page ledger authoritative, adds v3 bounded
   diagnostic counters, and passed independent QA7 with P0=0/P1=0/P2=0.
+- The T9 production run reached `ready` with cleanup but failed the core gate
+  only because submission method remained null. Its v3 audit proves one global
+  114-record receipt failure while every package submission-veto counter is
+  zero. Static tracing proves that failure cannot null Email; the independent
+  submission adjudication was also incomplete or unresolved. V3 did not retain
+  either subsystem's bounded initiating reason, so guessing is not evidence.
 - Root `AGENTS.md`, Chief governance, role catalog, context bundles, knowledge
   policy, and reusable task templates match the refreshed global
   `chief-agent-orchestration` assets. Bootstrap and active validation pass.
@@ -65,8 +72,11 @@ Updated: 2026-09-04
 
 ## Unknown
 
-- Whether T8 and the next Edmonton run will reach READY with all golden executive and
-  evaluation fields at acceptable cost and latency.
+- Which exact receipt-level reason and submission-adjudication reason occurred
+  in the T9 provider response; the private response was correctly not retained
+  and v3 omitted these bounded reason counters.
+- Whether the next reviewed Edmonton run will reach READY with all golden
+  executive and evaluation fields at acceptable cost and latency.
 - Whether the full CER main-plus-three-amendment campaign passes every replacement
   and conflict requirement in production.
 - Final 12-citation production review, 90-second video, contest submission, and

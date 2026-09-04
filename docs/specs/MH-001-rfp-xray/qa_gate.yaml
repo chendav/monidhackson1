@@ -43,16 +43,18 @@ regression_checks:
 
 review:
   required: true
-  verdict: APPROVE
-  active_review_task: QA7
+  verdict: BLOCKED
+  active_review_task: QA8
   revision_round: 0
-  starts_after: T9 handoff exists and implementation checks are recorded
-  implementation_handoff: handoff-backend.md T9 Implementation — Source-Ledger Package Authority
-  active_failures: []
+  starts_after: T10 handoff exists and implementation checks are recorded
+  implementation_handoff: pending T10 section in handoff-backend.md
+  active_failures:
+    - T9 production did not retain the initiating submission-adjudication reason.
+    - T9 production private delivery allowed a globally incomplete record receipt.
   p0: 0
-  p1: 0
+  p1: 2
   p2: 0
-  deployment_allowed: true
+  deployment_allowed: false
   previous_review:
     task: QA4
     verdict: REQUEST_CHANGES
@@ -72,8 +74,8 @@ governance_may_change_automatically: false
 
 current_release_evidence:
   observed_at: 2026-09-04
-  deployed_commit: fc2adadae97111cee2d5640c9a1d4549fd79e428
-  deployment_id: dpl_H92p52THaTe2gWan16sYuByqhRbX
+  deployed_commit: 40f425c596a1a91c216d49178ff61e065334b676
+  deployment_id: dpl_563oYhacTDPjn4XSSB3vT6DLF7zx
   public_url: https://rfp-xray.vercel.app
   health:
     http_status: 200
@@ -83,12 +85,12 @@ current_release_evidence:
   last_controlled_edmonton_run:
     result: ready_but_core_accuracy_failed
     actual_cost_usd: 0.0036
-    estimated_cost_usd: 1.085495
+    estimated_cost_usd: 1.109656
     app_controlled_cleanup: confirmed
-    limitation: 4 rejected model citations or a remaining source-ledger condition made authority incomplete and withheld Email; v2 lacked reason counters.
+    limitation: v3 proves one global record-receipt failure plus independently unresolved submission adjudication, but did not retain either initiating bounded reason.
   evidence_boundary: Health and terminal READY do not override the failed core accuracy gate.
 
 release:
   status: NOT_READY
-  next_gate: Root-recheck and deploy QA7-approved T9, attest it, then run one final controlled Edmonton pilot.
+  next_gate: Complete T10 falsification evidence and QA8 before another deployment or paid Edmonton pilot.
   remaining_after_edmonton: CER campaign, 12-citation review, final video, contest submission, and five publications.

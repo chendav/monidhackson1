@@ -153,3 +153,59 @@ bad `n` citations. It proves 25 discarded records, zero package veto, retained
 Email plus recovered title/M1, null closing date, no discarded lineage, and
 `not_found` Q&A. A companion four-collection fixture and explicit counterexample
 matrix cover every global-veto condition above.
+
+## T10 Addendum — Three Independent Delivery Contracts
+
+The T9 production run falsified the assumption that record-receipt diagnostics
+could explain package submission resolution. Its 114-record v3 receipt was
+globally incomplete and the audit attributed every discarded record to
+`receipt_integrity`, while all submission-veto counters were zero. Static
+tracing proves that this receipt state cannot itself null Email. The independent
+source-ledger adjudication was also incomplete or unresolved, but v3 persisted
+neither subsystem's initiating bounded reason.
+
+The accepted minimum model has three non-substitutable contracts:
+
+1. `ExtractionDelivery` proves that each provider response parsed under its
+   exact batch schema and cost/deadline commitment.
+2. `RecordPublicationAuthority` binds relevance directly to each emitted
+   private record and controls only that record's publication and lineage.
+3. `SourceLedgerAdjudication` owns complete all-page candidate coverage,
+   relation consistency, unique channel resolution, and decisive citation.
+
+Provider-private submission wire v2 uses a schema generated from each actual
+batch. The server-signed batch and ledger digests are literals. Every candidate
+is a required strict object key whose value is its bounded relation array; the
+server supplies immutable document/page/candidate metadata rather than asking
+the model to echo it. Missing, duplicate, or unknown candidates therefore fail
+schema parsing. Existing offset, confidence, overlap, prompt-taint, and
+unfamiliar-channel fail-closed checks remain authoritative. If strict dynamic
+object schemas fail the local formatter or budget experiment, the hypothesis is
+rejected rather than weakened silently.
+
+Record relevance moves inline into every private Claim, Requirement, Risk, and
+Evaluation record. It is required by Structured Outputs and stripped before
+the public Draft is built. This removes positional sidecar loss and the
+arbitrary 40-tuple delivery boundary without adding a vocabulary heuristic.
+Receipt v3 may remain the record-publication representation if it can faithfully
+seal the inline classifications.
+
+A separate versioned, operator-only submission audit persists only fixed enums,
+counts, booleans, and bounded per-batch status. It records expected/verified
+candidate, fragment, page, and batch counts, resolution status, and every fixed
+unresolved-reason count. It stores no source text, quote, candidate ID, page
+number, offset, URL, model output, or raw run identifier. Historical absence is
+`not_recorded`, never inferred success.
+
+The smallest no-cost falsification experiment covers: complete Edmonton fixture
+to unique Email; missing/extra candidate keys and wrong literal digests failing
+schema parse; semantic offset/confidence/overlap failures reaching their exact
+audit counters; unfamiliar SecureDrop remaining unresolved; corrupt record
+authority with complete Email still publishing Email; complete records with
+incomplete ledger withholding Email; redaction allowlists; provider call count,
+token preflight, reservation, and deadline bounds remaining unchanged.
+
+Chief disposition: ACCEPT. No deployment or paid run is authorized before this
+experiment passes and independent QA8 returns `PASS` with P0=0 and P1=0. The
+migration is private-contract and nullable-audit only; rollback is the prior app
+commit plus retention of any additive nullable database field.

@@ -2,8 +2,8 @@
 
 - Task ID: MH-001
 - Title: RFP X-Ray contest MVP
-- Status: active; T7 is independently accepted and the release is entering
-  migration, deployment, and controlled production validation
+- Status: active; T9 is independently accepted and deployed, while T10 is in
+  Reframing after the third controlled Edmonton production gate failed
 - Chief owner: chief
 - Updated: 2026-09-04
 - Active packet: `docs/specs/MH-001-rfp-xray/`
@@ -49,8 +49,9 @@ cost. The product is document-only and does not search for tenders.
 
 ## Current Phase
 
-- `main` and `origin/main` are commit `885404f`; production deployment
-  `dpl_7wWdF8MR2XfzV2EebDLWTPN1AfGn` is live with schema v10 and fresh runtime
+- `main` and `origin/main` are commit
+  `40f425c596a1a91c216d49178ff61e065334b676`; production deployment
+  `dpl_563oYhacTDPjn4XSSB3vT6DLF7zx` is live with schema v10 and fresh runtime
   and provider attestations.
 - The last controlled Edmonton run reached `partial`, not READY. It cost
   USD 1.020701, completed controlled cleanup, and recovered requirements,
@@ -70,6 +71,12 @@ cost. The product is document-only and does not search for tenders.
   rejected citations and a healthy 88865-byte receipt. T9 moves package safety
   to the complete all-page ledger, adds v3 diagnostic counters, and passed QA7
   with `APPROVE`, P0=0/P1=0/P2=0. Redeployment is authorized.
+- The T9 production run reached `ready`, confirmed cleanup, and preserved every
+  Edmonton golden other than submission method. Its 114-record v3 receipt was
+  globally incomplete at 139271/262144 bytes. Static tracing proves that record
+  receipt failure cannot itself null Email; the independent source-ledger
+  adjudication was also incomplete or unresolved. V3 retained neither bounded
+  initiating reason, so no further paid run is authorized before T10 and QA8.
 
 ## Owners
 
@@ -81,6 +88,6 @@ cost. The product is document-only and does not search for tenders.
 
 ## Immediate Next Action
 
-Root-recheck, commit and deploy QA7-approved T9, refresh exact-deployment
-attestations, then run one final controlled Edmonton pilot. Only a full pass can
-authorize the remaining campaign.
+Complete and review the T10 falsification experiment: inline record relevance,
+batch-bound exact submission coverage, and redacted v4 diagnostics. Only after
+QA8 approval may Chief deploy and run one controlled Edmonton pilot.
