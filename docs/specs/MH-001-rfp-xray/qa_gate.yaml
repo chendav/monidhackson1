@@ -44,10 +44,10 @@ regression_checks:
 review:
   required: true
   verdict: PASS
-  active_review_task: QA13
-  revision_round: 1
-  starts_after: T15 implementation handoff independently reviewed
-  implementation_handoff: handoff-backend.md T15 Implementation — Protected work-conserving output balance
+  active_review_task: QA14
+  revision_round: 2
+  starts_after: T16 Revision 2 integration-fixture handoff independently reviewed
+  implementation_handoff: handoff-backend.md T16 Revision 2 — Pipeline authority-audit fixture migration
   active_failures: []
   p0: 0
   p1: 0
@@ -72,23 +72,26 @@ governance_may_change_automatically: false
 
 current_release_evidence:
   observed_at: 2026-09-04
-  deployed_commit: 6916da8b504ff064d721661b89e7dc1d2afb18d0
-  deployment_id: dpl_8tXppF1sZrqfZMN9czN1C7tRuo9M
+  deployed_commit: aa8d10d7d3930eb335734ee5fef7a5052d590806
+  deployment_id: dpl_Fc6KfgMNHyYQ6bmv1fTYyZ5vJ1v3
   public_url: https://rfp-xray.vercel.app
   health:
     http_status: 200
     status: ok
     mode: live
     dependencies: ready
-  last_controlled_edmonton_run:
-    result: golden_pass_with_noncritical_needs_review
-    actual_cost_usd: 0.0036
-    estimated_cost_usd: 1.080240
+  last_controlled_cer_run:
+    result: partial
+    conservative_total_usd: 1.219916
+    elapsed_ms: 250565
     app_controlled_cleanup: confirmed
-    limitation: All seven declared Edmonton golden checks pass, but submission method and closing date remain explicitly withheld for review.
-  evidence_boundary: The legacy extra gate requiring Email failed; no claim is made that submission method or closing date resolved.
+    model_records: 190
+    verified_model_records: 32
+    source_unlocated: 127
+    limitation: All four Monid parses and five OpenAI extraction batches completed, but evaluation, amendment replacement, and conflict evidence did not survive the physical-source authority gate.
+  evidence_boundary: The run proves provider completion, bounded cost, and cleanup only; it does not prove CER analysis completeness or READY.
 
 release:
   status: NOT_READY
-  next_gate: Commit and deploy the accepted T15 candidate, refresh exact-deployment attestations, verify health, then run the saved CER package once.
+  next_gate: Commit and deploy the accepted T16 candidate, refresh exact runtime/provider attestations and health, then run the saved CER package once.
   remaining_after_edmonton: CER campaign, 12-citation review, final video, contest submission, and five publications.

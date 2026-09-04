@@ -2,13 +2,24 @@
 
 - Task ID: MH-001
 - Title: RFP X-Ray contest MVP
-- Status: active; T14 is deployed and attested. The controlled CER retry passed
-  all four Monid parses but stopped on the first OpenAI extraction batch with
-  `incomplete_max_output`. T15 implementation and saved-fixture replay are
-  complete, but independent QA13 returned `REQUEST_CHANGES` with one P1. T15
-  Revision 1 passed independent QA13 with P0=0/P1=0/P2=0. The one release-
-  candidate full check/build/browser gate passed. Paid work remains prohibited
-  until the exact build is committed, deployed, and freshly attested.
+- Status: active; T15 commit `aa8d10d7d3930eb335734ee5fef7a5052d590806`
+  is deployed, freshly attested, and proved all five CER extraction batches can
+  complete within the unchanged provider budget. The retained production run
+  ended `partial`: 190 model records were received, but record authority
+  discarded 158, including 127 `source_unlocated`; the independent submission
+  ledger verified 95/116 candidates and left 18 `semantic_uncertainty` plus
+  three `ownership_mismatch`. T16 is a saved-artifact-only source-binding
+  reframe. QA14 returned `REQUEST_CHANGES`, P0=0/P1=2/P2=1: unrestricted
+  NFKC and loose pipe stripping can create false physical bindings, and v2
+  authority does not re-resolve selector provenance after receipt mutation.
+  T16 Revision 1 closed those findings and passed independent QA14 Revision 1
+  with P0=0/P1=0/P2=0. The single release-candidate full check then found one
+  stale integration fixture that still authors a legacy v1 authority envelope
+  while expecting v2 publication. T16 Revision 2 migrated that fixture and
+  passed independent QA14 Revision 2 with P0=0/P1=0/P2=0. The resumed release-
+  candidate gate passed 777 tests, production build, and Playwright 14/14 with
+  two credentialed storage tests skipped. Commit, exact deployment,
+  attestations, health, and one controlled CER proof remain.
 - Chief owner: chief
 - Updated: 2026-09-04
 - Active packet: `docs/specs/MH-001-rfp-xray/`
@@ -97,9 +108,10 @@ cost. The product is document-only and does not search for tenders.
 
 ## Immediate Next Action
 
-Commit the accepted T15 candidate, deploy that exact commit, refresh the runtime
-and provider attestations, verify public health, then run the saved CER package
-once. Do not reparse Edmonton or reopen submission analysis.
+Commit the accepted T16 candidate, deploy that exact commit, refresh runtime and
+provider attestations, verify public health, then perform one controlled CER
+main-plus-three-amendment proof from saved local PDFs. Do not rerun Edmonton or
+repeat CER if the result is partial; retain and diagnose the result instead.
 
 ## Verification Cadence
 

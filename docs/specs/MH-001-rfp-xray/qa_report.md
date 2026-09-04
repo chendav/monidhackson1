@@ -688,3 +688,199 @@ browser test, network/provider call, paid call, deployment, commit, or push was
 performed. QA13 Revision 1 permits the ordinary Chief release-candidate gate;
 it does not by itself prove production CER completion or overall release
 readiness.
+
+## QA14 — T16 physical-page source binding
+
+```yaml
+verdict: REQUEST_CHANGES
+revision_round: 0
+p0: 0
+p1: 2
+p2: 1
+deployment_allowed: false
+reviewed_base: aa8d10d7d3930eb335734ee5fef7a5052d590806
+```
+
+### P1_QA14_ALIGNMENT_NORMALIZES_SEMANTIC_CONTENT
+
+The source-map transform is broader than the accepted enumerated,
+provenance-preserving representation allowlist. In
+`src/lib/analysis/record-authority.ts:532-577`, every character outside the
+small explicit map is normalized with unrestricted `NFKC`, and any line with
+two pipes has all pipes removed. Independent in-memory probes against the real
+`buildDocumentSourceMap` and `resolveSemanticSpan` reproduced both unsafe
+bindings:
+
+- Monid `The minimum is 10² units.` bound successfully to PDF.js
+  `The minimum is 102 units.` and returned the latter as authoritative public
+  evidence.
+- Monid `The bidder must use A || B.` bound successfully to PDF.js
+  `The bidder must use A B.` because a non-table logical operator was treated
+  as Markdown table layout.
+
+Both cases convert semantically different source text into an exact physical
+quote with authority, contrary to the T16 gate requiring only enumerated
+representation artifacts and rejection of unmatched substantive tokens
+(`reframing_review.md:476-484`). Minimum acceptance: replace blanket NFKC with
+an explicit reviewed compatibility-glyph mapping, recognize table delimiters
+only in structurally validated Markdown table rows, and add fail-closed
+regressions for these exact two counterexamples while preserving the existing
+ligature/table/whitespace positives.
+
+### P1_QA14_SOURCE_BINDING_IS_NOT_REVERIFIED
+
+`verifyRecordAuthorities` validates that a fragment ID is listed and that the
+physical PDF slice/hash matches the public citation, but it has no source map
+and never compares `source_representation_sha256` or selector coordinates to
+the actual model-visible fragment (`src/lib/analysis/record-authority.ts:830-837,
+903-925`). A real verifier probe built a valid v2 envelope and then separately
+mutated the source representation hash to 64 zeroes and the selector range to
+`[999,1000)`. Both mutated envelopes still returned
+`source_binding=exact_bound`, `publication=verified`, and the same canonical
+record digest. The existing helper itself supplies an arbitrary source hash
+(`tests/unit/record-authority.test.ts:184-197`), while the only mutation test
+changes the page-text hash (`tests/unit/record-authority.test.ts:1725-1769`).
+
+This falsifies the handoff claim that record authority re-verifies the source
+fragment and selector offsets (`handoff-backend.md:3357-3360`). Minimum
+acceptance: make authority verification consume the exact ephemeral source map
+or equivalent authenticated server-owned binding, recompute the selector-to-
+PDF mapping, and fail closed when the fragment representation hash, selector
+range, alignment version, or resolved physical span differs. Add independent
+mutations for each source-side field.
+
+### P2_QA14_CANONICAL_GATE_STILL_NAMES_QA13
+
+`qa_gate.yaml` still records `active_review_task: QA13`, a PASS verdict, and
+`deployment_allowed: true` even though `tasks.md` has T16 handed off and QA14
+queued. This does not change the two product findings, but the Chief must
+advance the canonical gate to QA14 and record this verdict before any revision
+or deployment decision.
+
+### Independent command evidence
+
+- `pnpm exec vitest run tests/unit/record-authority.test.ts tests/unit/openai-adapter.test.ts --reporter=dot`:
+  PASS, 2 files / 98 tests.
+- With `RFP_XRAY_FIXTURE_DIR=D:\monidhackson\.data\official-fixtures`,
+  `pnpm exec vitest run tests/golden/official-fixture-audit.test.ts -t "verifies every CER" --reporter=dot`:
+  PASS, 1 selected test / 2 skipped, with the pre-existing non-fatal PDF.js
+  `TT: undefined function: 21` warnings.
+- Two `pnpm exec tsx -` read-only adversarial probes reproduced the unsafe
+  normalization bindings and source-binding mutation acceptance described
+  above.
+- `git diff --check`: PASS except Git's LF-to-CRLF notices. Scoped secret scan
+  found only documented secret names and synthetic `test-key` fixtures, no
+  credential value. The implementation diff remains confined to the declared
+  source/provider/tests/docs scope; no public API, UI, database, migration, or
+  deployment file changed.
+
+Per the QA14 cadence, no full suite, build, Playwright, network/provider/paid
+call, deployment, database action, commit, push, or Edmonton reparse was run.
+The P1 findings block deployment.
+
+## QA14 Revision 1 — Enumerated alignment and source re-resolution
+
+```yaml
+verdict: PASS
+revision_round: 1
+p0: 0
+p1: 0
+p2: 0
+deployment_allowed: true
+reviewed_base: aa8d10d7d3930eb335734ee5fef7a5052d590806
+```
+
+The failure-scoped delta closes all three QA14 findings. Alignment now uses an
+explicit presentation-glyph map instead of unrestricted NFKC
+(`src/lib/analysis/record-authority.ts:534-540`), and pipe removal requires a
+non-empty header followed immediately by a same-width Markdown delimiter row
+and applies only to the validated contiguous table
+(`src/lib/analysis/record-authority.ts:542-581`). Independent calls to the real
+source-map resolver returned `null` for both exact prior counterexamples:
+Monid `The minimum is 10² units.` against PDF.js
+`The minimum is 102 units.`, and Monid `The bidder must use A || B.` against
+PDF.js `The bidder must use A B.`. Positive controls still mapped repeated
+whitespace/newlines, the allowlisted `ﬁ`/`fi` presentation difference, and a
+validated Markdown table, returning the byte-exact raw PDF.js slice.
+
+Every v2 batch now carries its server-owned ephemeral source map. Authority
+re-resolves the issued fragment and selector and requires canonical equality of
+the complete reconstructed binding before publication
+(`src/lib/analysis/record-authority.ts:853-860,936-960`; production wiring at
+`src/lib/providers/openai.ts:1419-1424`). A valid control published as
+`exact_bound/verified`. Independent mutations of
+`source_representation_sha256`, selector range, alignment version,
+`evidence_start_utf16`, and `evidence_end_utf16` each returned
+`unlocated/discarded` with `invalid_private_source_binding`. The provider schema
+also replaces the generic fragment pattern with an enum of the exact fragment
+IDs issued for the batch (`src/lib/providers/openai.ts:306-324`); the rerun
+regression rejects a different valid-looking 32-hex ID.
+
+Independent verification:
+
+- `pnpm exec vitest run tests/unit/record-authority.test.ts tests/unit/openai-adapter.test.ts --reporter=dot`:
+  PASS, 2 files / 99 tests. This covers the prior false bindings, positive
+  whitespace/table/Unicode controls, all four record collections, dynamic
+  fragment enum, page/core authority, legacy rejection, mutation fences, and
+  the existing T15 allocator/cost/call/retry/deadline regressions.
+- With `RFP_XRAY_FIXTURE_DIR=D:\monidhackson\.data\official-fixtures`,
+  `pnpm exec vitest run tests/golden/official-fixture-audit.test.ts -t "verifies every CER" --reporter=dot`:
+  PASS, 1 selected test / 2 skipped, with only the pre-existing non-fatal PDF.js
+  `TT: undefined function: 21` warnings.
+- Two `pnpm exec tsx -` read-only probes independently exercised the exact
+  alignment positives/negatives and all five binding mutations above.
+- `git diff --check`: PASS except workspace LF-to-CRLF notices. `src/lib/config.ts`
+  has no delta; static inspection found no new parse call, retry, deadline, or
+  cost-cap path. The dynamic format remains included in the existing exact
+  preflight and saved CER capacity gate.
+
+No implementation/test file, provider/network/paid call, full suite, build,
+Playwright run, deployment, database action, commit, push, or Edmonton reparse
+was performed by the Reviewer. QA14 Revision 1 permits the ordinary Chief
+release-candidate gate; it does not prove production Monid-to-PDF.js transform
+coverage or authorize a paid run by itself.
+
+## QA14 Revision 2 — Pipeline audit fixture migration
+
+```yaml
+verdict: PASS
+revision_round: 2
+p0: 0
+p1: 0
+p2: 0
+deployment_allowed: true
+reviewed_base: aa8d10d7d3930eb335734ee5fef7a5052d590806
+```
+
+The migrated integration fixture exercises the production-shaped v2 authority
+chain rather than forging a physical receipt. It builds an ephemeral
+`DocumentSourceMap` from the exact model-visible fixture text and PDF.js
+documents, derives each selector from that issued fragment, calls
+`resolveSemanticSpan`, copies only the resolver-produced complete binding, and
+passes the same source map to `verifyRecordAuthorities`
+(`tests/integration/record-authority-audit.test.ts:70-166`). Arbitrary
+source-side fields therefore cannot be authored by the fixture and survive the
+Revision-1 verifier; the independently rerun focused mutation fences remain
+green.
+
+Before the positive v2 path, the integration test submits the same records as a
+legacy v1 authority envelope and asserts that every nonempty record is
+`discarded` with `legacy_unbound_citation`
+(`tests/integration/record-authority-audit.test.ts:118-137`). The v2 path then
+produces a nonempty, integrity-complete v4 sanitized audit which remains after
+24-hour result expiry and is removed with the existing 30-day audit-row expiry.
+
+Independent commands:
+
+- `pnpm exec vitest run tests/integration/record-authority-audit.test.ts --reporter=dot`:
+  PASS, 1 file / 2 tests.
+- `pnpm exec vitest run tests/unit/record-authority.test.ts tests/unit/openai-adapter.test.ts --reporter=dot`:
+  PASS, 2 files / 99 tests.
+- `git diff --check`: PASS except workspace LF-to-CRLF notices.
+
+Inspection of the failure-scoped Revision-2 delta found only
+`tests/integration/record-authority-audit.test.ts` plus task/handoff context;
+the accepted Revision-1 product source is unchanged. No full suite, build,
+official fixture, browser test, network/provider/paid call, deployment,
+database action, credential access, commit, or push was performed. QA14
+Revision 2 permits the ordinary Chief release-candidate gate.

@@ -440,3 +440,108 @@ or canonical analysis state changes. Chief disposition: **ACCEPT** the bounded
 saved-fixture experiment and, only if it passes independent QA13 with P0=0 and
 P1=0, authorize the ordinary implementation/release workflow. Do not authorize
 another paid CER run from this review alone.
+
+## T16 Addendum — A citation selects a source span; it does not author evidence
+
+The completed CER extraction exposed a source-representation mismatch rather
+than a record-authority capacity failure. The model received Monid Markdown and
+authored `evidence_quote` strings from that representation, while
+`exactOccurrences` discarded the Markdown provenance and searched only for the
+literal string in PDF.js physical-page text. Of 190 model records, 127 were
+therefore `source_unlocated`; only 32 records survived publication.
+
+The invariants are unchanged: Monid remains the semantic normalization input;
+PDF.js raw page text, document SHA, physical page, and exact raw slice remain
+the only citation authority; every citation binds to exactly one document/page
+span; paraphrase, zero matches, multiple matches, cross-page spans, and
+wrong-document selectors fail closed; provider calls, token/cost envelopes,
+deadlines, and retries do not increase.
+
+The current accidental ontology treats a model-written quote as both semantic
+selection and physical evidence. The minimum replacement separates them:
+
+1. A private `SemanticSpan` is a model selection of an existing server-issued
+   Monid `source_fragment_id`, UTF-16 start, and length. The model no longer
+   supplies authoritative evidence text or a page number.
+2. Before extraction, a server-owned `DocumentSourceMap` binds the exact Monid
+   representation hash and fragment coordinates to zero or one exact,
+   contiguous PDF.js span: document SHA, page-text hash, physical page, raw
+   UTF-16 start/end, exact slice hash, and alignment version.
+3. Decoding accepts a selector only when its complete substantive token range
+   has one monotonic, contiguous, single-page mapping. It then constructs the
+   public `evidence_quote` from the exact PDF.js slice and carries the private
+   physical binding into record authority. Authority verifies that binding and
+   slice directly instead of rediscovering location by searching quote text.
+
+The source map is provenance-preserving alignment, not tolerant citation
+matching. Its tokenizer may normalize only enumerated representation artifacts
+such as line-ending/whitespace runs, Markdown table delimiters, and reversible
+Unicode compatibility glyphs while retaining every raw offset. It must not use
+case folding, stemming, synonym substitution, edit distance, punctuation-wide
+deletion, or semantic similarity. Every non-layout token selected from Monid
+must equal the mapped PDF.js token under that versioned transform. Ambiguous
+alignments remain zero authority; surrounding context may prove uniqueness but
+is never included as cited evidence unless the model selected it.
+
+This model rejects three broader alternatives. Normalized or fuzzy searching
+of a free quote remains many-to-one, loses its Monid origin coordinate, and can
+bind repeated text, deleted negation, reordered table cells, or a paraphrase to
+the wrong page. PDF.js-only model input would make copying easier but discards
+the already demonstrated value of Monid table/semantic normalization and
+changes extraction quality rather than repairing provenance. Sending both full
+Monid and PDF.js bodies makes two competing evidence sources model-visible,
+expands the already bounded inputs, and still lets the model cite the wrong
+representation. A private source map retains one semantic body in the prompt
+and keeps the second representation solely in deterministic server authority.
+
+The model-visible fragment IDs already exist. Replacing each private citation's
+free `evidence_quote` with a fragment selector therefore requires no second
+provider request and need not add source text. The server-side map is temporary;
+only the existing exact public quote/binding receipt and bounded hashes need
+survive cleanup. Any dynamic-schema/token change is measured by the existing
+preflight and T15 package balance; the 320,000 input-token, 50,000 output-token,
+USD 0.495 reserve, model context, one-attempt, and zero-retry gates remain exact.
+
+The minimum no-provider falsification gate uses synthetic representation pairs
+plus locally indexed, hash-bound official CER PDFs. The production Monid body
+and raw private model output were correctly purged and are not available for
+offline replay; therefore no claim may be made that all 127 production rejects
+are recovered before one later reviewed production proof:
+
+- line wrapping, repeated whitespace, Markdown table delimiters, soft hyphens,
+  and an allowlisted Unicode ligature must resolve to one exact raw PDF.js slice;
+- the returned public quote must be byte-for-byte that slice, never the Monid
+  spelling, and its private document/page/start/end hashes must reverify;
+- repeated identical text on two pages, two possible monotonic alignments,
+  cross-page selections, wrong document IDs, out-of-range fragment offsets,
+  unmatched substantive tokens, reordered values, deleted `not`, and
+  paraphrases must remain unbound;
+- two identical quotes selected at different fragment offsets must retain their
+  distinct physical bindings rather than be re-searched globally;
+- page-core ownership and submission relation cross-checks must use the bound
+  physical midpoint, preserving the unfamiliar SecureDrop counterexample;
+- a fake structured response spanning Claim, Requirement, Risk, and Evaluation
+  must decode selectors, replace quotes, and pass the unchanged record receipt,
+  while one mutated selector discards only its affected record or restores the
+  existing package veto when submission-relevant;
+- the local CER gate must prove declared golden physical-page evidence remains
+  uniquely bindable and record only counts/hashes, without persisting source
+  bodies; it cannot simulate the purged Monid representation;
+- serialized bytes/tokens, T15 protected floors, aggregate cost, call count,
+  retry count, and deadline assertions must be unchanged or lower.
+
+The hypothesis is falsified if required CER golden evidence cannot be uniquely
+aligned without fuzzy rules, if a paraphrase or ambiguous repeated span gains
+authority, if the public quote differs from the bound PDF.js slice, if a model
+page number influences binding, or if the private selector/map pushes any
+existing provider budget over its cap. The production audit alone cannot prove
+that all 127 rejected records are recoverable because raw private responses
+were correctly not retained.
+
+Migration is private and reversible: version the citation selector/source-map
+contract, dual-read the old free-quote wire only to fail closed, and leave the
+public Draft, database, provider count, and physical citation receipt format
+unchanged where possible. Rollback restores the old decoder and continues to
+discard unlocated Markdown quotes; no data migration is required. Chief
+disposition: **ACCEPT** only the saved-artifact alignment experiment and
+independent QA14 gate. No provider rerun is authorized by this review.

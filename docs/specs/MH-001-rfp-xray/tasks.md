@@ -440,6 +440,42 @@ revision_round: 1
 failed_acceptance: [AC-9, AC-11]
 ```
 
+## T16 Physical-page source binding
+
+```yaml
+id: T16
+owner_profile: backend
+objective: Repair the observed representation mismatch so exact evidence selected from model-visible Monid Markdown is deterministically rebound to one server-owned PDF.js physical-page span, without admitting paraphrase, ambiguous occurrences, wrong-document evidence, or inferred page numbers.
+depends_on: [QA13]
+include_paths: [src/lib/analysis/record-authority.ts, src/lib/providers/openai.ts, tests/unit/record-authority.test.ts, tests/unit/openai-adapter.test.ts, tests/golden/**, docs/specs/MH-001-rfp-xray/**]
+exclude_paths: [src/app/**, src/components/**, drizzle/**, scripts/live-verify.mjs]
+edits_allowed: true
+acceptance: [AC-2, AC-4, AC-5, AC-6, AC-9, AC-10]
+handoff: handoff-backend.md
+status: completed_accepted
+revision_round: 2
+revision_scope: [STALE_V1_PIPELINE_AUDIT_FIXTURE]
+constraints: [saved_local_PDFs_and_synthetic_pairs_only, no_paid_calls, no_remote_or_Monid_reparse, local_PDFjs_indexing_allowed, exact_PDFjs_quote_required, unique_physical_page_binding, no_paraphrase_acceptance, unchanged_provider_and_cost_limits]
+```
+
+## QA14 T16 source-binding review
+
+```yaml
+id: QA14
+owner_profile: reviewer
+objective: Independently falsify the source-binding repair with whitespace, Markdown table, repeated-text, wrong-document, wrong-page, paraphrase, Unicode, page-core ownership, and CER golden cases; require exact returned PDF.js evidence and no weaker citation gate.
+depends_on: [T16]
+include_paths: [src/lib/analysis/record-authority.ts, src/lib/providers/openai.ts, tests/unit/record-authority.test.ts, tests/unit/openai-adapter.test.ts, tests/golden/**]
+exclude_paths: []
+edits_allowed: false
+acceptance: [AC-2, AC-4, AC-5, AC-6, AC-9, AC-10, AC-11]
+handoff: qa_report.md
+status: completed_pass
+revision_round: 2
+verdict: PASS
+findings: { P0: 0, P1: 0, P2: 0 }
+```
+
 ## T8 Publication/submission authority separation
 
 ```yaml

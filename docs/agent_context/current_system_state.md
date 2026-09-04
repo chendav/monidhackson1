@@ -1,5 +1,45 @@
 # Current System State
 
+## 2026-09-04 T16 production diagnosis
+
+- T15 is committed at `aa8d10d7d3930eb335734ee5fef7a5052d590806`, pushed,
+  and live as exact deployment `dpl_Fc6KfgMNHyYQ6bmv1fTYyZ5vJ1v3` after a
+  necessary 10% daily-cap increase from USD 20 to USD 22; the per-run USD 2 cap
+  and OpenAI USD 0.495 reserve remain unchanged.
+- One controlled CER main-plus-three-amendment run completed four Monid parses,
+  all five OpenAI extraction batches, and controlled cleanup in 250,565 ms. Its
+  conservative total was USD 1.219916. It ended `partial`, not READY.
+- The retained v4 record-authority audit is integrity-complete and contains 190
+  model records: 32 verified and 158 discarded. The largest reason is exactly
+  127 `source_unlocated`, followed by 20 relation gaps, five coverage gaps, five
+  semantic disagreements, and one relation conflict.
+- The retained v2 submission audit covers all 75 pages and 24/24 source
+  fragments. It verifies 95/116 candidates and three of five batches; the only
+  unresolved reasons are 18 `semantic_uncertainty` and three
+  `ownership_mismatch`.
+- Static tracing identifies a representation boundary: extraction reads Monid
+  Markdown when present, while record authority requires each model quote to be
+  an exact substring of PDF.js physical-page text. T16 must test this hypothesis
+  against saved artifacts and repair source binding without accepting paraphrase
+  or weakening physical-page citation proof. No Monid/OpenAI call is allowed.
+- T16 implementation reached focused 98/98, local CER 1/1, targeted lint and
+  typecheck, but QA14 found two P1 counterexamples: unrestricted NFKC binds
+  `10²` to `102`, and the pipe heuristic treats non-table `A || B` as Markdown
+  layout and binds it to `A B`. QA14 also found a P2 integrity gap: v2 physical
+  bindings are trusted structurally instead of being re-resolved from the
+  issued fragment selector, so mutated source hash/coordinates can remain
+  `exact_bound`. Deployment is prohibited pending T16 Revision 1.
+- T16 Revision 1 passed independent QA14 with P0=0/P1=0/P2=0. The first full
+  release-candidate check passed 776 tests and failed exactly one integration
+  fixture: `record-authority-audit.test.ts` still creates a legacy v1 envelope
+  but expects a verified v2 publication count. The v1 fail-closed behavior is
+  correct; Revision 2 updates only the test fixture and adds the explicit legacy
+  boundary before the gate is resumed.
+- T16 Revision 2 passed independent QA14 with P0=0/P1=0/P2=0. The resumed
+  release-candidate gate passed `pnpm check` with 777 tests and 10 skipped,
+  `pnpm build` with 13 static/dynamic application routes and five workflows,
+  and Playwright 14/14 with two credentialed live-storage cases skipped.
+
 ## 2026-09-04 T15 production boundary
 
 - T14 commit `a9b8832aefc3447448470cb69db6f5a97553a9e4` is live as exact

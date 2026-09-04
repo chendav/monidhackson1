@@ -3,10 +3,14 @@ import type { DocumentManifest } from "@/contracts";
 import type { DraftAnalysis } from "@/lib/analysis/draft";
 import {
   MAX_RECORD_AUTHORITY_RECEIPT_BYTES,
+  RECORD_AUTHORITY_ENVELOPE_VERSION,
+  RECORD_SOURCE_ALIGNMENT_VERSION,
   RECORD_AUTHORITY_VERSION,
   RecordAuthorityEnvelopeSchema,
+  buildDocumentSourceMap,
   recordAuthorityManifestIntegrity,
   recordAuthorityReceiptWithinCapacity,
+  resolveSemanticSpan,
   unresolvedRecordAuthority,
   verifiedRecordAuthorityManifestDigest,
   verifyRecordAuthorities
@@ -93,7 +97,13 @@ function artifact(pages: string[], relationForPage: (page: number, text: string)
   const submission = verifySubmissionAdjudication({
     ledger, bindings: [binding], responses: [response], packingComplete: true
   });
-  return { source, ledger, binding, submission };
+  const sourceMap = buildDocumentSourceMap([{
+    source_fragment_id: "fragment",
+    document_sha256: sha,
+    chunk_id: null,
+    text: pages.join("\n")
+  }], [source]);
+  return { source, ledger, binding, submission, sourceMap };
 }
 
 function artifactByCandidate(
@@ -129,7 +139,13 @@ function artifactByCandidate(
     }],
     packingComplete: true
   });
-  return { source, ledger, binding, submission };
+  const sourceMap = buildDocumentSourceMap([{
+    source_fragment_id: "fragment",
+    document_sha256: sha,
+    chunk_id: null,
+    text: pages.join("\n")
+  }], [source]);
+  return { source, ledger, binding, submission, sourceMap };
 }
 
 function relation(text: string, clause: string, channel: "email" | "portal" = "email",
@@ -146,6 +162,47 @@ function relation(text: string, clause: string, channel: "email" | "portal" = "e
     condition_end_utf16: null,
     confidence: 0.99
   }];
+}
+
+function boundAuthority(
+  analysis: DraftAnalysis,
+  annotations: unknown[],
+  source: ReturnType<typeof document>,
+  binding: SubmissionBatchBinding
+) {
+  const sourceMap = buildDocumentSourceMap([{
+    source_fragment_id: binding.ordered_source_fragment_ids[0]!,
+    document_sha256: sha,
+    chunk_id: null,
+    text: source.index.pages.map((page) => page.text).join("\n")
+  }], [source]);
+  const sourceFragment = sourceMap.fragments.get(binding.ordered_source_fragment_ids[0]!);
+  const records = [
+    ...analysis.claims.map((record, ordinal) => ({ kind: "c" as const, ordinal, record })),
+    ...analysis.requirements.map((record, ordinal) => ({ kind: "q" as const, ordinal, record })),
+    ...analysis.risks.map((record, ordinal) => ({ kind: "r" as const, ordinal, record })),
+    ...analysis.evaluation.rules.map((record, ordinal) => ({ kind: "e" as const, ordinal, record }))
+  ];
+  const rows = annotations.map((annotation) => {
+    const [kind, ordinal, relevance] = annotation as ["c" | "q" | "r" | "e", number, "s" | "n" | "u"];
+    const record = records.find((item) => item.kind === kind && item.ordinal === ordinal)?.record;
+    const physical = (record?.citations ?? []).flatMap((item, citationOrdinal) => {
+      const start = sourceFragment?.source_text.indexOf(item.evidence_quote) ?? -1;
+      if (!sourceFragment || start < 0 ||
+        sourceFragment.source_text.lastIndexOf(item.evidence_quote) !== start) return [];
+      const resolved = resolveSemanticSpan(sourceMap, {
+        source_fragment_id: sourceFragment.source_fragment_id,
+        start_utf16: start,
+        length_utf16: item.evidence_quote.length
+      }, [source]);
+      return resolved ? [{ citation_ordinal: citationOrdinal, ...resolved.binding }] : [];
+    });
+    return [kind, ordinal, relevance, physical];
+  });
+  return RecordAuthorityEnvelopeSchema.parse({
+    v: RECORD_AUTHORITY_ENVELOPE_VERSION,
+    r: rows
+  });
 }
 
 function manifest(pageCount: number): DocumentManifest {
@@ -180,7 +237,8 @@ function verifyBundle(options: {
     batches: [{
       binding: state.binding,
       draft: options.analysis,
-      authority: RecordAuthorityEnvelopeSchema.parse({ v: 1, r: options.annotations })
+      authority: boundAuthority(options.analysis, options.annotations, state.source, state.binding),
+      sourceMap: state.sourceMap
     }],
     ledger: state.ledger,
     submission: state.submission,
@@ -235,21 +293,23 @@ describe("T7 record-bound semantic authority", () => {
     const merged = mergeDrafts(batches);
     const state = artifact(pages, (_page, text) => relation(text, submissionClause));
     const authority = verifyRecordAuthorities({
-      batches: batches.map((batch, batchIndex) => ({
-        binding: {
+      batches: batches.map((batch, batchIndex) => {
+        const binding = {
           ...state.binding,
           batch_id: sha256Hex(`authority-batch-${batchIndex}`)
-        },
-        draft: batch,
-        authority: RecordAuthorityEnvelopeSchema.parse({
-          v: 1,
-          r: batch.claims.map((_claim, ordinal) => [
+        };
+        const annotations = batch.claims.map((_claim, ordinal) => [
             "c",
             ordinal,
             batchIndex === 0 && ordinal === 0 ? "s" : "n"
-          ])
-        })
-      })),
+          ]);
+        return {
+          binding,
+          draft: batch,
+          authority: boundAuthority(batch, annotations, state.source, binding),
+          sourceMap: state.sourceMap
+        };
+      }),
       ledger: state.ledger,
       submission: state.submission,
       documents: [state.source],
@@ -264,7 +324,7 @@ describe("T7 record-bound semantic authority", () => {
     });
     expect(authority.records.filter((record) => record.publication === "discarded"))
       .toHaveLength(25);
-    expect(authority.discarded_reasons).toEqual(["non_exact_or_uncovered_citation"]);
+    expect(authority.discarded_reasons).toEqual(["invalid_private_source_binding"]);
     const discarded = authority.records.find((record) => record.merged_record_id === "noise-1")!;
     expect(materializedModelOriginKeysForRecord(
       new Map(authority.records.map((record) => [`${record.kind}:${record.merged_record_id}`, record])),
@@ -553,7 +613,8 @@ describe("T7 record-bound semantic authority", () => {
       batches: [{
         binding: state.binding,
         draft: base,
-        authority: RecordAuthorityEnvelopeSchema.parse({ v: 1, r: [["q", 0, "n"]] })
+        authority: boundAuthority(base, [["q", 0, "n"]], state.source, state.binding),
+        sourceMap: state.sourceMap
       }],
       ledger: state.ledger,
       submission: { ...state.submission, complete: false },
@@ -565,7 +626,8 @@ describe("T7 record-bound semantic authority", () => {
       batches: [{
         binding: state.binding,
         draft: base,
-        authority: RecordAuthorityEnvelopeSchema.parse({ v: 1, r: [["q", 0, "n"]] })
+        authority: boundAuthority(base, [["q", 0, "n"]], state.source, state.binding),
+        sourceMap: state.sourceMap
       }],
       ledger: state.ledger,
       submission: state.submission,
@@ -648,7 +710,7 @@ describe("T7 record-bound semantic authority", () => {
       .unresolved_reasons).toContain("unknown_annotation");
   });
 
-  it("fails closed when duplicate exact quotes have mixed relation states", () => {
+  it("does not infer a source binding from duplicate exact quote text", () => {
     const email = "Bids must be submitted by email.";
     const analysis = draft({ claims: [{
       claim_id: "email", topic: "submission", claim_text: email, claim_type: "source",
@@ -659,7 +721,12 @@ describe("T7 record-bound semantic authority", () => {
       pages: [email, email], analysis, annotations: [["c", 0, "s"]],
       relationForPage: (page, text) => relation(text, email, "email", page === 1 ? "whole_bid" : "other")
     });
-    expect(result.unresolved_reasons).toContain("submission_relation_conflict");
+    expect(result).toMatchObject({ complete: true, package_veto: false });
+    expect(result.records[0]).toMatchObject({
+      publication: "discarded",
+      source_binding: "unlocated",
+      reason: "invalid_private_source_binding"
+    });
   });
 
   it("merges identical semantics across different model IDs and joins authority conservatively", () => {
@@ -670,11 +737,18 @@ describe("T7 record-bound semantic authority", () => {
       citations: [citation(quote)], supersedes_claim_ids: []
     };
     const state = artifact([quote], (_page, text) => relation(text, quote));
-    const batches = ["s", "n"].map((relevance, index) => ({
-      binding: { ...state.binding, batch_id: sha256Hex(`batch-${index}`) },
-      draft: draft({ claims: [{ ...record, claim_id: index === 0 ? "z-model-id" : "a-model-id" }] }),
-      authority: RecordAuthorityEnvelopeSchema.parse({ v: 1, r: [["c", 0, relevance]] })
-    }));
+    const batches = ["s", "n"].map((relevance, index) => {
+      const binding = { ...state.binding, batch_id: sha256Hex(`batch-${index}`) };
+      const batchDraft = draft({
+        claims: [{ ...record, claim_id: index === 0 ? "z-model-id" : "a-model-id" }]
+      });
+      return {
+        binding,
+        draft: batchDraft,
+        authority: boundAuthority(batchDraft, [["c", 0, relevance]], state.source, binding),
+        sourceMap: state.sourceMap
+      };
+    });
     const merged = mergeDrafts(batches.map((batch) => batch.draft));
     const result = verifyRecordAuthorities({
       batches, ledger: state.ledger, submission: state.submission, documents: [state.source],
@@ -744,22 +818,38 @@ describe("T7 record-bound semantic authority", () => {
     })).toBe(false);
   });
 
-  it("allows eight exact occurrences and fails closed on the ninth", () => {
+  it("fails closed instead of re-searching repeated free-quote occurrences", () => {
     const quote = "Invoices are payable within 30 days.";
     const analysis = draft({ requirements: [{
       id: "payment", topic: "payment", category: "financial", text: quote,
       evidence_needed: null, consequence: null, document_sha256: sha,
       amendment_number: null, effect: "add", citations: [citation(quote)]
     }] });
-    const eight = verify({ pages: Array.from({ length: 8 }, () => quote), analysis,
+    const repeated = verify({ pages: Array.from({ length: 8 }, () => quote), analysis,
       annotations: [["q", 0, "n"]] });
-    const nine = verify({ pages: Array.from({ length: 9 }, () => quote), analysis,
-      annotations: [["q", 0, "n"]] });
-    expect(eight.complete).toBe(true);
-    expect(eight.origins[0]?.citation_bindings[0]?.occurrences).toHaveLength(8);
-    expect(nine.complete).toBe(true);
-    expect(nine.package_veto).toBe(false);
-    expect(nine.discarded_reasons).toContain("exact_occurrence_capacity");
+    expect(repeated).toMatchObject({ complete: true, package_veto: false });
+    expect(repeated.origins[0]?.citation_bindings).toEqual([]);
+    expect(repeated.records[0]).toMatchObject({
+      publication: "discarded",
+      reason: "invalid_private_source_binding"
+    });
+
+    const state = artifact([quote]);
+    const legacy = verifyRecordAuthorities({
+      batches: [{
+        binding: state.binding,
+        draft: analysis,
+        authority: RecordAuthorityEnvelopeSchema.parse({ v: 1, r: [["q", 0, "n"]] })
+      }],
+      ledger: state.ledger,
+      submission: state.submission,
+      documents: [state.source],
+      mergedDraft: analysis
+    });
+    expect(legacy.records[0]).toMatchObject({
+      publication: "discarded",
+      reason: "legacy_unbound_citation"
+    });
   });
 
   it("enforces the 262144-byte receipt boundary without truncation", () => {
@@ -1180,9 +1270,30 @@ describe("T9 source-ledger package authority", () => {
         annotations: [["c", 0, "s"]], relationForPage: (_page, text) => relation(text, email) }),
       false, "exact_bound", "consistent"]
     ] as const;
-    const longSecureDrop = `SecureDrop ${"x".repeat(3_300)}`;
-    const coverageGap = classify({ pages: [longSecureDrop], quote: longSecureDrop,
-      annotations: [["c", 0, "s"]] });
+    const longSecureDrop = `${"x".repeat(2_690)} SecureDrop delivery is required. ${"y".repeat(700)}`;
+    const coverageQuote = "SecureDrop delivery is required.";
+    const coverageAnalysis = baseClaim(coverageQuote);
+    const coverageState = artifactByCandidate([longSecureDrop], (candidate) => ({
+      coverage: candidate.core_start_utf16 >= 2_700 ? "uncertain" : "complete",
+      relations: []
+    }));
+    const coverageGap = verifyRecordAuthorities({
+      batches: [{
+        binding: coverageState.binding,
+        draft: coverageAnalysis,
+        authority: boundAuthority(
+          coverageAnalysis,
+          [["c", 0, "s"]],
+          coverageState.source,
+          coverageState.binding
+        ),
+        sourceMap: coverageState.sourceMap
+      }],
+      ledger: coverageState.ledger,
+      submission: coverageState.submission,
+      documents: [coverageState.source],
+      mergedDraft: coverageAnalysis
+    });
     const allCases = [...cases, ["exact s coverage gap", coverageGap, true,
       "coverage_gap", "disagrees"] as const];
     expect(allCases).toHaveLength(13);
@@ -1307,7 +1418,8 @@ describe("T9 source-ledger package authority", () => {
     ]);
     const authority = verifyRecordAuthorities({
       batches: [{ binding: state.binding, draft: analysis,
-        authority: RecordAuthorityEnvelopeSchema.parse({ v: 1, r: [] }) }],
+        authority: boundAuthority(analysis, [], state.source, state.binding),
+        sourceMap: state.sourceMap }],
       ledger: state.ledger, submission: state.submission, documents: [state.source],
       mergedDraft: analysis
     });
@@ -1351,7 +1463,8 @@ describe("T9 source-ledger package authority", () => {
       batches: [{
         binding: state.binding,
         draft: analysis,
-        authority: RecordAuthorityEnvelopeSchema.parse({ v: 1, r: [["q", 0, "n"]] })
+        authority: boundAuthority(analysis, [["q", 0, "n"]], state.source, state.binding),
+        sourceMap: state.sourceMap
       }],
       ledger: state.ledger,
       submission: state.submission,
@@ -1418,7 +1531,8 @@ describe("T9 source-ledger package authority", () => {
       batches: [{
         binding: state.binding,
         draft: analysis,
-        authority: RecordAuthorityEnvelopeSchema.parse({ v: 1, r: [["q", 0, "s"]] })
+        authority: boundAuthority(analysis, [["q", 0, "s"]], state.source, state.binding),
+        sourceMap: state.sourceMap
       }],
       ledger: state.ledger,
       submission: state.submission,
@@ -1462,10 +1576,13 @@ describe("T9 source-ledger package authority", () => {
       batches: [{
         binding: state.binding,
         draft: analysis,
-        authority: RecordAuthorityEnvelopeSchema.parse({
-          v: 1,
-          r: [["q", 0, "n"], ["q", 1, "n"]]
-        })
+        authority: boundAuthority(
+          analysis,
+          [["q", 0, "n"], ["q", 1, "n"]],
+          state.source,
+          state.binding
+        ),
+        sourceMap: state.sourceMap
       }],
       ledger: state.ledger,
       submission: state.submission,
@@ -1527,5 +1644,197 @@ describe("T9 source-ledger package authority", () => {
     expect(result.summary.submission_method).toBe("Email");
     expect(result.requirements.filter((requirement) => requirement.category === "submission"))
       .toHaveLength(14);
+  });
+});
+
+describe("T16 deterministic Monid-to-PDF.js source binding", () => {
+  it("maps only allowlisted layout and Unicode representation differences to an exact raw slice", () => {
+    const pdfText = "Office ﬁles must not cooperate.\nItem Amount\nA 10\nB 20";
+    const monidText = "Office files   must not co\u00adoperate.\n| Item | Amount |\n| --- | --- |\n| A | 10 |\n| B | 20 |";
+    const source = document([pdfText]);
+    const fragment = {
+      source_fragment_id: "fragment",
+      document_sha256: sha,
+      chunk_id: null,
+      text: monidText
+    };
+    const sourceMap = buildDocumentSourceMap([fragment], [source]);
+    const clause = "Office files   must not co\u00adoperate.";
+    const resolvedClause = resolveSemanticSpan(sourceMap, {
+      source_fragment_id: "fragment",
+      start_utf16: monidText.indexOf(clause),
+      length_utf16: clause.length
+    }, [source]);
+    const tableRow = "| A | 10 |";
+    const resolvedRow = resolveSemanticSpan(sourceMap, {
+      source_fragment_id: "fragment",
+      start_utf16: monidText.indexOf(tableRow),
+      length_utf16: tableRow.length
+    }, [source]);
+
+    expect(resolvedClause?.evidence_quote).toBe("Office ﬁles must not cooperate.");
+    expect(resolvedRow?.evidence_quote).toBe("A 10");
+    expect(resolvedClause?.binding).toMatchObject({
+      document_sha256: sha,
+      pdf_page_1based: 1,
+      page_text_sha256: sha256Hex(pdfText),
+      evidence_quote_sha256: sha256Hex("Office ﬁles must not cooperate."),
+      alignment_version: RECORD_SOURCE_ALIGNMENT_VERSION
+    });
+  });
+
+  it("does not erase superscripts or non-table logical pipe operators", () => {
+    const superscriptPdf = document(["The minimum is 102 units."]);
+    const superscriptSource = "The minimum is 10² units.";
+    const superscriptMap = buildDocumentSourceMap([{
+      source_fragment_id: "superscript", document_sha256: sha, chunk_id: null,
+      text: superscriptSource
+    }], [superscriptPdf]);
+    expect(resolveSemanticSpan(superscriptMap, {
+      source_fragment_id: "superscript", start_utf16: 0, length_utf16: superscriptSource.length
+    }, [superscriptPdf])).toBeNull();
+
+    const pipePdf = document(["The bidder must use A B."]);
+    const pipeSource = "The bidder must use A || B.";
+    const pipeMap = buildDocumentSourceMap([{
+      source_fragment_id: "logical-pipe", document_sha256: sha, chunk_id: null,
+      text: pipeSource
+    }], [pipePdf]);
+    expect(resolveSemanticSpan(pipeMap, {
+      source_fragment_id: "logical-pipe", start_utf16: 0, length_utf16: pipeSource.length
+    }, [pipePdf])).toBeNull();
+  });
+
+  it("rejects ambiguous, cross-page, wrong-document, out-of-range, and substantive mutations", () => {
+    const repeated = "Responses must use the secure endpoint.";
+    const repeatedSource = document([repeated, repeated]);
+    const ambiguousMap = buildDocumentSourceMap([{
+      source_fragment_id: "ambiguous",
+      document_sha256: sha,
+      chunk_id: null,
+      text: repeated
+    }], [repeatedSource]);
+    expect(resolveSemanticSpan(ambiguousMap, {
+      source_fragment_id: "ambiguous", start_utf16: 0, length_utf16: repeated.length
+    }, [repeatedSource])).toBeNull();
+
+    const crossPageSource = document(["Alpha end", "Beta start"]);
+    const crossPageText = "Alpha end Beta start";
+    const crossPageMap = buildDocumentSourceMap([{
+      source_fragment_id: "cross-page", document_sha256: sha, chunk_id: null,
+      text: crossPageText
+    }], [crossPageSource]);
+    expect(resolveSemanticSpan(crossPageMap, {
+      source_fragment_id: "cross-page", start_utf16: 0, length_utf16: crossPageText.length
+    }, [crossPageSource])).toBeNull();
+
+    const wrongDocumentMap = buildDocumentSourceMap([{
+      source_fragment_id: "wrong-document", document_sha256: "8".repeat(64), chunk_id: null,
+      text: repeated
+    }], [document([repeated])]);
+    expect(resolveSemanticSpan(wrongDocumentMap, {
+      source_fragment_id: "wrong-document", start_utf16: 0, length_utf16: repeated.length
+    }, [document([repeated])])).toBeNull();
+    expect(resolveSemanticSpan(ambiguousMap, {
+      source_fragment_id: "ambiguous", start_utf16: repeated.length, length_utf16: 1
+    }, [repeatedSource])).toBeNull();
+
+    for (const mutation of [
+      "Responses may use the secure endpoint.",
+      "Responses must use secure the endpoint.",
+      "Responses must use the endpoint."
+    ]) {
+      const source = document([repeated]);
+      const sourceMap = buildDocumentSourceMap([{
+        source_fragment_id: "mutation", document_sha256: sha, chunk_id: null, text: mutation
+      }], [source]);
+      expect(resolveSemanticSpan(sourceMap, {
+        source_fragment_id: "mutation", start_utf16: 0, length_utf16: mutation.length
+      }, [source]), mutation).toBeNull();
+    }
+  });
+
+  it("keeps identical selected text at distinct fragment offsets bound to distinct physical spans", () => {
+    const text = "Alpha context. Same clause. Middle context. Same clause. Omega.";
+    const source = document([text]);
+    const sourceMap = buildDocumentSourceMap([{
+      source_fragment_id: "distinct", document_sha256: sha, chunk_id: null, text
+    }], [source]);
+    const first = text.indexOf("Same clause.");
+    const second = text.lastIndexOf("Same clause.");
+    const firstResolved = resolveSemanticSpan(sourceMap, {
+      source_fragment_id: "distinct", start_utf16: first, length_utf16: "Same clause.".length
+    }, [source]);
+    const secondResolved = resolveSemanticSpan(sourceMap, {
+      source_fragment_id: "distinct", start_utf16: second, length_utf16: "Same clause.".length
+    }, [source]);
+
+    expect(firstResolved?.evidence_quote).toBe("Same clause.");
+    expect(secondResolved?.evidence_quote).toBe("Same clause.");
+    expect(firstResolved?.binding.evidence_start_utf16).toBe(first);
+    expect(secondResolved?.binding.evidence_start_utf16).toBe(second);
+  });
+
+  it("publishes only after record authority reverifies the supplied physical binding", () => {
+    const text = "Invoices are payable within 30 days.";
+    const source = document([text]);
+    const state = artifact([text]);
+    const sourceMap = buildDocumentSourceMap([{
+      source_fragment_id: "fragment", document_sha256: sha, chunk_id: null, text
+    }], [source]);
+    const resolved = resolveSemanticSpan(sourceMap, {
+      source_fragment_id: "fragment", start_utf16: 0, length_utf16: text.length
+    }, [source])!;
+    const analysis = draft({ requirements: [{
+      id: "payment", topic: "payment", category: "financial", text,
+      evidence_needed: null, consequence: null, document_sha256: sha,
+      amendment_number: null, effect: "add", citations: [citation(resolved.evidence_quote)]
+    }] });
+    const envelope = RecordAuthorityEnvelopeSchema.parse({
+      v: RECORD_AUTHORITY_ENVELOPE_VERSION,
+      r: [["q", 0, "n", [{ citation_ordinal: 0, ...resolved.binding }]]]
+    });
+    const valid = verifyRecordAuthorities({
+      batches: [{ binding: state.binding, draft: analysis, authority: envelope, sourceMap }],
+      ledger: state.ledger,
+      submission: state.submission,
+      documents: [source],
+      mergedDraft: analysis
+    });
+    expect(valid.records[0]).toMatchObject({
+      source_binding: "exact_bound",
+      publication: "verified"
+    });
+
+    const mutations = [
+      (binding: typeof resolved.binding) => { binding.page_text_sha256 = "0".repeat(64); },
+      (binding: typeof resolved.binding) => {
+        binding.source_representation_sha256 = "0".repeat(64);
+      },
+      (binding: typeof resolved.binding) => { binding.selector_start_utf16 += 1; },
+      (binding: typeof resolved.binding) => { binding.selector_end_utf16 -= 1; },
+      (binding: typeof resolved.binding) => {
+        binding.alignment_version = "monid-pdfjs-utf16-v0" as typeof binding.alignment_version;
+      }
+    ];
+    for (const mutate of mutations) {
+      const mutated = structuredClone(envelope);
+      if (mutated.v !== RECORD_AUTHORITY_ENVELOPE_VERSION) {
+        throw new Error("unexpected legacy envelope");
+      }
+      mutate(mutated.r[0]![3][0]!);
+      const rejected = verifyRecordAuthorities({
+        batches: [{ binding: state.binding, draft: analysis, authority: mutated, sourceMap }],
+        ledger: state.ledger,
+        submission: state.submission,
+        documents: [source],
+        mergedDraft: analysis
+      });
+      expect(rejected.records[0]).toMatchObject({
+        source_binding: "unlocated",
+        publication: "discarded",
+        reason: "invalid_private_source_binding"
+      });
+    }
   });
 });

@@ -3319,3 +3319,194 @@ database operation, commit, or push occurred.
 QA13 must independently rerun the exact reproductions and adjudicate this
 revision. No full suite, official fixture, build, browser test, deployment, or
 paid production retry was authorized for this delta.
+
+## T16 Implementation — Private source selector and exact PDF.js binding
+
+This is implementation evidence for QA14, not self-approval. No network,
+provider, or paid call; deployment; database operation; credential access;
+commit; or push occurred. The implementation preserves the existing public
+Draft/API shapes, generation call count, single-attempt behavior, T15 output
+allocator, cost ceilings, deadlines, and submission-channel adjudication.
+
+### Implemented contract
+
+- The private extraction wire is versioned as `rfp_xray_analysis_v6`. Each
+  model citation is now the compact selector `{f,a,n,s}`: a server-issued
+  source-fragment ID, UTF-16 start, bounded length (1..500), and nullable
+  section. The model no longer returns evidence text, document SHA, chunk ID,
+  or a physical page.
+- `prepareExtractionPlan` constructs a temporary, per-batch source map between
+  model-visible fragments and server-owned PDF.js pages. It is retained only in
+  memory and is neither serialized to the public result nor persisted.
+- Mapping is deterministic and deliberately narrow: Unicode compatibility
+  forms, soft-hyphen/zero-width representation artifacts, collapsed
+  whitespace, Markdown table pipes/separators, compatible dashes, and smart
+  quotes. Literal unique alignment is preferred; Markdown layout removal is
+  only a fallback. There is no case fold, fuzzy/edit-distance match, stemming,
+  synonym rule, or arbitrary punctuation deletion.
+- Fragment construction now retains a 500-UTF-16 overlap, ensuring any allowed
+  citation span crossing a 12,000-character fragmentation boundary is wholly
+  selectable from a source fragment.
+- A selector is accepted only when its issued fragment aligns once, its bounds
+  are valid and do not cut through a substantive normalized unit, and its
+  mapped units form one contiguous physical PDF.js page slice. The server
+  replaces the public evidence quote with that exact raw PDF.js slice and
+  records fragment, representation hash, selector offsets, page-text hash,
+  physical offsets, and exact quote hash in a version-2 private authority
+  envelope.
+- Record authority re-verifies every supplied physical binding against the
+  record citation, source fragment, raw PDF.js page, exact offsets/hashes, and
+  canonical-core submission relation. Legacy version-1 free-quote authority
+  and absent or mutated bindings fail closed as discarded records.
+- Zero/multiple fragment alignments, cross-page spans, wrong documents,
+  out-of-range selectors, paraphrases, reordered clauses, deleted negations,
+  ambiguous repeated fragments, and tampered page bindings do not publish.
+
+### Changed implementation and tests
+
+- `src/lib/analysis/record-authority.ts`
+- `src/lib/providers/openai.ts`
+- `tests/unit/record-authority.test.ts`
+- `tests/unit/openai-adapter.test.ts`
+- `tests/golden/official-fixture-audit.test.ts`
+- `docs/specs/MH-001-rfp-xray/tasks.md`
+- This T16 handoff section.
+
+The focused regressions cover allowlisted whitespace/table/soft-hyphen/
+ligature differences; ambiguous repeated text; cross-page, wrong-document,
+out-of-range, paraphrased, reordered, and deleted-negation selectors; two
+distinct physical occurrences; binding mutation; all four model record kinds;
+one-record failure isolation; and legacy free-quote rejection.
+
+### Exact local evidence
+
+- `pnpm exec vitest run tests/unit/record-authority.test.ts tests/unit/openai-adapter.test.ts --reporter=dot`:
+  PASS, 2 files and 98 tests.
+- With `RFP_XRAY_FIXTURE_DIR=D:\monidhackson\.data\official-fixtures`,
+  `pnpm exec vitest run tests/golden/official-fixture-audit.test.ts -t "verifies every CER" --reporter=dot`:
+  PASS, 1 selected test (2 unrelated tests skipped). PDF.js emitted the existing
+  non-fatal `TT: undefined function: 21` warnings.
+- Targeted ESLint over the five changed source/test files: PASS.
+- `pnpm exec tsc --noEmit`: PASS.
+- `git diff --check`: PASS; Git reported only workspace LF-to-CRLF notices.
+
+The official test first exposed two test-contract issues during iteration: the
+new fragment overlap deterministically redistributed the same 34,441-byte
+control-plane total across five batches, and legacy golden citations may be
+representation-equivalent rather than raw PDF.js slices. The frozen test now
+asserts the new exact per-batch plan and proves each golden representation can
+select a span whose returned evidence is the exact raw PDF.js page slice.
+
+### Remaining unknown and next gate
+
+The local official experiment uses saved PDF.js page text as the
+model-fragment surrogate; no retained raw Monid Markdown artifact was
+available. It therefore proves the binding algorithm and physical-page result,
+but does not prove that every production Monid layout transformation is inside
+the allowlist or that the prior live CER discard count is recovered. Any
+unrecognized representation remains fail-closed. QA14 should independently
+falsify this boundary before any controlled paid production rerun is proposed.
+
+## T16 Revision 1 — QA14 source-binding hardening
+
+This bounded revision addresses only QA14's two P1 findings and the associated
+binding-provenance defect. It is implementation evidence for QA14 Revision 1,
+not self-approval. No network/provider or paid call, full suite, build,
+deployment, database action, credential access, commit, or push occurred.
+
+### Exact corrections
+
+- Removed unrestricted Unicode NFKC. Alignment now preserves every character
+  except the reviewed explicit compatibility set: compatible dash/quote forms,
+  the seven Unicode presentation ligatures, soft hyphen, and zero-width
+  representation characters. Consequently `10²` cannot bind `102`, while the
+  existing `ﬁ`/`fi` representation case remains supported.
+- Markdown pipe removal now requires a non-empty header immediately followed
+  by a syntactically valid delimiter row with the same cell count. Pipes are
+  removed only from that validated header/delimiter and its contiguous,
+  same-width data rows. Standalone `A || B` is substantive and cannot bind
+  `A B`.
+- Every version-2 authority binding now requires the exact ephemeral source map
+  issued with its batch. The verifier independently re-runs the fragment ID and
+  selector through `resolveSemanticSpan`, reconstructs the complete physical
+  binding, and requires canonical equality of every binding field plus exact
+  equality with the public PDF.js quote. Missing maps, altered source hashes,
+  selector coordinates, alignment version, page hashes, offsets, or quote
+  hashes fail closed as `invalid_private_source_binding`.
+- The dynamic provider schema now encodes citation `f` as the enum of fragment
+  IDs issued for that exact batch. An unknown but syntactically valid 32-hex ID
+  is rejected by Structured Outputs validation before decode. This increased
+  each saved CER format by 628 bytes; the existing measured budget path remains
+  positive and the T15 allocator/cost/deadline/call-count behavior is unchanged.
+
+### Changed files
+
+- `src/lib/analysis/record-authority.ts`
+- `src/lib/providers/openai.ts`
+- `tests/unit/record-authority.test.ts`
+- `tests/unit/openai-adapter.test.ts`
+- `tests/golden/official-fixture-audit.test.ts`
+- `docs/specs/MH-001-rfp-xray/tasks.md`
+- This Revision 1 handoff section.
+
+### Exact verification
+
+- `pnpm exec vitest run tests/unit/record-authority.test.ts tests/unit/openai-adapter.test.ts --reporter=dot`:
+  PASS, 2 files and 99 tests. This includes the exact `10²`/`102` and
+  `A || B`/`A B` Reviewer reproductions, valid Markdown table and ligature
+  controls, dynamic unknown-fragment rejection, and independent mutation of
+  source representation hash, selector start/end, alignment version, and page
+  hash.
+- With `RFP_XRAY_FIXTURE_DIR=D:\monidhackson\.data\official-fixtures`,
+  `pnpm exec vitest run tests/golden/official-fixture-audit.test.ts -t "verifies every CER" --reporter=dot`:
+  PASS, 1 selected test and 2 unrelated skips. Existing non-fatal PDF.js
+  `TT: undefined function: 21` warnings remain.
+- The CER dynamic-format bytes are frozen at
+  `[38139,35901,30300,34780,30298]`. The representative five-record local
+  authority receipt is 6,429/262,144 bytes with 255,715 bytes headroom.
+- Targeted ESLint over the five source/test paths: PASS.
+- `pnpm exec tsc --noEmit`: PASS.
+- `git diff --check`: PASS with workspace LF-to-CRLF notices only.
+
+The CER gate initially stopped on its old dynamic-schema byte fixture and then
+on its old forged-receipt byte fixture. Both were replaced with exact values
+from the new issued-fragment enum and independently re-resolved source maps;
+the corrected gate passed. The prior T16 unknown remains: the saved official
+fixture is not a retained raw Monid artifact, so production transformation
+coverage still requires an independently authorized controlled run after QA14
+Revision 1 passes.
+
+## T16 Revision 2 — Pipeline authority-audit fixture migration
+
+This revision changes no product source. It migrates the single stale positive
+pipeline-audit fixture from a legacy version-1 relevance tuple to the real
+version-2 source-map/selector/physical-binding path required by T16 Revision 1.
+
+- The fixture issues deterministic bounded fragment IDs, builds the ephemeral
+  source map from the exact model-visible input and pipeline PDF.js documents,
+  resolves every local-model citation through `resolveSemanticSpan`, attaches
+  the resulting complete private physical binding, and passes the same source
+  map to `verifyRecordAuthorities`.
+- The successful pipeline still persists a nonempty, complete version-4
+  sanitized record-authority audit through cleanup and result expiry, and
+  deletes it only with the existing 30-day run audit row.
+- Before the positive v2 path, the same fixture runs its prior version-1
+  envelope and explicitly asserts every model record is discarded with
+  `legacy_unbound_citation`. Legacy input therefore remains parseable for a
+  fail-closed read but cannot publish.
+
+Exact checks:
+
+- `pnpm exec vitest run tests/integration/record-authority-audit.test.ts --reporter=dot`:
+  PASS, 1 file and 2 tests.
+- `pnpm exec vitest run tests/unit/record-authority.test.ts tests/unit/openai-adapter.test.ts --reporter=dot`:
+  PASS, 2 files and 99 tests.
+- Targeted ESLint over the integration and two focused unit files: PASS.
+- `pnpm exec tsc --noEmit`: PASS.
+- `git diff --check`: PASS with workspace LF-to-CRLF notices only.
+
+No provider/network or paid call, official-fixture rerun, full suite, build,
+deployment, credential access, database action, commit, or push occurred. The
+only Revision 2 implementation file is
+`tests/integration/record-authority-audit.test.ts`, plus this handoff and the
+T16 task-status update. QA14 must independently adjudicate the frozen revision.

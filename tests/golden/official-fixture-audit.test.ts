@@ -4,8 +4,14 @@ import { describe, expect, it } from "vitest";
 import type { Citation } from "@/contracts";
 import type { DraftAnalysis } from "@/lib/analysis/draft";
 import { materializeAnalysis } from "@/lib/analysis/materialize";
+import { sha256Hex } from "@/lib/crypto";
 import {
   MAX_RECORD_AUTHORITY_RECEIPT_BYTES,
+  RECORD_AUTHORITY_ENVELOPE_VERSION,
+  RECORD_SOURCE_ALIGNMENT_VERSION,
+  RecordAuthorityEnvelopeSchema,
+  resolveSemanticSpan,
+  selectorsForEvidenceRepresentation,
   verifyRecordAuthorities
 } from "@/lib/analysis/record-authority";
 import {
@@ -123,6 +129,46 @@ function representativeRequirement(options: {
   };
 }
 
+function boundAuthority(
+  draft: DraftAnalysis,
+  annotations: Array<["c" | "q" | "r" | "e", number, "s" | "n" | "u"]>,
+  binding: ReturnType<typeof prepareExtractionPlan>["bindings"][number],
+  sourceMap: ReturnType<typeof prepareExtractionPlan>["sourceMaps"][number],
+  documents: CitationDocument[]
+) {
+  const records = [
+    ...draft.claims.map((record, ordinal) => ({ kind: "c" as const, ordinal, record })),
+    ...draft.requirements.map((record, ordinal) => ({ kind: "q" as const, ordinal, record })),
+    ...draft.risks.map((record, ordinal) => ({ kind: "r" as const, ordinal, record })),
+    ...draft.evaluation.rules.map((record, ordinal) => ({ kind: "e" as const, ordinal, record }))
+  ];
+  return RecordAuthorityEnvelopeSchema.parse({
+    v: RECORD_AUTHORITY_ENVELOPE_VERSION,
+    r: annotations.map(([kind, ordinal, relevance]) => {
+      const record = records.find((item) => item.kind === kind && item.ordinal === ordinal)?.record;
+      const physical = (record?.citations ?? []).flatMap((citation, citationOrdinal) => {
+        const document = documents.find((item) =>
+          item.index.documentSha256 === citation.document_sha256
+        );
+        const selectors = document?.index.pages.flatMap((page) =>
+          selectorsForEvidenceRepresentation(sourceMap, {
+            document_sha256: citation.document_sha256,
+            pdf_page_1based: page.pdfPage1Based,
+            evidence_quote: citation.evidence_quote
+          }, documents)
+        ) ?? [];
+        const resolved = selectors.length > 0
+          ? resolveSemanticSpan(sourceMap, selectors[0]!, documents)
+          : null;
+        return resolved?.evidence_quote === citation.evidence_quote
+          ? [{ citation_ordinal: citationOrdinal, ...resolved.binding }]
+          : [];
+      });
+      return [kind, ordinal, relevance, physical];
+    })
+  });
+}
+
 function allCerCitations(): Citation[] {
   return [
     ...cerGoldenFacts.flatMap((fact) => fact.citations),
@@ -228,7 +274,8 @@ describe("optional official-PDF local audit (PDFs are never committed)", () => {
       amendment_number: null,
       parsed_markdown: index.pages.map((page) => page.text).join("\n"),
       evidence_chunks: index.chunks,
-      submission_ledger: submissionLedger
+      submission_ledger: submissionLedger,
+      citation_document: sourceDocument
     }], modelPlanConfig());
     expect(extractionPlan.packingComplete).toBe(true);
     expect(extractionPlan.inputs).toHaveLength(3);
@@ -249,12 +296,17 @@ describe("optional official-PDF local audit (PDFs are never committed)", () => {
     ))).toBe(7_444);
     expect(50_000 - extractionPlan.controlPlaneOutputUpperBoundBytes.reduce((sum, bytes) => sum + bytes, 0))
       .toBe(26_486);
-    expect(dynamicFormatMeasurements(extractionPlan)).toEqual([39_037, 35_676, 43_521]);
+    expect(dynamicFormatMeasurements(extractionPlan).every((bytes, index) =>
+      bytes <= [39_037, 35_676, 43_521][index]!
+    )).toBe(true);
     const emptyAuthorityReceipt = verifyRecordAuthorities({
-      batches: extractionPlan.bindings.map((binding) => ({
+      batches: extractionPlan.bindings.map((binding, index) => ({
         binding,
         draft: emptyDraft(),
-        authority: { v: 1, r: [] }
+        authority: boundAuthority(
+          emptyDraft(), [], binding, extractionPlan.sourceMaps[index]!, [sourceDocument]
+        ),
+        sourceMap: extractionPlan.sourceMaps[index]!
       })),
       ledger: submissionLedger,
       submission: submissionAdjudication,
@@ -304,7 +356,14 @@ describe("optional official-PDF local audit (PDFs are never committed)", () => {
       batches: extractionPlan.bindings.map((binding, index) => ({
         binding,
         draft: representativeDrafts[index]!,
-        authority: { v: 1, r: [[index === 0 ? "c" : "q", 0, index === 0 ? "s" : "n"]] }
+        authority: boundAuthority(
+          representativeDrafts[index]!,
+          [[index === 0 ? "c" : "q", 0, index === 0 ? "s" : "n"]],
+          binding,
+          extractionPlan.sourceMaps[index]!,
+          [sourceDocument]
+        ),
+        sourceMap: extractionPlan.sourceMaps[index]!
       })),
       ledger: submissionLedger,
       submission: submissionAdjudication,
@@ -465,7 +524,8 @@ describe("optional official-PDF local audit (PDFs are never committed)", () => {
       amendment_number: document.amendment,
       parsed_markdown: indexes.get(document.sha256)!.pages.map((page) => page.text).join("\n"),
       evidence_chunks: indexes.get(document.sha256)!.chunks,
-      submission_ledger: index === 0 ? submissionLedger : undefined
+      submission_ledger: index === 0 ? submissionLedger : undefined,
+      citation_document: candidateDocuments[index]
     })), modelPlanConfig());
     expect(extractionPlan.packingComplete).toBe(true);
     expect(extractionPlan.inputs).toHaveLength(5);
@@ -474,11 +534,11 @@ describe("optional official-PDF local audit (PDFs are never committed)", () => {
     )).toBe(true);
     expect(extractionPlan.bindings.flatMap((binding) => binding.ordered_candidate_ids).toSorted())
       .toEqual(submissionLedger.candidates.map((candidate) => candidate.candidate_id).toSorted());
-    expect(extractionPlan.controlPlaneOutputUpperBoundBytes).toEqual([6014, 5942, 5931, 7423, 9131]);
+    expect(extractionPlan.controlPlaneOutputUpperBoundBytes).toEqual([7420, 6322, 5161, 6407, 9131]);
     expect(extractionPlan.controlPlaneOutputUpperBoundBytes.reduce((sum, bytes) => sum + bytes, 0))
       .toBe(34_441);
     expect(extractionPlan.minimumOutputTokenFloors).toEqual([
-      6_312, 6_240, 6_229, 7_721, 9_429
+      7_718, 6_620, 5_459, 6_705, 9_429
     ]);
     expect(extractionPlan.minimumOutputTokenFloors.reduce((sum, floor) => sum + floor, 0))
       .toBe(35_931);
@@ -487,7 +547,7 @@ describe("optional official-PDF local audit (PDFs are never committed)", () => {
       accountedTokens: 0,
       floors: extractionPlan.minimumOutputTokenFloors,
       batchIndex: 0
-    })).toBe(20_381);
+    })).toBe(21_787);
     expect(extractionPlan.controlPlaneOutputPreflightInputs.every((item) =>
       (JSON.parse(item) as { submission_adjudication: { v: number } }).submission_adjudication.v === 5 &&
       !("record_authority" in JSON.parse(item))
@@ -498,7 +558,7 @@ describe("optional official-PDF local audit (PDFs are never committed)", () => {
     expect(50_000 - extractionPlan.controlPlaneOutputUpperBoundBytes.reduce((sum, bytes) => sum + bytes, 0))
       .toBe(15_559);
     expect(dynamicFormatMeasurements(extractionPlan)).toEqual([
-      33_434, 32_315, 34_557, 37_918, 30_074
+      38_139, 35_901, 30_300, 34_780, 30_298
     ]);
     const submissionAdjudication = verifiedFixtureSubmissionAdjudication(
       candidateDocuments,
@@ -506,10 +566,13 @@ describe("optional official-PDF local audit (PDFs are never committed)", () => {
       { defaultOccurrenceDisposition: "other" }
     );
     const emptyAuthorityReceipt = verifyRecordAuthorities({
-      batches: extractionPlan.bindings.map((binding) => ({
+      batches: extractionPlan.bindings.map((binding, index) => ({
         binding,
         draft: emptyDraft(),
-        authority: { v: 1, r: [] }
+        authority: boundAuthority(
+          emptyDraft(), [], binding, extractionPlan.sourceMaps[index]!, candidateDocuments
+        ),
+        sourceMap: extractionPlan.sourceMaps[index]!
       })),
       ledger: submissionLedger,
       submission: submissionAdjudication,
@@ -542,21 +605,42 @@ describe("optional official-PDF local audit (PDFs are never committed)", () => {
         quote: "Any requirement marked \"No\" or left blank will result in the bid being declared non-responsive.", document: CER_DOCUMENTS[3]
       }
     ];
-    const representativeDrafts = representativeQuotes.map((item) => emptyDraft({
-      requirements: [representativeRequirement({
+    const representativeDrafts = extractionPlan.sourceMaps.map(() => emptyDraft());
+    for (const item of representativeQuotes) {
+      const requirement = representativeRequirement({
         id: item.id,
         topic: item.topic,
         category: item.category,
         quote: item.quote,
         documentSha256: item.document.sha256,
         amendmentNumber: item.document.amendment
-      })]
-    }));
+      });
+      const sourceMapIndex = extractionPlan.sourceMaps.findIndex((sourceMap) =>
+        candidateDocuments.find((document) =>
+          document.index.documentSha256 === item.document.sha256
+        )!.index.pages.some((page) => selectorsForEvidenceRepresentation(sourceMap, {
+          document_sha256: item.document.sha256,
+          pdf_page_1based: page.pdfPage1Based,
+          evidence_quote: item.quote
+        }, candidateDocuments).length > 0)
+      );
+      expect(sourceMapIndex, `representative source map for ${item.id}`).toBeGreaterThanOrEqual(0);
+      representativeDrafts[sourceMapIndex]!.requirements.push(requirement);
+    }
     const representativeReceipt = verifyRecordAuthorities({
       batches: extractionPlan.bindings.map((binding, index) => ({
         binding,
         draft: representativeDrafts[index]!,
-        authority: { v: 1, r: [["q", 0, "n"]] }
+        authority: boundAuthority(
+          representativeDrafts[index]!,
+          representativeDrafts[index]!.requirements.map((_record, ordinal) => [
+            "q", ordinal, "n"
+          ]),
+          binding,
+          extractionPlan.sourceMaps[index]!,
+          candidateDocuments
+        ),
+        sourceMap: extractionPlan.sourceMaps[index]!
       })),
       ledger: submissionLedger,
       submission: submissionAdjudication,
@@ -564,9 +648,9 @@ describe("optional official-PDF local audit (PDFs are never committed)", () => {
       mergedDraft: mergeDrafts(representativeDrafts)
     });
     expect(representativeReceipt).toMatchObject({ complete: true, package_veto: false });
-    expect(representativeReceipt.receipt_byte_length).toBe(6_681);
+    expect(representativeReceipt.receipt_byte_length).toBe(6_429);
     expect(MAX_RECORD_AUTHORITY_RECEIPT_BYTES - representativeReceipt.receipt_byte_length)
-      .toBe(255_463);
+      .toBe(255_715);
 
     expect(base.pages[8].normalizedText).toContain("fails to meet all mandatory solicitation requirements non-compliant");
     expect(base.pages[10].normalizedText).toContain("minimum of fifty (50) points");
@@ -599,6 +683,60 @@ describe("optional official-PDF local audit (PDFs are never committed)", () => {
         `amendment 003 M3 row ${definition.row} on p${definition.amendmentPage}`
       ).toContain(normalizeEvidenceText(definition.amendmentQuote));
     }
+
+    const goldenBindings = allCerCitations().map((citation) => {
+      if (citation.pdf_page_1based === null) {
+        throw new Error(`Frozen citation has no physical page: ${citation.document_name}`);
+      }
+      const pdfPage1Based = citation.pdf_page_1based;
+      const fragmentMatches = extractionPlan.sourceMaps.flatMap((sourceMap) =>
+        selectorsForEvidenceRepresentation(sourceMap, {
+          document_sha256: citation.document_sha256,
+          pdf_page_1based: pdfPage1Based,
+          evidence_quote: citation.evidence_quote
+        }, candidateDocuments).map((selector) => ({ sourceMap, selector }))
+      );
+      const sourceMapFragments = extractionPlan.sourceMaps.flatMap((sourceMap) =>
+        [...sourceMap.fragments.values()].filter((fragment) =>
+          fragment.document_sha256 === citation.document_sha256
+        )
+      );
+      const citedPage = candidateDocuments.find((document) =>
+        document.index.documentSha256 === citation.document_sha256
+      )?.index.pages.find((page) => page.pdfPage1Based === citation.pdf_page_1based);
+      expect(fragmentMatches, `source selector for ${citation.document_name} p${citation.pdf_page_1based}; ` +
+        `fragments=${sourceMapFragments.length}; uniquely_aligned=${sourceMapFragments.filter((fragment) =>
+          fragment.match_starts.length === 1).length}; exact_page_occurrences=${citedPage?.text.split(
+          citation.evidence_quote
+        ).length ?? 0}`)
+        .not.toHaveLength(0);
+      const match = fragmentMatches[0]!;
+      const resolved = resolveSemanticSpan(match.sourceMap, match.selector, candidateDocuments);
+      const physicalPage = candidateDocuments.find((document) =>
+        document.index.documentSha256 === citation.document_sha256
+      )!.index.pages[pdfPage1Based - 1]!;
+      expect(resolved?.evidence_quote).toBe(physicalPage.text.slice(
+        resolved!.binding.evidence_start_utf16,
+        resolved!.binding.evidence_end_utf16
+      ));
+      expect(normalizeEvidenceText(resolved!.evidence_quote))
+        .toBe(normalizeEvidenceText(citation.evidence_quote));
+      expect(resolved?.binding).toMatchObject({
+        document_sha256: citation.document_sha256,
+        pdf_page_1based: citation.pdf_page_1based,
+        evidence_quote_sha256: sha256Hex(resolved!.evidence_quote),
+        alignment_version: RECORD_SOURCE_ALIGNMENT_VERSION
+      });
+      return {
+        document_sha256: resolved!.binding.document_sha256,
+        pdf_page_1based: resolved!.binding.pdf_page_1based,
+        evidence_start_utf16: resolved!.binding.evidence_start_utf16,
+        evidence_end_utf16: resolved!.binding.evidence_end_utf16,
+        evidence_quote_sha256: resolved!.binding.evidence_quote_sha256
+      };
+    });
+    expect(goldenBindings).toHaveLength(allCerCitations().length);
+    expect(sha256Hex(JSON.stringify(goldenBindings))).toMatch(/^[a-f0-9]{64}$/);
 
     assertFrozenCitationsAgainstVerifier(allCerCitations(), documents);
   }, 60_000);

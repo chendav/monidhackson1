@@ -9,8 +9,9 @@ import type {
 import { sha256Hex, stableJson } from "@/lib/crypto";
 import type { CitationDocument } from "@/lib/evidence/citations";
 
-export const RECORD_AUTHORITY_ENVELOPE_VERSION = 1 as const;
+export const RECORD_AUTHORITY_ENVELOPE_VERSION = 2 as const;
 export const RECORD_AUTHORITY_VERSION = 3 as const;
+export const RECORD_SOURCE_ALIGNMENT_VERSION = "monid-pdfjs-utf16-v1" as const;
 // T10 carries relevance inline on every private model record. This bound is the
 // sum of the strict private Draft collection maxima and is a server-only guard;
 // it is no longer a positional provider sidecar or a 40-record delivery limit.
@@ -19,14 +20,44 @@ export const MAX_MODEL_CITATIONS_PER_ANNOTATED_RECORD = 3;
 export const MAX_EXACT_OCCURRENCES_PER_CITATION = 8;
 export const MAX_RECORD_AUTHORITY_RECEIPT_BYTES = 262_144;
 
-export const RecordAuthorityEnvelopeSchema = z.object({
-  v: z.literal(RECORD_AUTHORITY_ENVELOPE_VERSION),
+const RecordAuthorityPhysicalBindingSchema = z.object({
+  citation_ordinal: z.number().int().nonnegative().max(MAX_MODEL_CITATIONS_PER_ANNOTATED_RECORD - 1),
+  source_fragment_id: z.string().min(1).max(64),
+  source_representation_sha256: z.string().regex(/^[a-f0-9]{64}$/),
+  selector_start_utf16: z.number().int().nonnegative(),
+  selector_end_utf16: z.number().int().positive(),
+  document_sha256: z.string().regex(/^[a-f0-9]{64}$/),
+  pdf_page_1based: z.number().int().positive(),
+  page_text_sha256: z.string().regex(/^[a-f0-9]{64}$/),
+  evidence_start_utf16: z.number().int().nonnegative(),
+  evidence_end_utf16: z.number().int().positive(),
+  evidence_quote_sha256: z.string().regex(/^[a-f0-9]{64}$/),
+  alignment_version: z.literal(RECORD_SOURCE_ALIGNMENT_VERSION)
+}).strict();
+
+const RecordAuthorityLegacyEnvelopeSchema = z.object({
+  v: z.literal(1),
   r: z.array(z.tuple([
     z.enum(["c", "q", "r", "e"]),
     z.number().int().nonnegative(),
     z.enum(["s", "n", "u"])
   ])).max(MAX_RECORD_AUTHORITY_RECORDS_PER_BATCH)
-});
+}).strict();
+
+const RecordAuthorityBoundEnvelopeSchema = z.object({
+  v: z.literal(RECORD_AUTHORITY_ENVELOPE_VERSION),
+  r: z.array(z.tuple([
+    z.enum(["c", "q", "r", "e"]),
+    z.number().int().nonnegative(),
+    z.enum(["s", "n", "u"]),
+    z.array(RecordAuthorityPhysicalBindingSchema).max(MAX_MODEL_CITATIONS_PER_ANNOTATED_RECORD)
+  ])).max(MAX_RECORD_AUTHORITY_RECORDS_PER_BATCH)
+}).strict();
+
+export const RecordAuthorityEnvelopeSchema = z.discriminatedUnion("v", [
+  RecordAuthorityLegacyEnvelopeSchema,
+  RecordAuthorityBoundEnvelopeSchema
+]);
 
 export type RecordKind = "c" | "q" | "r" | "e";
 export type SubmissionRelevance = "s" | "n" | "u";
@@ -39,6 +70,51 @@ export type RecordSourceBinding =
 export type RecordSemanticCrosscheck = "consistent" | "disagrees" | "unknown";
 export type RecordPublication = "verified" | "discarded";
 export type RecordAuthorityEnvelope = z.infer<typeof RecordAuthorityEnvelopeSchema>;
+export type RecordAuthorityPhysicalBinding = z.infer<typeof RecordAuthorityPhysicalBindingSchema>;
+
+export interface SemanticSpanSelector {
+  source_fragment_id: string;
+  start_utf16: number;
+  length_utf16: number;
+}
+
+export interface SourceMapFragment {
+  source_fragment_id: string;
+  document_sha256: string;
+  chunk_id: string | null;
+  text: string;
+}
+
+interface AlignmentUnit {
+  value: string;
+  rawStart: number;
+  rawEnd: number;
+  pdfPage1Based: number | null;
+}
+
+export interface AlignedSourceFragment {
+  source_fragment_id: string;
+  document_sha256: string;
+  chunk_id: string | null;
+  source_text: string;
+  source_text_length: number;
+  source_representation_sha256: string;
+  source_units: AlignmentUnit[];
+  document_units: AlignmentUnit[];
+  match_starts: number[];
+}
+
+export interface DocumentSourceMap {
+  alignment_version: typeof RECORD_SOURCE_ALIGNMENT_VERSION;
+  fragments: Map<string, AlignedSourceFragment>;
+}
+
+export interface ResolvedSemanticSpan {
+  document_sha256: string;
+  chunk_id: string | null;
+  evidence_quote: string;
+  binding: Omit<RecordAuthorityPhysicalBinding, "citation_ordinal">;
+}
 
 export type ModelRecord =
   | DraftAnalysis["claims"][number]
@@ -50,6 +126,8 @@ export interface RecordAuthorityBatch {
   binding: SubmissionBatchBinding;
   draft: DraftAnalysis;
   authority: RecordAuthorityEnvelope;
+  /** Exact ephemeral map issued with this paid batch; never persisted. */
+  sourceMap?: DocumentSourceMap;
 }
 
 export interface JoinedRecordAuthority {
@@ -449,51 +527,291 @@ export function maximumRecordAuthorityEnvelope(draft: DraftAnalysis) {
   return JSON.stringify({
     v: RECORD_AUTHORITY_ENVELOPE_VERSION,
     r: recordsIn(draft).slice(0, MAX_RECORD_AUTHORITY_RECORDS_PER_BATCH)
-      .map(({ kind, ordinal }) => [kind, ordinal, "u"])
+      .map(({ kind, ordinal }) => [kind, ordinal, "u", []])
   });
 }
 
-function exactOccurrences(
-  quote: string,
-  documentSha256: string,
-  documents: CitationDocument[],
-  ledger: SubmissionCandidateLedger
-) {
-  const occurrences = new Map<string, {
-    documentSha256: string;
-    page: number;
-    start: number;
-    end: number;
-    candidateIds: string[];
-  }>();
-  const document = documents.find((item) => item.index.documentSha256 === documentSha256);
-  if (!document) return [];
-  for (const page of document.index.pages) {
-    let cursor = 0;
-    while (cursor <= page.text.length) {
-      const localStart = page.text.indexOf(quote, cursor);
-      if (localStart < 0) break;
-      const start = localStart;
-      const end = start + quote.length;
-      const midpoint = start + Math.floor((quote.length - 1) / 2);
-      const candidateIds = ledger.candidates.filter((candidate) =>
-        candidate.document_sha256 === documentSha256 &&
-        candidate.pdf_page_1based === page.pdfPage1Based &&
-        midpoint >= candidate.core_start_utf16 && midpoint < candidate.core_end_utf16 &&
-        start >= candidate.source_start_utf16 && end <= candidate.source_end_utf16
-      ).map((candidate) => candidate.candidate_id);
-      const key = `${documentSha256}:${page.pdfPage1Based}:${start}:${end}`;
-      occurrences.set(key, {
-        documentSha256,
-        page: page.pdfPage1Based,
-        start,
-        end,
-        candidateIds
-      });
-      cursor = localStart + Math.max(1, quote.length);
+const DROPPED_REPRESENTATION_CHARACTERS = /[\u00ad\u200b-\u200d\ufeff]/u;
+const COMPATIBILITY_GLYPHS: Readonly<Record<string, string>> = {
+  "‐": "-", "‑": "-", "‒": "-", "–": "-", "—": "-", "―": "-",
+  "“": "\"", "”": "\"", "‘": "'", "’": "'",
+  "ﬀ": "ff", "ﬁ": "fi", "ﬂ": "fl", "ﬃ": "ffi", "ﬄ": "ffl",
+  "ﬅ": "st", "ﬆ": "st"
+};
+
+function markdownLayoutIndexes(value: string) {
+  const ignored = new Set<number>();
+  const lines: Array<{ body: string; start: number }> = [];
+  let lineStart = 0;
+  for (const line of value.split(/(?<=\n)/u)) {
+    const body = line.endsWith("\n") ? line.slice(0, -1) : line;
+    lines.push({ body, start: lineStart });
+    lineStart += line.length;
+  }
+  const cells = (body: string) => {
+    if (!body.includes("|")) return null;
+    const parts = body.split("|");
+    if (body.trimStart().startsWith("|")) parts.shift();
+    if (body.trimEnd().endsWith("|")) parts.pop();
+    return parts.length >= 2 ? parts : null;
+  };
+  const ignorePipes = (line: { body: string; start: number }) => {
+    for (let index = 0; index < line.body.length; index += 1) {
+      if (line.body[index] === "|") ignored.add(line.start + index);
+    }
+  };
+  for (let delimiterIndex = 1; delimiterIndex < lines.length; delimiterIndex += 1) {
+    const header = lines[delimiterIndex - 1]!;
+    const delimiter = lines[delimiterIndex]!;
+    const headerCells = cells(header.body);
+    const delimiterCells = cells(delimiter.body);
+    if (!headerCells || !delimiterCells || headerCells.length !== delimiterCells.length ||
+      headerCells.some((cell) => cell.trim() === "") ||
+      !delimiterCells.every((cell) => /^\s*:?-{3,}:?\s*$/u.test(cell))) continue;
+    ignorePipes(header);
+    for (let index = 0; index < delimiter.body.length; index += 1) {
+      if (!/\s/u.test(delimiter.body[index]!)) ignored.add(delimiter.start + index);
+    }
+    for (let rowIndex = delimiterIndex + 1; rowIndex < lines.length; rowIndex += 1) {
+      const row = lines[rowIndex]!;
+      const rowCells = cells(row.body);
+      if (!rowCells || rowCells.length !== headerCells.length) break;
+      ignorePipes(row);
     }
   }
-  return [...occurrences.values()];
+  return ignored;
+}
+
+function alignmentUnits(
+  value: string,
+  options: { markdown: boolean; pdfPage1Based: number | null }
+) {
+  const ignored = options.markdown ? markdownLayoutIndexes(value) : new Set<number>();
+  const units: AlignmentUnit[] = [];
+  for (let rawStart = 0; rawStart < value.length;) {
+    const codePoint = value.codePointAt(rawStart);
+    if (codePoint === undefined) break;
+    const source = String.fromCodePoint(codePoint);
+    const rawEnd = rawStart + source.length;
+    if (ignored.has(rawStart) || DROPPED_REPRESENTATION_CHARACTERS.test(source)) {
+      rawStart = rawEnd;
+      continue;
+    }
+    const normalized = COMPATIBILITY_GLYPHS[source] ?? source;
+    if (/^\s+$/u.test(normalized)) {
+      const previous = units.at(-1);
+      if (previous?.value === " ") previous.rawEnd = rawEnd;
+      else units.push({
+        value: " ", rawStart, rawEnd, pdfPage1Based: options.pdfPage1Based
+      });
+    } else {
+      for (let index = 0; index < normalized.length; index += 1) {
+        units.push({
+          value: normalized[index]!, rawStart, rawEnd,
+          pdfPage1Based: options.pdfPage1Based
+        });
+      }
+    }
+    rawStart = rawEnd;
+  }
+  while (units[0]?.value === " ") units.shift();
+  while (units.at(-1)?.value === " ") units.pop();
+  return units;
+}
+
+function documentAlignmentUnits(document: CitationDocument) {
+  const units: AlignmentUnit[] = [];
+  for (const page of document.index.pages) {
+    if (units.length > 0 && units.at(-1)?.value !== " ") {
+      units.push({ value: " ", rawStart: 0, rawEnd: 0, pdfPage1Based: null });
+    }
+    units.push(...alignmentUnits(page.text, {
+      markdown: false,
+      pdfPage1Based: page.pdfPage1Based
+    }));
+  }
+  return units;
+}
+
+function everyMatch(value: string, needle: string) {
+  if (!needle) return [];
+  const matches: number[] = [];
+  let cursor = 0;
+  while (cursor <= value.length - needle.length) {
+    const match = value.indexOf(needle, cursor);
+    if (match < 0) break;
+    matches.push(match);
+    cursor = match + 1;
+  }
+  return matches;
+}
+
+export function buildDocumentSourceMap(
+  fragments: SourceMapFragment[],
+  documents: CitationDocument[]
+): DocumentSourceMap {
+  const documentUnits = new Map(documents.map((document) => [
+    document.index.documentSha256,
+    documentAlignmentUnits(document)
+  ]));
+  const mapped = new Map<string, AlignedSourceFragment>();
+  for (const fragment of fragments) {
+    if (mapped.has(fragment.source_fragment_id)) continue;
+    const literalSourceUnits = alignmentUnits(fragment.text, {
+      markdown: false,
+      pdfPage1Based: null
+    });
+    const targetUnits = documentUnits.get(fragment.document_sha256) ?? [];
+    const targetValue = targetUnits.map((unit) => unit.value).join("");
+    const literalMatches = everyMatch(
+      targetValue,
+      literalSourceUnits.map((unit) => unit.value).join("")
+    );
+    // Prefer literal alignment whenever it is unique. Markdown layout removal
+    // is an allowlisted fallback, not a transformation applied to exact text.
+    // A repeated literal fragment remains ambiguous instead of being repaired
+    // by dropping representation characters.
+    const sourceUnits = literalMatches.length === 0
+      ? alignmentUnits(fragment.text, { markdown: true, pdfPage1Based: null })
+      : literalSourceUnits;
+    const sourceValue = sourceUnits.map((unit) => unit.value).join("");
+    mapped.set(fragment.source_fragment_id, {
+      source_fragment_id: fragment.source_fragment_id,
+      document_sha256: fragment.document_sha256,
+      chunk_id: fragment.chunk_id,
+      source_text: fragment.text,
+      source_text_length: fragment.text.length,
+      source_representation_sha256: sha256Hex(fragment.text),
+      source_units: sourceUnits,
+      document_units: targetUnits,
+      match_starts: literalMatches.length === 0
+        ? everyMatch(targetValue, sourceValue)
+        : literalMatches
+    });
+  }
+  return { alignment_version: RECORD_SOURCE_ALIGNMENT_VERSION, fragments: mapped };
+}
+
+export function resolveSemanticSpan(
+  sourceMap: DocumentSourceMap,
+  selector: SemanticSpanSelector,
+  documents: CitationDocument[]
+): ResolvedSemanticSpan | null {
+  const fragment = sourceMap.fragments.get(selector.source_fragment_id);
+  const selectorEnd = selector.start_utf16 + selector.length_utf16;
+  if (!fragment || !Number.isSafeInteger(selector.start_utf16) || selector.start_utf16 < 0 ||
+    !Number.isSafeInteger(selector.length_utf16) || selector.length_utf16 < 1 ||
+    !Number.isSafeInteger(selectorEnd) || selectorEnd > fragment.source_text_length ||
+    fragment.match_starts.length !== 1) return null;
+  const intersectingUnits = fragment.source_units.filter((unit) =>
+    unit.rawStart < selectorEnd && unit.rawEnd > selector.start_utf16
+  );
+  if (intersectingUnits.some((unit) => unit.value !== " " &&
+    (unit.rawStart < selector.start_utf16 || unit.rawEnd > selectorEnd))) return null;
+  const overlappingUnits = fragment.source_units.filter((unit) =>
+    unit.rawStart >= selector.start_utf16 && unit.rawEnd <= selectorEnd
+  );
+  while (overlappingUnits[0]?.value === " ") overlappingUnits.shift();
+  while (overlappingUnits.at(-1)?.value === " ") overlappingUnits.pop();
+  if (overlappingUnits.length === 0) return null;
+  const firstSourceUnit = fragment.source_units.indexOf(overlappingUnits[0]!);
+  const lastSourceUnit = fragment.source_units.indexOf(overlappingUnits.at(-1)!);
+  const matchStart = fragment.match_starts[0]!;
+  const targetUnits = fragment.document_units.slice(
+    matchStart + firstSourceUnit,
+    matchStart + lastSourceUnit + 1
+  );
+  const pageNumber = targetUnits[0]?.pdfPage1Based;
+  if (!pageNumber || targetUnits.some((unit) => unit.pdfPage1Based !== pageNumber)) return null;
+  const evidenceStart = targetUnits[0]!.rawStart;
+  const evidenceEnd = targetUnits.at(-1)!.rawEnd;
+  const document = documents.find((item) =>
+    item.index.documentSha256 === fragment.document_sha256
+  );
+  const page = document?.index.pages.find((item) => item.pdfPage1Based === pageNumber);
+  if (!page || evidenceEnd <= evidenceStart || evidenceEnd > page.text.length) return null;
+  const evidenceQuote = page.text.slice(evidenceStart, evidenceEnd);
+  if (!evidenceQuote || evidenceQuote.length > 500) return null;
+  return {
+    document_sha256: fragment.document_sha256,
+    chunk_id: fragment.chunk_id,
+    evidence_quote: evidenceQuote,
+    binding: {
+      source_fragment_id: fragment.source_fragment_id,
+      source_representation_sha256: fragment.source_representation_sha256,
+      selector_start_utf16: selector.start_utf16,
+      selector_end_utf16: selectorEnd,
+      document_sha256: fragment.document_sha256,
+      pdf_page_1based: pageNumber,
+      page_text_sha256: sha256Hex(page.text),
+      evidence_start_utf16: evidenceStart,
+      evidence_end_utf16: evidenceEnd,
+      evidence_quote_sha256: sha256Hex(evidenceQuote),
+      alignment_version: RECORD_SOURCE_ALIGNMENT_VERSION
+    }
+  };
+}
+
+/**
+ * Inverse lookup used by local proof fixtures: find private selectors whose
+ * verified result is strictly representation-equivalent to a frozen citation.
+ * Production does not use this to author selectors; the provider must still
+ * choose one issued source fragment and bounded span in the same response.
+ */
+export function selectorsForEvidenceRepresentation(
+  sourceMap: DocumentSourceMap,
+  evidence: {
+    document_sha256: string;
+    pdf_page_1based: number;
+    evidence_quote: string;
+  },
+  documents: CitationDocument[]
+) {
+  const document = documents.find((item) =>
+    item.index.documentSha256 === evidence.document_sha256
+  );
+  const page = document?.index.pages.find((item) =>
+    item.pdfPage1Based === evidence.pdf_page_1based
+  );
+  if (!page || !evidence.evidence_quote || evidence.evidence_quote.length > 500) return [];
+  const evidenceUnits = alignmentUnits(evidence.evidence_quote, {
+    markdown: false,
+    pdfPage1Based: evidence.pdf_page_1based
+  });
+  const evidenceValue = evidenceUnits.map((unit) => unit.value).join("");
+  if (!evidenceValue) return [];
+  const selectors: SemanticSpanSelector[] = [];
+  for (const fragment of sourceMap.fragments.values()) {
+    if (fragment.document_sha256 !== evidence.document_sha256 ||
+      fragment.match_starts.length !== 1) continue;
+    const matchStart = fragment.match_starts[0]!;
+    const targetValue = fragment.document_units.map((unit) => unit.value).join("");
+    for (const targetStart of everyMatch(targetValue, evidenceValue)) {
+      const targetEnd = targetStart + evidenceUnits.length - 1;
+      const targetUnits = fragment.document_units.slice(targetStart, targetEnd + 1);
+      if (targetUnits.length !== evidenceUnits.length || targetUnits.some((unit) =>
+        unit.pdfPage1Based !== evidence.pdf_page_1based
+      )) continue;
+      const sourceStartIndex = targetStart - matchStart;
+      const sourceEndIndex = targetEnd - matchStart;
+      const sourceStartUnit = fragment.source_units[sourceStartIndex];
+      const sourceEndUnit = fragment.source_units[sourceEndIndex];
+      if (!sourceStartUnit || !sourceEndUnit || sourceEndIndex < sourceStartIndex) continue;
+      const selector = {
+        source_fragment_id: fragment.source_fragment_id,
+        start_utf16: sourceStartUnit.rawStart,
+        length_utf16: sourceEndUnit.rawEnd - sourceStartUnit.rawStart
+      };
+      const resolved = resolveSemanticSpan(sourceMap, selector, documents);
+      if (resolved?.document_sha256 === evidence.document_sha256 &&
+        resolved.binding.pdf_page_1based === evidence.pdf_page_1based &&
+        alignmentUnits(resolved.evidence_quote, {
+          markdown: false,
+          pdfPage1Based: evidence.pdf_page_1based
+        }).map((unit) => unit.value).join("") === evidenceValue) selectors.push(selector);
+    }
+  }
+  return selectors;
 }
 
 function mergedIds(origins: OriginRecord[]) {
@@ -550,10 +868,19 @@ export function verifyRecordAuthorities(input: {
 
   for (const batch of input.batches) {
     const expected = recordsIn(batch.draft);
-    const annotationGroups = new Map<string, SubmissionRelevance[]>();
-    for (const [kind, ordinal, relevance] of batch.authority.r) {
+    const annotationGroups = new Map<string, Array<{
+      relevance: SubmissionRelevance;
+      bindings: RecordAuthorityPhysicalBinding[] | null;
+    }>>();
+    for (const annotation of batch.authority.r) {
+      const [kind, ordinal, relevance] = annotation;
       const key = `${kind}:${ordinal}`;
-      annotationGroups.set(key, [...(annotationGroups.get(key) ?? []), relevance]);
+      annotationGroups.set(key, [...(annotationGroups.get(key) ?? []), {
+        relevance,
+        bindings: batch.authority.v === RECORD_AUTHORITY_ENVELOPE_VERSION
+          ? (annotation as z.infer<typeof RecordAuthorityBoundEnvelopeSchema>["r"][number])[3]
+          : null
+      }]);
     }
     const expectedKeys = new Set(expected.map(({ kind, ordinal }) => `${kind}:${ordinal}`));
     if (batch.authority.r.some(([kind, ordinal]) => !expectedKeys.has(`${kind}:${ordinal}`))) {
@@ -566,10 +893,14 @@ export function verifyRecordAuthorities(input: {
     for (const { kind, ordinal, record } of expected) {
       const key = `${kind}:${ordinal}`;
       const annotations = annotationGroups.get(key) ?? [];
-      const relevance: SubmissionRelevance | null = annotations.length === 1 ? annotations[0] : null;
+      const relevance: SubmissionRelevance | null = annotations.length === 1
+        ? annotations[0]!.relevance
+        : null;
+      const physicalBindings = annotations.length === 1 ? annotations[0]!.bindings : null;
       let reason: string | null = annotations.length === 0
         ? "missing_annotation"
         : annotations.length > 1 ? "duplicate_annotation" : null;
+      if (!reason && physicalBindings === null) reason = "legacy_unbound_citation";
       if (!reason && batch.binding.prompt_injection_tainted) reason = "prompt_injection";
       if (!reason && citations(record).length > MAX_MODEL_CITATIONS_PER_ANNOTATED_RECORD) {
         reason = "record_citation_capacity";
@@ -580,29 +911,74 @@ export function verifyRecordAuthorities(input: {
       const citationBindings: RecordAuthorityCitationBinding[] = [];
       if (!reason) {
         if (citations(record).length === 0) reason = "missing_exact_citation";
-        for (const citation of citations(record)) {
+        if (!reason && (physicalBindings?.length !== citations(record).length ||
+          new Set(physicalBindings.map((binding) => binding.citation_ordinal)).size !==
+            physicalBindings.length)) {
+          reason = "invalid_private_source_binding";
+        }
+        for (const [citationOrdinal, citation] of citations(record).entries()) {
           if (reason) break;
           if (citation.document_sha256 !== record.document_sha256) {
             sourceBinding = "unlocated";
             reason = "cross_document_citation";
             break;
           }
-          const occurrences = exactOccurrences(
-            citation.evidence_quote,
-            citation.document_sha256,
-            input.documents,
-            input.ledger
+          const matchingBindings = physicalBindings!.filter((binding) =>
+            binding.citation_ordinal === citationOrdinal
           );
-          if (occurrences.length === 0) {
+          const binding = matchingBindings[0];
+          const document = input.documents.find((item) =>
+            item.index.documentSha256 === citation.document_sha256
+          );
+          const page = document?.index.pages.find((item) =>
+            item.pdfPage1Based === binding?.pdf_page_1based
+          );
+          const selectorValid = Boolean(binding &&
+            binding.selector_end_utf16 > binding.selector_start_utf16 &&
+            binding.evidence_end_utf16 > binding.evidence_start_utf16 &&
+            batch.binding.ordered_source_fragment_ids.includes(binding.source_fragment_id));
+          const reResolved = selectorValid && batch.sourceMap
+            ? resolveSemanticSpan(batch.sourceMap, {
+                source_fragment_id: binding!.source_fragment_id,
+                start_utf16: binding!.selector_start_utf16,
+                length_utf16: binding!.selector_end_utf16 - binding!.selector_start_utf16
+              }, input.documents)
+            : null;
+          const expectedBinding = reResolved && {
+            citation_ordinal: citationOrdinal,
+            ...reResolved.binding
+          };
+          const physicalValid = Boolean(selectorValid && page && reResolved && expectedBinding &&
+            stableJson(binding) === stableJson(expectedBinding) &&
+            reResolved.evidence_quote === citation.evidence_quote &&
+            binding!.document_sha256 === citation.document_sha256 &&
+            binding!.document_sha256 === record.document_sha256 &&
+            binding!.page_text_sha256 === sha256Hex(page!.text) &&
+            binding!.evidence_quote_sha256 === sha256Hex(citation.evidence_quote) &&
+            binding!.evidence_end_utf16 <= page!.text.length &&
+            page!.text.slice(binding!.evidence_start_utf16, binding!.evidence_end_utf16) ===
+              citation.evidence_quote);
+          if (!physicalValid) {
             sourceBinding = "unlocated";
-            reason = "non_exact_or_uncovered_citation";
+            reason = "invalid_private_source_binding";
             break;
           }
-          if (occurrences.length > MAX_EXACT_OCCURRENCES_PER_CITATION) {
-            sourceBinding = "unlocated";
-            reason = "exact_occurrence_capacity";
-            break;
-          }
+          const start = binding!.evidence_start_utf16;
+          const end = binding!.evidence_end_utf16;
+          const midpoint = start + Math.floor((end - start - 1) / 2);
+          const candidateIds = input.ledger.candidates.filter((candidate) =>
+            candidate.document_sha256 === binding!.document_sha256 &&
+            candidate.pdf_page_1based === binding!.pdf_page_1based &&
+            midpoint >= candidate.core_start_utf16 && midpoint < candidate.core_end_utf16 &&
+            start >= candidate.source_start_utf16 && end <= candidate.source_end_utf16
+          ).map((candidate) => candidate.candidate_id);
+          const occurrences = [{
+            documentSha256: binding!.document_sha256,
+            page: binding!.pdf_page_1based,
+            start,
+            end,
+            candidateIds
+          }];
           const occurrenceStates = occurrences.map((occurrence) => {
             const coverage = occurrence.candidateIds.map((id) => verifiedCoverage.get(id))
               .filter((value) => value?.disposition === "verified");

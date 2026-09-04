@@ -63,12 +63,49 @@ function envelope(
 ) {
   type PrivateRelevance = "whole_bid_submission_channel" |
     "not_whole_bid_submission_channel" | "uncertain";
-  const withRelevance = <T extends object>(records: T[]): Array<T & {
+  const serializedInput = String(request.input);
+  const jsonStart = serializedInput.indexOf("{");
+  const payload = (jsonStart >= 0
+    ? JSON.parse(serializedInput.slice(jsonStart))
+    : { documents: [] }) as {
+    documents: Array<{
+      document_sha256: string;
+      source_fragments: Array<{ source_fragment_id: string; text: string }>;
+    }>;
+  };
+  const withRelevance = <T extends { citations: DraftAnalysis["claims"][number]["citations"] }>(
+    records: T[]
+  ): Array<Omit<T, "citations"> & {
+    citations: Array<{
+      f: string;
+      a: number;
+      n: number;
+      s: string | null;
+    }>;
     submission_relevance: PrivateRelevance;
-  }> => records.map((record) => ({
-    ...record,
-    submission_relevance: "not_whole_bid_submission_channel" as const
-  }));
+  }> => records.map((record) => {
+    const { citations, ...rest } = record;
+    return {
+      ...rest,
+      citations: citations.map((citation) => {
+        const fragments = payload.documents.find((document) =>
+          document.document_sha256 === citation.document_sha256
+        )?.source_fragments ?? payload.documents.flatMap((document) => document.source_fragments);
+        const exact = fragments.find((fragment) =>
+          fragment.text.includes(citation.evidence_quote)
+        );
+        const fragment = exact ?? fragments[0]!;
+        const start = exact ? fragment.text.indexOf(citation.evidence_quote) : 0;
+        return {
+          f: fragment.source_fragment_id,
+          a: start,
+          n: exact ? citation.evidence_quote.length : 1,
+          s: citation.section
+        };
+      }),
+      submission_relevance: "not_whole_bid_submission_channel" as const
+    };
+  });
   const format = (request.text as { format: { schema: { properties: Record<string, unknown> } } }).format;
   const submission = format.schema.properties.submission_adjudication as {
     properties: {
@@ -523,6 +560,26 @@ describe("OpenAI Responses structured output adapter", () => {
     expect(format.schema.properties.submission_adjudication.properties.r.additionalProperties).toBe(false);
     const valid = envelope({ text: { format } });
     expect(schema.safeParse(valid).success).toBe(true);
+    valid.analysis.claims = [{
+      claim_id: "selector", topic: "submission", claim_text: "Bids",
+      claim_type: "source", confidence: 1,
+      document_sha256: sourceDocument.document_sha256, amendment_number: null,
+      effect: "add", supersedes_claim_ids: [],
+      citations: [{ f: binding.ordered_source_fragment_ids[0]!, a: 0, n: 4, s: null }],
+      submission_relevance: "not_whole_bid_submission_channel"
+    }];
+    expect(schema.safeParse(valid).success).toBe(true);
+    const legacyFreeQuote = structuredClone(valid);
+    legacyFreeQuote.analysis.claims[0]!.citations = [{
+      document_sha256: sourceDocument.document_sha256,
+      chunk_id: null,
+      evidence_quote: "Bids",
+      section: null
+    }] as never;
+    expect(schema.safeParse(legacyFreeQuote).success).toBe(false);
+    const unknownFragment = structuredClone(valid);
+    unknownFragment.analysis.claims[0]!.citations[0]!.f = "0".repeat(32);
+    expect(schema.safeParse(unknownFragment).success).toBe(false);
     const candidateId = binding.ordered_candidate_ids[0]!;
     const uncertain = structuredClone(valid);
     (uncertain.submission_adjudication.r[candidateId] as { coverage: string }).coverage = "uncertain";
@@ -771,6 +828,142 @@ describe("OpenAI Responses structured output adapter", () => {
     expect(result.recordAuthority?.records.map((record) => [record.kind, record.relevance]))
       .toEqual([["c", "s"], ["q", "n"], ["r", "u"], ["e", "s"]]);
     expect(JSON.stringify(result.analysis)).not.toContain("submission_relevance");
+  });
+
+  it("decodes private span selectors into exact PDF.js evidence across all record kinds", async () => {
+    const pdfText = [
+      "Alpha Tender",
+      "Invoices are ﬁnal within 30 days.",
+      "Late bids are rejected.",
+      "Lowest evaluated price"
+    ].join("\n");
+    const monidText = pdfText.replace("ﬁnal", "final");
+    const citationDocument = {
+      name: "source.pdf",
+      sourceUrl: null,
+      index: {
+        documentSha256: sourceDocument.document_sha256,
+        representationSha256: sha256Hex(pdfText),
+        pagesTotal: 1,
+        pages: [{
+          pdfPage1Based: 1,
+          printedPageLabel: "1",
+          text: pdfText,
+          normalizedText: pdfText.normalize("NFKC").toLowerCase(),
+          representationSha256: sha256Hex(pdfText)
+        }],
+        chunks: [],
+        embeddedJavaScriptDetected: false,
+        indexVersion: "pdfjs-1based-v1" as const
+      }
+    };
+    const ledger = discoverSubmissionCandidateLedger([{
+      ...citationDocument,
+      role: "base" as const,
+      amendmentNumber: null
+    }]);
+    const cited = (evidenceQuote: string) => [{
+      document_sha256: sourceDocument.document_sha256,
+      chunk_id: null,
+      evidence_quote: evidenceQuote,
+      section: null
+    }];
+    const analysis: DraftAnalysis = {
+      ...emptyDraft(),
+      summary: { ...emptyDraft().summary, title: "Alpha Tender" },
+      claims: [{
+        claim_id: "title", topic: "title", claim_text: "Alpha Tender",
+        claim_type: "source", confidence: 1,
+        document_sha256: sourceDocument.document_sha256, amendment_number: null,
+        effect: "add", citations: cited("Alpha Tender"), supersedes_claim_ids: []
+      }],
+      requirements: [{
+        id: "payment", topic: "payment", category: "financial",
+        text: "Invoices are final within 30 days.", evidence_needed: null, consequence: null,
+        document_sha256: sourceDocument.document_sha256, amendment_number: null,
+        effect: "add", citations: cited("Invoices are final within 30 days.")
+      }],
+      risks: [{
+        id: "late", topic: "deadline", severity: "high", category: "submission",
+        finding: "Late bids are rejected.", impact: "Late bids are rejected.",
+        recommended_action: "Submit on time.",
+        document_sha256: sourceDocument.document_sha256, amendment_number: null,
+        effect: "add", citations: cited("Late bids are rejected.")
+      }],
+      evaluation: { rules: [{
+        id: "selection", topic: "selection method", field: "selection_method",
+        value: "Lowest evaluated price", document_sha256: sourceDocument.document_sha256,
+        amendment_number: null, effect: "add", citations: cited("Lowest evaluated price")
+      }] }
+    };
+    const result = await new OpenAIResponsesAdapter(testConfig(), fakeClient({
+      parse: async (request) => ({
+        id: "response-private-source-selectors",
+        output_parsed: envelope(request, analysis),
+        usage: { input_tokens: 100, output_tokens: 500 }
+      })
+    })).extract([{
+      ...sourceDocument,
+      parsed_markdown: monidText,
+      submission_ledger: ledger,
+      citation_document: citationDocument
+    }], noopPaidCallbacks);
+
+    expect(result.analysis.requirements[0]?.citations[0]?.evidence_quote)
+      .toBe("Invoices are ﬁnal within 30 days.");
+    expect(result.recordAuthority).toMatchObject({ complete: true, package_veto: false });
+    expect(result.recordAuthority?.records).toHaveLength(4);
+    expect(result.recordAuthority?.records.every((record) =>
+      record.source_binding === "exact_bound" && record.publication === "verified"
+    )).toBe(true);
+  });
+
+  it("discards only the record selected by a malformed private source offset", async () => {
+    const pdfText = "Alpha Tender\nInvoices are payable within 30 days.";
+    const citationDocument = {
+      name: "source.pdf",
+      sourceUrl: null,
+      index: {
+        documentSha256: sourceDocument.document_sha256,
+        representationSha256: sha256Hex(pdfText),
+        pagesTotal: 1,
+        pages: [{ pdfPage1Based: 1, printedPageLabel: "1", text: pdfText,
+          normalizedText: pdfText.toLowerCase(), representationSha256: sha256Hex(pdfText) }],
+        chunks: [], embeddedJavaScriptDetected: false, indexVersion: "pdfjs-1based-v1" as const
+      }
+    };
+    const ledger = discoverSubmissionCandidateLedger([{
+      ...citationDocument, role: "base" as const, amendmentNumber: null
+    }]);
+    const cited = (quote: string) => [{ document_sha256: sourceDocument.document_sha256,
+      chunk_id: null, evidence_quote: quote, section: null }];
+    const analysis: DraftAnalysis = {
+      ...emptyDraft(),
+      claims: [{ claim_id: "title", topic: "title", claim_text: "Alpha Tender",
+        claim_type: "source", confidence: 1, document_sha256: sourceDocument.document_sha256,
+        amendment_number: null, effect: "add", citations: cited("Alpha Tender"),
+        supersedes_claim_ids: [] }],
+      requirements: [{ id: "payment", topic: "payment", category: "financial",
+        text: "Invoices are payable within 30 days.", evidence_needed: null, consequence: null,
+        document_sha256: sourceDocument.document_sha256, amendment_number: null,
+        effect: "add", citations: cited("Invoices are payable within 30 days.") }]
+    };
+    const result = await new OpenAIResponsesAdapter(testConfig(), fakeClient({
+      parse: async (request) => {
+        const output = envelope(request, analysis);
+        output.analysis.requirements[0]!.citations[0]!.a += 1;
+        return { id: "response-mutated-source-selector", output_parsed: output,
+          usage: { input_tokens: 100, output_tokens: 300 } };
+      }
+    })).extract([{
+      ...sourceDocument, parsed_markdown: pdfText, submission_ledger: ledger,
+      citation_document: citationDocument
+    }], noopPaidCallbacks);
+
+    expect(result.recordAuthority?.records.find((record) => record.kind === "c"))
+      .toMatchObject({ publication: "verified" });
+    expect(result.recordAuthority?.records.find((record) => record.kind === "q"))
+      .toMatchObject({ publication: "discarded", reason: "invalid_private_source_binding" });
   });
 
   it("derives the protected floor from the exact minimum Draft and dynamic control envelope", () => {

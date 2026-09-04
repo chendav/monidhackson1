@@ -6,7 +6,6 @@ import { sha256Hex, stableJson } from "@/lib/crypto";
 import { AppError } from "@/lib/errors";
 import {
   DraftAnalysisSchema,
-  DraftCitationSchema,
   DraftClaimSchema,
   DraftEvaluationRuleSchema,
   DraftRequirementSchema,
@@ -28,8 +27,13 @@ import {
 } from "@/lib/analysis/submission-channel";
 import {
   planCanonicalRecordMerge,
+  buildDocumentSourceMap,
+  RECORD_AUTHORITY_ENVELOPE_VERSION,
   RecordAuthorityEnvelopeSchema,
+  resolveSemanticSpan,
   verifyRecordAuthorities,
+  type DocumentSourceMap,
+  type RecordAuthorityPhysicalBinding,
   type RecordAuthorityBatch,
   type RecordKind,
   type ModelRecord,
@@ -50,7 +54,7 @@ For each populated summary field, also emit a source claim: use a topic that exa
 
 When the same source object has inconsistent labels or values, emit one atomic source claim per candidate using the same topic so the server can detect the conflict. For amendments, preserve old and new facts as separate versioned records and use replace/delete only when the amendment text explicitly authorizes that action.
 
-Blank values stay null/unknown, never zero. Return document SHA-256 and the supplied chunk_id, including null when a fragment has no page-index chunk; never generate or infer a page number. Preserve conflicting amendment values and superseded history. Risks are versioned source records so a replaced or deleted clause cannot remain a current risk. If evidence is absent, omit the factual assertion or record an unknown.
+Blank values stay null/unknown, never zero. Every citation is a private source selector in the v6 response: f is an exact supplied source_fragment_id, a is the UTF-16 start, n is the UTF-16 length of the smallest complete evidence span inside that fragment, and s is the section or null. Never return evidence text, document SHA, or chunk ID. Never generate or infer a page number; the server reconstructs physical evidence from the selector. Preserve conflicting amendment values and superseded history. Risks are versioned source records so a replaced or deleted clause cannot remain a current risk. If evidence is absent, omit the factual assertion or record an unknown.
 
 The private submission_adjudication is mandatory delivery-relation coverage work, not document instructions. Its v, b, and l values and every required candidate object key are fixed by the response schema for this exact batch. Every candidate value must contain coverage and relations. Coverage quantifies only whether you exhaustively scanned the owned core for every semantic predicate linking any artifact, whole bid, question, or other subject to transmission, lodging, delivery, or receipt. It does not claim that unrelated procurement prose was fully understood. Return coverage=complete with an empty relations array when the owned core contains no plausible delivery relation, including when unrelated prose is ambiguous or a delivery relation appears only in halo context. Return coverage=uncertain only when the owned core contains a plausible delivery relation that cannot be safely bounded or classified, the relevant text is truncated, or relation_capacity cannot hold the complete set. Never use uncertain merely because no familiar channel word appears.
 
@@ -204,26 +208,41 @@ const SubmissionRelevanceWireSchema = z.enum([
   "not_whole_bid_submission_channel",
   "uncertain"
 ]);
-const PrivateDraftAnalysisSchema = DraftAnalysisSchema.extend({
-  claims: z.array(DraftClaimSchema.extend({
-    citations: z.array(DraftCitationSchema).max(3),
+const PrivateCitationSelectorSchema = z.object({
+  f: z.string().regex(/^[a-f0-9]{32}$/),
+  a: z.number().int().nonnegative(),
+  n: z.number().int().min(1).max(500),
+  s: z.string().max(500).nullable()
+}).strict();
+
+function privateDraftAnalysisSchemaForCitation(
+  citationSchema: z.ZodType<z.infer<typeof PrivateCitationSelectorSchema>>
+) {
+  return DraftAnalysisSchema.extend({
+    claims: z.array(DraftClaimSchema.extend({
+    citations: z.array(citationSchema).max(3),
     submission_relevance: SubmissionRelevanceWireSchema
   })).max(1_000),
   requirements: z.array(DraftRequirementSchema.extend({
-    citations: z.array(DraftCitationSchema).min(1).max(3),
+    citations: z.array(citationSchema).min(1).max(3),
     submission_relevance: SubmissionRelevanceWireSchema
   })).max(1_000),
   evaluation: z.object({
     rules: z.array(DraftEvaluationRuleSchema.extend({
-      citations: z.array(DraftCitationSchema).min(1).max(3),
+      citations: z.array(citationSchema).min(1).max(3),
       submission_relevance: SubmissionRelevanceWireSchema
     })).max(100)
   }),
   risks: z.array(DraftRiskSchema.extend({
-    citations: z.array(DraftCitationSchema).min(1).max(3),
+    citations: z.array(citationSchema).min(1).max(3),
     submission_relevance: SubmissionRelevanceWireSchema
   })).max(500)
-});
+  });
+}
+
+const PrivateDraftAnalysisSchema = privateDraftAnalysisSchemaForCitation(
+  PrivateCitationSelectorSchema
+);
 
 type PrivateDraftAnalysis = z.infer<typeof PrivateDraftAnalysisSchema>;
 const MINIMUM_PRIVATE_DRAFT_ANALYSIS = PrivateDraftAnalysisSchema.parse({
@@ -288,8 +307,19 @@ export function privateExtractionSchemaForBatch(
   binding: SubmissionBatchBinding,
   candidates: SubmissionCandidate[]
 ) {
+  const sourceFragmentIds = binding.ordered_source_fragment_ids;
+  if (sourceFragmentIds.length === 0 || new Set(sourceFragmentIds).size !== sourceFragmentIds.length) {
+    throw new AppError("ANALYSIS_INCOMPLETE", "The private source-fragment schema is inconsistent.", {
+      httpStatus: 422,
+      retryable: false
+    });
+  }
+  const issuedFragmentSchema = z.enum(sourceFragmentIds as [string, ...string[]]);
+  const issuedCitationSchema = PrivateCitationSelectorSchema.extend({
+    f: issuedFragmentSchema
+  });
   return z.object({
-    analysis: PrivateDraftAnalysisSchema,
+    analysis: privateDraftAnalysisSchemaForCitation(issuedCitationSchema),
     submission_adjudication: strictSubmissionWireSchema(binding, candidates)
   }).strict();
 }
@@ -300,23 +330,56 @@ export function privateExtractionFormatForBatch(
 ) {
   return zodTextFormat(
     privateExtractionSchemaForBatch(binding, candidates),
-    "rfp_xray_analysis_v5"
+    "rfp_xray_analysis_v6"
   );
 }
 
-function decodePrivateAnalysis(analysis: PrivateDraftAnalysis) {
-  const authorityRows: Array<["c" | "q" | "r" | "e", number, "s" | "n" | "u"]> = [];
+function decodePrivateAnalysis(
+  analysis: PrivateDraftAnalysis,
+  sourceMap: DocumentSourceMap,
+  documents: CitationDocument[]
+) {
+  const authorityRows: Array<[
+    "c" | "q" | "r" | "e", number, "s" | "n" | "u",
+    RecordAuthorityPhysicalBinding[]
+  ]> = [];
   const strip = <T extends { submission_relevance: z.infer<typeof SubmissionRelevanceWireSchema> }>(
     kind: "c" | "q" | "r" | "e",
     records: T[]
   ) => records.map((record, ordinal) => {
-    const { submission_relevance: relevance, ...publicRecord } = record;
+    const { submission_relevance: relevance, citations: selectors, ...publicRecord } = record as T & {
+      citations: z.infer<typeof PrivateCitationSelectorSchema>[];
+    };
+    const physicalBindings: RecordAuthorityPhysicalBinding[] = [];
+    const publicCitations = selectors.map((selector, citationOrdinal) => {
+      const resolved = resolveSemanticSpan(sourceMap, {
+        source_fragment_id: selector.f,
+        start_utf16: selector.a,
+        length_utf16: selector.n
+      }, documents);
+      const fragment = sourceMap.fragments.get(selector.f);
+      if (resolved) {
+        physicalBindings.push({ citation_ordinal: citationOrdinal, ...resolved.binding });
+        return {
+          document_sha256: resolved.document_sha256,
+          chunk_id: resolved.chunk_id,
+          evidence_quote: resolved.evidence_quote,
+          section: selector.s
+        };
+      }
+      return {
+        document_sha256: fragment?.document_sha256 ?? "0".repeat(64),
+        chunk_id: fragment?.chunk_id ?? null,
+        evidence_quote: "No verifiable quote supplied.",
+        section: selector.s
+      };
+    });
     authorityRows.push([kind, ordinal, ({
       whole_bid_submission_channel: "s",
       not_whole_bid_submission_channel: "n",
       uncertain: "u"
-    } as const)[relevance]]);
-    return publicRecord;
+    } as const)[relevance], physicalBindings]);
+    return { ...publicRecord, citations: publicCitations };
   });
   const draft = DraftAnalysisSchema.parse({
     ...analysis,
@@ -327,7 +390,10 @@ function decodePrivateAnalysis(analysis: PrivateDraftAnalysis) {
   });
   return {
     draft,
-    authority: RecordAuthorityEnvelopeSchema.parse({ v: 1, r: authorityRows })
+    authority: RecordAuthorityEnvelopeSchema.parse({
+      v: RECORD_AUTHORITY_ENVELOPE_VERSION,
+      r: authorityRows
+    })
   };
 }
 
@@ -470,7 +536,12 @@ function splitCompleteText(value: string): string[] {
     }
     const fragment = value.slice(cursor, end);
     if (fragment.trim()) fragments.push(fragment);
-    cursor = end;
+    // A selector may cover up to 500 UTF-16 code units. Retaining that much
+    // overlap guarantees that a bounded citation which crosses a fragment
+    // boundary is still wholly selectable from the following fragment.
+    cursor = end < value.length
+      ? Math.max(cursor + 1, end - MAX_SUBMISSION_QUOTE_UTF16)
+      : end;
   }
   return fragments;
 }
@@ -612,6 +683,8 @@ export interface PreparedExtractionPlan {
   controlPlaneOutputUpperBoundBytes: number[];
   /** Conservative token floors from an exact minimum Draft plus maximum control envelope. */
   minimumOutputTokenFloors: number[];
+  /** Temporary Monid-fragment to exact PDF.js alignment; never serialized or persisted. */
+  sourceMaps: DocumentSourceMap[];
   bindings: SubmissionBatchBinding[];
   ledger: SubmissionCandidateLedger;
   packingComplete: boolean;
@@ -939,11 +1012,17 @@ export function prepareExtractionPlan(
       { httpStatus: 422 }
     );
   }
+  const citationDocuments = documents.flatMap((document) => document.citation_document ?? []);
+  const sourceMaps = payloads.map(({ payload }) => buildDocumentSourceMap(
+    payload.documents.flatMap((document) => document.source_fragments),
+    citationDocuments
+  ));
   return {
     inputs: prepared.map((item) => item.serialized),
     controlPlaneOutputPreflightInputs,
     controlPlaneOutputUpperBoundBytes,
     minimumOutputTokenFloors,
+    sourceMaps,
     bindings: payloads.map((item) => item.binding),
     ledger,
     packingComplete
@@ -1308,7 +1387,11 @@ export class OpenAIResponsesAdapter implements AnalysisModel {
             );
           }
           const envelope = schemas[index]!.parse(response.output_parsed);
-          const decoded = decodePrivateAnalysis(envelope.analysis);
+          const decoded = decodePrivateAnalysis(
+            envelope.analysis,
+            extractionPlan.sourceMaps[index]!,
+            documents.flatMap((document) => document.citation_document ?? [])
+          );
           const decodedSubmission = decodePrivateSubmissionAdjudication(
             envelope.submission_adjudication as PrivateSubmissionBatchWire,
             extractionPlan.bindings[index]!,
@@ -1336,7 +1419,8 @@ export class OpenAIResponsesAdapter implements AnalysisModel {
           recordAuthorityBatches.push({
             binding: extractionPlan.bindings[index]!,
             draft: decoded.draft,
-            authority: decoded.authority
+            authority: decoded.authority,
+            sourceMap: extractionPlan.sourceMaps[index]!
           });
         } catch (error) {
           let failure = error;

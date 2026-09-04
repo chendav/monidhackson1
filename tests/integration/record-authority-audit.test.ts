@@ -2,8 +2,11 @@ import { describe, expect, it } from "vitest";
 import type { PresignUploadResponse } from "@/contracts";
 import { LocalDeterministicModel } from "@/lib/analysis/local-model";
 import {
+  RECORD_AUTHORITY_ENVELOPE_VERSION,
   RecordAuthorityEnvelopeSchema,
+  buildDocumentSourceMap,
   recordsIn,
+  resolveSemanticSpan,
   verifyRecordAuthorities
 } from "@/lib/analysis/record-authority";
 import {
@@ -83,7 +86,7 @@ describe("record authority pipeline audit", () => {
           ledger_digest: ledger.ledger_digest,
           ordered_candidate_ids: ledger.candidates.map((candidate) => candidate.candidate_id),
           ordered_source_fragment_ids: documents.map((document, index) =>
-            `${index}:${document.document_sha256}`
+            sha256Hex(stableJson({ index, sha: document.document_sha256 })).slice(0, 32)
           ),
           prompt_injection_tainted: false
         };
@@ -106,7 +109,13 @@ describe("record authority pipeline audit", () => {
           responses: [response],
           packingComplete: true
         });
-        const recordAuthority = verifyRecordAuthorities({
+        const sourceMap = buildDocumentSourceMap(documents.map((document, index) => ({
+          source_fragment_id: binding.ordered_source_fragment_ids[index]!,
+          document_sha256: document.document_sha256,
+          chunk_id: null,
+          text: document.parsed_markdown
+        })), sourceDocuments);
+        const legacyAuthority = verifyRecordAuthorities({
           batches: [{
             binding,
             draft: extracted.analysis,
@@ -116,6 +125,44 @@ describe("record authority pipeline audit", () => {
                 [kind, ordinal, "n"]
               )
             })
+          }],
+          ledger,
+          submission: submissionAdjudication,
+          documents: sourceDocuments,
+          mergedDraft: extracted.analysis
+        });
+        expect(legacyAuthority.records.length).toBeGreaterThan(0);
+        expect(legacyAuthority.records.every((item) =>
+          item.publication === "discarded" && item.reason === "legacy_unbound_citation"
+        )).toBe(true);
+        const authorityRows = recordsIn(extracted.analysis).map(({ kind, ordinal, record }) => {
+          const physicalBindings = record.citations.flatMap((citation, citationOrdinal) => {
+            const fragment = [...sourceMap.fragments.values()].find((item) =>
+              item.document_sha256 === citation.document_sha256
+            );
+            const start = fragment?.source_text.indexOf(citation.evidence_quote) ?? -1;
+            if (!fragment || start < 0 ||
+              fragment.source_text.lastIndexOf(citation.evidence_quote) !== start) return [];
+            const resolved = resolveSemanticSpan(sourceMap, {
+              source_fragment_id: fragment.source_fragment_id,
+              start_utf16: start,
+              length_utf16: citation.evidence_quote.length
+            }, sourceDocuments);
+            return resolved
+              ? [{ citation_ordinal: citationOrdinal, ...resolved.binding }]
+              : [];
+          });
+          return [kind, ordinal, "n", physicalBindings] as const;
+        });
+        const recordAuthority = verifyRecordAuthorities({
+          batches: [{
+            binding,
+            draft: extracted.analysis,
+            authority: RecordAuthorityEnvelopeSchema.parse({
+              v: RECORD_AUTHORITY_ENVELOPE_VERSION,
+              r: authorityRows
+            }),
+            sourceMap
           }],
           ledger,
           submission: submissionAdjudication,

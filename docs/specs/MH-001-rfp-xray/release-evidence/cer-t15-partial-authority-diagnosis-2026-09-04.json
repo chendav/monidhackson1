@@ -1,0 +1,40 @@
+{
+  "evidence_class": "sanitized_production_diagnostic",
+  "git_commit_sha": "aa8d10d7d3930eb335734ee5fef7a5052d590806",
+  "deployment_id": "dpl_Fc6KfgMNHyYQ6bmv1fTYyZ5vJ1v3",
+  "run_id_sha256": "ecde9937f9248f0eb0446b561333d848cc5240c28cc75dba00bd5f1a22c8469c",
+  "terminal_status": "partial",
+  "cleanup_confirmed": true,
+  "elapsed_ms": 250565,
+  "conservative_total_micro_usd": 1219916,
+  "monid_parse_calls": 4,
+  "openai_extraction_batches_succeeded": 5,
+  "record_authority": {
+    "version": 4,
+    "record_count": 190,
+    "integrity_complete": true,
+    "package_veto": true,
+    "verified": 32,
+    "discarded": 158,
+    "source_unlocated": 127,
+    "source_coverage_gap": 5,
+    "source_relation_gap": 20,
+    "source_relation_conflict": 1,
+    "semantic_disagreement": 5
+  },
+  "submission_adjudication": {
+    "version": 2,
+    "expected_candidate_count": 116,
+    "verified_candidate_count": 95,
+    "expected_page_count": 75,
+    "covered_page_count": 75,
+    "expected_source_fragment_count": 24,
+    "verified_source_fragment_count": 24,
+    "expected_batch_count": 5,
+    "verified_batch_count": 3,
+    "semantic_uncertainty": 18,
+    "ownership_mismatch": 3
+  },
+  "privacy": "No run UUID, source URL, signed URL, tender body, evidence quote, provider response, or secret is retained in this artifact.",
+  "verdict": "NOT_READY"
+}
