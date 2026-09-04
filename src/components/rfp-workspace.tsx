@@ -207,6 +207,7 @@ function SourceBuilder({
   fileDrafts,
   setFileDrafts,
   onLoadSample,
+  interactiveReady,
   onSubmit,
   validationError,
 }: {
@@ -217,6 +218,7 @@ function SourceBuilder({
   fileDrafts: FileDraft[];
   setFileDrafts: (updater: (current: FileDraft[]) => FileDraft[]) => void;
   onLoadSample: () => void;
+  interactiveReady: boolean;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
   validationError: string | null;
 }) {
@@ -303,7 +305,7 @@ function SourceBuilder({
         <p><strong>Upstream retention:</strong> Context.dev zero-data retention is not enabled. A verified parse reported a seven-day artifact expiry; do not submit confidential material unless that is acceptable.</p>
       </header>
 
-      <button className="mobile-sample-shortcut" onClick={onLoadSample} type="button"><FileCheck2 aria-hidden="true" size={16} />Preview Edmonton sample<ArrowRight aria-hidden="true" size={15} /></button>
+      <button className="mobile-sample-shortcut" disabled={!interactiveReady} onClick={onLoadSample} type="button"><FileCheck2 aria-hidden="true" size={16} />Preview Edmonton sample<ArrowRight aria-hidden="true" size={15} /></button>
 
       <form className="source-form" onSubmit={onSubmit} noValidate>
         <fieldset className="source-mode-picker">
@@ -382,7 +384,7 @@ function SourceBuilder({
   );
 }
 
-function SamplePanel({ onLoadSample, loading }: { onLoadSample: () => void; loading: boolean }) {
+function SamplePanel({ interactiveReady, onLoadSample, loading }: { interactiveReady: boolean; onLoadSample: () => void; loading: boolean }) {
   return (
     <aside className="sample-panel" aria-labelledby="sample-title">
       <header className="sample-header">
@@ -402,7 +404,7 @@ function SamplePanel({ onLoadSample, loading }: { onLoadSample: () => void; load
         <span className="evidence-preview">Verified evidence on PDF page 17</span>
       </section>
       <div className="sample-audit-row"><span><CheckCircle2 aria-hidden="true" size={15} />Source cleanup confirmed</span><span><LockKeyhole aria-hidden="true" size={15} />Document-only</span></div>
-      <button className="sample-button" disabled={loading} onClick={onLoadSample} type="button">{loading ? <><LoaderCircle className="spin" aria-hidden="true" size={17} />Loading sample...</> : <>Open Edmonton sample<ArrowRight aria-hidden="true" size={17} /></>}</button>
+      <button className="sample-button" disabled={!interactiveReady || loading} onClick={onLoadSample} type="button">{loading ? <><LoaderCircle className="spin" aria-hidden="true" size={17} />Loading sample...</> : <>Open Edmonton sample<ArrowRight aria-hidden="true" size={17} /></>}</button>
     </aside>
   );
 }
@@ -467,6 +469,7 @@ function ErrorSurface({ error, onBack, onRetry }: { error: UiError; onBack: () =
 
 function RfpWorkspaceContent() {
   const { getMutationHeaders } = useTurnstile();
+  const [interactiveReady, setInteractiveReady] = useState(false);
   const [mode, setMode] = useState<SourceMode>("url");
   const [urlDrafts, setUrlDraftsState] = useState<UrlDraft[]>([{ id: "url-base", role: "base", url: "" }]);
   const [fileDrafts, setFileDraftsState] = useState<FileDraft[]>([]);
@@ -484,6 +487,11 @@ function RfpWorkspaceContent() {
   const requestRef = useRef<AbortController | null>(null);
   const idempotencyKeyRef = useRef<string | null>(null);
   const lastActionRef = useRef<"sample" | "analysis">("analysis");
+
+  useEffect(() => {
+    const activation = window.setTimeout(() => setInteractiveReady(true), 0);
+    return () => window.clearTimeout(activation);
+  }, []);
 
   const setUrlDrafts = useCallback((updater: (current: UrlDraft[]) => UrlDraft[]) => setUrlDraftsState(updater), []);
   const setFileDrafts = useCallback((updater: (current: FileDraft[]) => FileDraft[]) => setFileDraftsState(updater), []);
@@ -831,6 +839,7 @@ function RfpWorkspaceContent() {
         <main className="workspace" id="main-content">
           <SourceBuilder
             fileDrafts={fileDrafts}
+            interactiveReady={interactiveReady}
             mode={mode}
             onLoadSample={() => void loadSample()}
             onSubmit={submitSources}
@@ -840,7 +849,7 @@ function RfpWorkspaceContent() {
             urlDrafts={urlDrafts}
             validationError={validationError}
           />
-          <SamplePanel loading={false} onLoadSample={() => void loadSample()} />
+          <SamplePanel interactiveReady={interactiveReady} loading={false} onLoadSample={() => void loadSample()} />
         </main>
       ) : null}
 
