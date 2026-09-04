@@ -41,10 +41,24 @@ function emptyDraft(): DraftAnalysis {
   };
 }
 
+type TestPrivateRelation = {
+  a: number;
+  n: number;
+  s: "whole_bid" | "question" | "artifact" | "other" | "ambiguous";
+  m: "required" | "permitted" | "prohibited" | "conditional" | "unknown";
+  c: "email" | "portal" | "electronic" | "fax" | "postal_mail" | "courier" |
+    "hand_delivery" | "unspecified";
+  condition: {
+    start_in_relation_utf16: number;
+    length_utf16: number;
+  } | null;
+  f: number;
+};
+
 function envelope(
   request: Record<string, unknown>,
   analysis: DraftAnalysis = emptyDraft(),
-  relationsByCandidate: Record<string, unknown[]> = {}
+  relationsByCandidate: Record<string, TestPrivateRelation[]> = {}
 ) {
   type PrivateRelevance = "whole_bid_submission_channel" |
     "not_whole_bid_submission_channel" | "uncertain";
@@ -57,7 +71,7 @@ function envelope(
   const format = (request.text as { format: { schema: { properties: Record<string, unknown> } } }).format;
   const submission = format.schema.properties.submission_adjudication as {
     properties: {
-      v: { const: 4 };
+      v: { const: 5 };
       b: { const: string };
       l: { const: string };
       r: { required: string[] };
@@ -78,7 +92,7 @@ function envelope(
       r: Object.fromEntries(submission.properties.r.required.map((candidateId) => [
         candidateId,
         {
-          coverage: "complete" as const,
+          coverage: "complete" as "complete" | "uncertain",
           relations: relationsByCandidate[candidateId] ?? []
         }
       ]))
@@ -194,6 +208,11 @@ describe("OpenAI Responses structured output adapter", () => {
     expect(String(parseBody?.instructions)).toMatch(/copy the smallest complete source value or clause verbatim/i);
     expect(String(parseBody?.instructions)).toMatch(/generic statement.*mandatory_gate rule/i);
     expect(String(parseBody?.instructions)).toMatch(/do not emit package-level absence statements/i);
+    expect(String(parseBody?.instructions)).toMatch(/coverage quantifies only.*delivery/i);
+    expect(String(parseBody?.instructions)).toMatch(/complete with an empty relations array/i);
+    expect(String(parseBody?.instructions)).toMatch(/appears only in halo context/i);
+    expect(String(parseBody?.instructions)).toMatch(/closest bounded generic channel such as electronic/i);
+    expect(String(parseBody?.instructions)).toMatch(/start_in_relation_utf16/i);
   });
 
   it("returns a verified private adjudication from the existing paid extraction call", async () => {
@@ -260,8 +279,14 @@ describe("OpenAI Responses structured output adapter", () => {
               s: relation.subject_scope,
               m: relation.modality,
               c: relation.channel,
-              x: relation.condition_start_utf16,
-              y: relation.condition_end_utf16,
+              condition: relation.condition_start_utf16 === null ||
+                relation.condition_end_utf16 === null
+                ? null
+                : {
+                    start_in_relation_utf16: relation.condition_start_utf16 -
+                      relation.relation_start_utf16,
+                    length_utf16: relation.condition_end_utf16 - relation.condition_start_utf16
+                  },
               f: relation.confidence
             }))
           ]))),
@@ -286,7 +311,7 @@ describe("OpenAI Responses structured output adapter", () => {
       .toMatchObject({ status: "unique", channel: "email" });
   });
 
-  it("converts v4 context-relative offsets to absolute page offsets for the owning core", async () => {
+  it("converts v5 relation-relative conditions to absolute page offsets for the owning core", async () => {
     const clause = "Bids must be submitted by email.";
     const clauseStart = 2_800;
     const condition = "by email";
@@ -325,8 +350,10 @@ describe("OpenAI Responses structured output adapter", () => {
             s: "whole_bid",
             m: "required",
             c: "email",
-            x: conditionStart - owner.source_start_utf16,
-            y: conditionStart - owner.source_start_utf16 + condition.length,
+            condition: {
+              start_in_relation_utf16: conditionStart - clauseStart,
+              length_utf16: condition.length
+            },
             f: 0.99
           }];
         }
@@ -350,6 +377,115 @@ describe("OpenAI Responses structured output adapter", () => {
         has_condition_or_scope: true,
         condition_or_scope_sha256: sha256Hex(condition)
       }
+    });
+  });
+
+  it("fails closed when a relation-relative condition extends outside its relation", async () => {
+    const text = "Portal bids are rejected if late.";
+    const ledger = discoverSubmissionCandidateLedger([{
+      name: "source.pdf", sourceUrl: null, role: "base", amendmentNumber: null,
+      index: {
+        documentSha256: sourceDocument.document_sha256,
+        representationSha256: sha256Hex(text), pagesTotal: 1,
+        pages: [{ pdfPage1Based: 1, printedPageLabel: "1", text,
+          normalizedText: text.toLowerCase(), representationSha256: sha256Hex(text) }],
+        chunks: sourceDocument.evidence_chunks, embeddedJavaScriptDetected: false,
+        indexVersion: "pdfjs-1based-v1"
+      }
+    }]);
+    const client = fakeClient({
+      parse: async (request) => {
+        const output = envelope(request);
+        const candidateId = Object.keys(output.submission_adjudication.r)[0]!;
+        output.submission_adjudication.r[candidateId]!.relations = [{
+          a: 0,
+          n: text.length,
+          s: "whole_bid",
+          m: "conditional",
+          c: "portal",
+          condition: {
+            start_in_relation_utf16: text.length - 1,
+            length_utf16: 2
+          },
+          f: 0.99
+        }];
+        return {
+          id: "response-condition-outside-relation",
+          output_parsed: output,
+          usage: { input_tokens: 100, output_tokens: 100 }
+        };
+      }
+    });
+    const result = await new OpenAIResponsesAdapter(testConfig(), client).extract([{
+      ...sourceDocument, parsed_markdown: text, submission_ledger: ledger
+    }], noopPaidCallbacks);
+    expect(result.submissionAdjudication).toMatchObject({
+      complete: false,
+      unresolved_reasons: ["condition_mismatch"]
+    });
+  });
+
+  it("keeps unrelated ambiguous prose complete-empty", async () => {
+    const text = "Pricing assumptions may be interpreted in several ways.";
+    const ledger = discoverSubmissionCandidateLedger([{
+      name: "source.pdf", sourceUrl: null, role: "base", amendmentNumber: null,
+      index: {
+        documentSha256: sourceDocument.document_sha256,
+        representationSha256: sha256Hex(text), pagesTotal: 1,
+        pages: [{ pdfPage1Based: 1, printedPageLabel: "1", text,
+          normalizedText: text.toLowerCase(), representationSha256: sha256Hex(text) }],
+        chunks: sourceDocument.evidence_chunks, embeddedJavaScriptDetected: false,
+        indexVersion: "pdfjs-1based-v1"
+      }
+    }]);
+    const completeClient = fakeClient({
+      parse: async (request) => ({
+        id: "response-complete-empty-domain",
+        output_parsed: envelope(request),
+        usage: { input_tokens: 100, output_tokens: 100 }
+      })
+    });
+    const complete = await new OpenAIResponsesAdapter(testConfig(), completeClient).extract([{
+      ...sourceDocument, parsed_markdown: text, submission_ledger: ledger
+    }], noopPaidCallbacks);
+    expect(complete.submissionAdjudication).toMatchObject({ complete: true });
+    expect(resolveVerifiedSubmissionChannel(complete.submissionAdjudication))
+      .toMatchObject({ status: "none", channel: null });
+  });
+
+  it("preserves uncertainty for a plausible unclassifiable delivery relation", async () => {
+    const text = "The response must travel by an unclassifiable mechanism.";
+    const ledger = discoverSubmissionCandidateLedger([{
+      name: "source.pdf", sourceUrl: null, role: "base", amendmentNumber: null,
+      index: {
+        documentSha256: sourceDocument.document_sha256,
+        representationSha256: sha256Hex(text), pagesTotal: 1,
+        pages: [{ pdfPage1Based: 1, printedPageLabel: "1", text,
+          normalizedText: text.toLowerCase(), representationSha256: sha256Hex(text) }],
+        chunks: sourceDocument.evidence_chunks, embeddedJavaScriptDetected: false,
+        indexVersion: "pdfjs-1based-v1"
+      }
+    }]);
+    const uncertainClient = fakeClient({
+      parse: async (request) => {
+        const output = envelope(request);
+        const candidateId = Object.keys(output.submission_adjudication.r)[0]!;
+        output.submission_adjudication.r[candidateId]!.coverage = "uncertain";
+        return {
+          id: "response-target-domain-uncertain",
+          output_parsed: output,
+          usage: { input_tokens: 100, output_tokens: 100 }
+        };
+      }
+    });
+    const uncertain = await new OpenAIResponsesAdapter(testConfig(), uncertainClient).extract([{
+      ...sourceDocument,
+      parsed_markdown: text,
+      submission_ledger: ledger
+    }], noopPaidCallbacks);
+    expect(uncertain.submissionAdjudication).toMatchObject({
+      complete: false,
+      unresolved_reasons: ["semantic_uncertainty"]
     });
   });
 
@@ -396,10 +532,16 @@ describe("OpenAI Responses structured output adapter", () => {
     expect(schema.safeParse(missingCoverage).success).toBe(false);
     const boundedRelation = {
       a: 0, n: 500, s: "ambiguous" as const, m: "unknown" as const,
-      c: "unspecified" as const, x: null, y: null, f: 0.9
+      c: "unspecified" as const, condition: null, f: 0.9
     };
     valid.submission_adjudication.r[candidateId].relations = [boundedRelation];
     expect(schema.safeParse(valid).success).toBe(true);
+    const boundedCondition = structuredClone(valid);
+    boundedCondition.submission_adjudication.r[candidateId]!.relations[0]!.condition = {
+      start_in_relation_utf16: 0,
+      length_utf16: 500
+    };
+    expect(schema.safeParse(boundedCondition).success).toBe(true);
     const zeroLength = structuredClone(valid);
     (zeroLength.submission_adjudication.r[candidateId]!.relations[0] as { n: number }).n = 0;
     expect(schema.safeParse(zeroLength).success).toBe(false);
@@ -409,8 +551,36 @@ describe("OpenAI Responses structured output adapter", () => {
     const lowConfidence = structuredClone(valid);
     (lowConfidence.submission_adjudication.r[candidateId]!.relations[0] as { f: number }).f = 0.899;
     expect(schema.safeParse(lowConfidence).success).toBe(false);
+    const legacyCondition = structuredClone(valid) as unknown as {
+      submission_adjudication: { r: Record<string, { relations: Array<Record<string, unknown>> }> };
+    };
+    delete legacyCondition.submission_adjudication.r[candidateId]!.relations[0]!.condition;
+    legacyCondition.submission_adjudication.r[candidateId]!.relations[0]!.x = 0;
+    legacyCondition.submission_adjudication.r[candidateId]!.relations[0]!.y = 1;
+    expect(schema.safeParse(legacyCondition).success).toBe(false);
+    const missingCondition = structuredClone(valid);
+    delete (missingCondition.submission_adjudication.r[candidateId]!.relations[0] as
+      unknown as Record<string, unknown>).condition;
+    expect(schema.safeParse(missingCondition).success).toBe(false);
+    const zeroCondition = structuredClone(boundedCondition);
+    zeroCondition.submission_adjudication.r[candidateId]!.relations[0]!.condition!.length_utf16 = 0;
+    expect(schema.safeParse(zeroCondition).success).toBe(false);
+    const oversizedCondition = structuredClone(boundedCondition);
+    oversizedCondition.submission_adjudication.r[candidateId]!.relations[0]!.condition!.length_utf16 = 501;
+    expect(schema.safeParse(oversizedCondition).success).toBe(false);
+    const outOfSchemaStart = structuredClone(boundedCondition);
+    outOfSchemaStart.submission_adjudication.r[candidateId]!.relations[0]!.condition!
+      .start_in_relation_utf16 = 500;
+    expect(schema.safeParse(outOfSchemaStart).success).toBe(false);
+    const extraConditionField = structuredClone(boundedCondition) as unknown as {
+      submission_adjudication: { r: Record<string, { relations: Array<{
+        condition: Record<string, unknown> | null;
+      }> }> };
+    };
+    extraConditionField.submission_adjudication.r[candidateId]!.relations[0]!.condition!.end = 500;
+    expect(schema.safeParse(extraConditionField).success).toBe(false);
     expect(schema.safeParse({ ...valid, submission_adjudication: {
-      ...valid.submission_adjudication, v: 3
+      ...valid.submission_adjudication, v: 4
     } }).success).toBe(false);
     const missing = structuredClone(valid);
     delete missing.submission_adjudication.r[binding.ordered_candidate_ids[0]!];
@@ -455,7 +625,7 @@ describe("OpenAI Responses structured output adapter", () => {
         const candidateId = Object.keys(output.submission_adjudication.r)[0]!;
         output.submission_adjudication.r[candidateId].relations = [{
           a: 0, n: text.length, s: "ambiguous", m: "unknown", c: "unspecified",
-          x: null, y: null, f: 0.9
+          condition: null, f: 0.9
         }];
         return { id: "response-explicit-uncertainty", output_parsed: output,
           usage: { input_tokens: 100, output_tokens: 100 } };
@@ -519,7 +689,7 @@ describe("OpenAI Responses structured output adapter", () => {
         malformed.submission_adjudication.r[firstCandidate].relations = [{
           a: Number.MAX_SAFE_INTEGER - 100, n: 500,
           s: "ambiguous", m: "unknown", c: "unspecified",
-          x: null, y: null, f: 0.9
+          condition: null, f: 0.9
         }];
         return {
           id: "response-overflow-private-delivery",

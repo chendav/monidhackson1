@@ -14,6 +14,14 @@
   remain withheld. Known run cost was USD 1.064624 with no failed attempt.
 - T13 is the active bounded repair. Deployment and paid runs are prohibited
   until QA11 PASS with P0=0/P1=0.
+- T13 implementation is now frozen in the worktree. Focused tests passed
+  165/165, official fixtures 3/3, full checks 757 passed with 10 skips, build
+  passed, and Playwright passed 14 with 2 credentialed skips. These are
+  implementer handoff facts, not independent acceptance; QA11 is active.
+- QA11 independently returned PASS with P0=0/P1=0/P2=1 and deployment allowed.
+  The single P2 is runtime stripping of provider-forbidden unknown relation
+  siblings; it does not affect authority and is deferred to avoid blocking the
+  core production proof.
 
 Updated: 2026-09-04
 

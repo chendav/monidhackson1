@@ -43,16 +43,16 @@ regression_checks:
 
 review:
   required: true
-  verdict: BLOCKED
+  verdict: PASS
   active_review_task: QA11
   revision_round: 0
-  starts_after: T13 implementation handoff
-  implementation_handoff: pending
-  active_failures: [T13_NOT_IMPLEMENTED]
+  starts_after: T13 implementation handoff independently reviewed
+  implementation_handoff: handoff-backend.md T13 Implementation — Domain-bounded coverage and relation-relative conditions
+  active_failures: []
   p0: 0
   p1: 0
-  p2: 0
-  deployment_allowed: false
+  p2: 1
+  deployment_allowed: true
   previous_review:
     task: QA4
     verdict: REQUEST_CHANGES
@@ -72,8 +72,8 @@ governance_may_change_automatically: false
 
 current_release_evidence:
   observed_at: 2026-09-04
-  deployed_commit: 40f425c596a1a91c216d49178ff61e065334b676
-  deployment_id: dpl_563oYhacTDPjn4XSSB3vT6DLF7zx
+  deployed_commit: 6916da8b504ff064d721661b89e7dc1d2afb18d0
+  deployment_id: dpl_8tXppF1sZrqfZMN9czN1C7tRuo9M
   public_url: https://rfp-xray.vercel.app
   health:
     http_status: 200
@@ -83,12 +83,12 @@ current_release_evidence:
   last_controlled_edmonton_run:
     result: ready_but_core_accuracy_failed
     actual_cost_usd: 0.0036
-    estimated_cost_usd: 1.109656
+    estimated_cost_usd: 1.061024
     app_controlled_cleanup: confirmed
-    limitation: v3 proves one global record-receipt failure plus independently unresolved submission adjudication, but did not retain either initiating bounded reason.
+    limitation: T12 left fifteen semantic uncertainties and one condition mismatch; T13 is accepted locally but not yet deployed or provider-tested.
   evidence_boundary: Health and terminal READY do not override the failed core accuracy gate.
 
 release:
   status: NOT_READY
-  next_gate: Commit T10, apply additive schema-v11 migration, deploy and attest the exact build, then run one controlled Edmonton pilot.
+  next_gate: Commit and deploy accepted T13, attest the exact build and provider contract, then run one controlled Edmonton pilot.
   remaining_after_edmonton: CER campaign, 12-citation review, final video, contest submission, and five publications.

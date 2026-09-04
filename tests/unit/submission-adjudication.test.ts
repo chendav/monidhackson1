@@ -255,7 +255,7 @@ describe("agent-semantic submission adjudication", () => {
     expect(resolveVerifiedSubmissionChannel(artifact)).toMatchObject({ status: "unresolved" });
   });
 
-  it("treats lexical channel matches as hints rather than semantic authority", () => {
+  it("maps a source-bound unfamiliar digital mechanism to the generic electronic channel", () => {
     const ledger = discoverSubmissionCandidateLedger([document([
       "Bids must be lodged through SecureDrop."
     ])]);
@@ -265,7 +265,7 @@ describe("agent-semantic submission adjudication", () => {
         relation_end_utf16: "Bids must be lodged through SecureDrop.".length,
         subject_scope: "whole_bid",
         modality: "required",
-        channel: "portal",
+        channel: "electronic",
         condition_start_utf16: null,
         condition_end_utf16: null,
         confidence: 0.99
@@ -273,8 +273,30 @@ describe("agent-semantic submission adjudication", () => {
     });
     expect(artifact.complete).toBe(true);
     expect(resolveVerifiedSubmissionChannel(artifact)).toMatchObject({
-      status: "unique", channel: "portal"
+      status: "unique", channel: "electronic"
     });
+  });
+
+  it("keeps unrelated ambiguity complete-empty and target delivery uncertainty fail-closed", () => {
+    const unrelated = discoverSubmissionCandidateLedger([document([
+      "Pricing assumptions may be interpreted in several ways."
+    ])]);
+    expect(verify(unrelated)).toMatchObject({ complete: true, unresolved_reasons: [] });
+    expect(resolveVerifiedSubmissionChannel(verify(unrelated)))
+      .toMatchObject({ status: "none", channel: null });
+
+    const delivery = discoverSubmissionCandidateLedger([document([
+      "The response must travel by an unclassifiable mechanism."
+    ])]);
+    const uncertain = verify(delivery, (response) => {
+      response.coverage_units[0]!.coverage = "uncertain";
+    });
+    expect(uncertain).toMatchObject({
+      complete: false,
+      unresolved_reasons: ["semantic_uncertainty"]
+    });
+    expect(resolveVerifiedSubmissionChannel(uncertain))
+      .toMatchObject({ status: "unresolved", channel: null });
   });
 
   it("binds ledger digest and ordered batch manifests", () => {

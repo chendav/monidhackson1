@@ -2,8 +2,8 @@
 
 - Task ID: MH-001
 - Title: RFP X-Ray contest MVP
-- Status: active; T12 production evidence failed the core gate and T13 is the
-  only authorized implementation before independent QA11
+- Status: active; T13 passed independent QA11 with P0=0/P1=0/P2=1 and is
+  authorized for commit, exact deployment attestation, and one Edmonton proof
 - Chief owner: chief
 - Updated: 2026-09-04
 - Active packet: `docs/specs/MH-001-rfp-xray/`
@@ -92,11 +92,9 @@ cost. The product is document-only and does not search for tenders.
 
 ## Immediate Next Action
 
-Implement T13's delivery-domain coverage definition and relation-relative
-condition object while preserving canonical ownership and every current veto;
-run the falsification matrix and full local gates, then obtain independent
-QA11. Only after QA11 PASS may the Chief deploy and authorize one controlled
-Edmonton pilot. A full golden pass remains required before the CER campaign.
+Commit and deploy accepted T13, refresh exact-deployment runtime/provider
+attestations, then authorize one controlled Edmonton pilot. Do not start the
+ten-run or CER campaign until this first run passes the core gate.
 
 ## Verification Cadence
 

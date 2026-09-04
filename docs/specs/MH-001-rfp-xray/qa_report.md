@@ -506,3 +506,35 @@ Independent commands and results:
 Actual provider acceptance and post-T12 production results remain unproven and
 belong to the separately controlled deployment/run gate. QA10 Revision 1
 authorizes that gate; it does not itself make the overall release ready.
+
+## QA11 — Domain-bounded coverage and relation-relative conditions
+
+```yaml
+verdict: PASS
+revision_round: 0
+p0: 0
+p1: 0
+p2: 1
+deployment_allowed: true
+```
+
+Independent review confirmed that delivery-domain coverage distinguishes
+complete-empty unrelated cores from plausible unresolved delivery relations;
+unfamiliar whole-bid SecureDrop resolves only to source-bound generic
+`electronic`, while question-only SecureDrop does not become a package channel.
+Wire v5 rejects v4 and malformed condition shapes, converts a single
+relation-relative condition coordinate system, and retains server containment,
+canonical ownership, mixed-relevance, relation-gap, prompt-taint, one-call,
+no-retry, cost, and deadline gates.
+
+Evidence: focused T13/authority tests 165/165; closed-world/security/authority
+tests 94/94; official Edmonton/CER audit 3/3; `pnpm check` with 757 passed and
+10 skipped. The Reviewer used the accepted layered cadence and relied on the
+frozen handoff's already successful build and browser run instead of repeating
+them. No network, provider, paid, deployment, commit, or push action occurred.
+
+Non-blocking P2: the runtime relation Zod object is not strict and strips unknown
+sibling properties when called directly. The provider-facing generated JSON
+Schema has `additionalProperties:false`, and stripped values cannot influence
+authority. Record `.strict()` hardening for later; it does not block the T13
+deployment proof.

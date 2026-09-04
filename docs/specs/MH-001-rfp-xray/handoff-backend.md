@@ -2879,3 +2879,133 @@ lexicon, commit, push, release-evidence edit, or Reviewer-verdict edit occurred.
 ### Proposed long-term memory
 
 None. This is a project-specific citation-ownership correction.
+
+## T13 Implementation — Domain-bounded coverage and relation-relative conditions
+
+This is the bounded T13 implementation handoff for QA11. It is implementation
+evidence, not self-certification. No network/provider call, credential access,
+paid call, deployment, database operation or migration, commit, push, public
+API change, channel lexicon, release-evidence edit, or Reviewer-verdict edit
+occurred.
+
+### Implemented contracts
+
+1. The provider-private submission wire is now version 5. Its dynamic schema
+   still fixes the batch ID, ledger digest, and complete candidate-key set, but
+   each relation now has one required nullable `condition` value. A non-null
+   condition is the strict object `{ start_in_relation_utf16, length_utf16 }`;
+   its start is 0 through 499 and its length is 1 through 500. Wire v4, legacy
+   `x`/`y`, missing condition values, extra condition fields, zero/oversized
+   lengths, and invalid starts are rejected by the same paid response parse.
+2. The adapter uses checked addition to convert the relation-relative condition
+   into absolute PDF.js page offsets. The existing source verifier remains the
+   authority for exact source slicing, unique midpoint ownership, the 500-unit
+   relation limit, confidence, and full condition containment inside the
+   already verified relation. An out-of-relation condition therefore produces
+   the existing fixed `condition_mismatch` reason rather than being clipped or
+   ignored.
+3. `coverage` now has an explicit delivery-relation domain. `complete` means an
+   exhaustive scan of the owned core for predicates linking an artifact, whole
+   bid, question, or other subject to transmission, lodging, delivery, or
+   receipt. `complete` plus an empty relation array is required when no
+   plausible relation in that domain exists, even if unrelated procurement
+   prose is ambiguous or a relation is visible only in halo context.
+   `uncertain` remains fail-closed and is reserved for a plausible owned
+   delivery relation that cannot be bounded or classified, truncated relevant
+   context, or exhausted relation capacity.
+4. An unfamiliar but otherwise clear named digital mechanism is mapped to the
+   bounded generic `electronic` channel. This is Agent classification grounded
+   in an exact source relation, not a new keyword dictionary. Ambiguous scope,
+   unknown modality, an unspecified whole-bid channel, prompt taint, record
+   mixed relevance, and exact relation gaps retain their existing fail-closed
+   behavior.
+5. No model call, retry, cost reservation, deadline, ledger/core/halo ownership,
+   record-authority, Q&A, persistence, audit, or public response contract was
+   changed. The response still carries delivery adjudication and inline record
+   relevance in the existing paid extraction call only.
+
+### No-cost falsification evidence
+
+- The v5 formatter/decoder suite covers null and valid boundary conditions,
+  relation-relative conversion from a nonzero halo start, checked offset
+  rejection, an out-of-relation condition, missing/legacy/extra shapes, zero
+  and oversized lengths, low confidence, wrong literals/keys, and malformed
+  delivery settling exactly one failed paid attempt with no retry.
+- Coverage tests distinguish unrelated ambiguous pricing prose
+  (`complete`/empty) from a plausible but unclassifiable response-delivery
+  predicate (`uncertain`/global source-ledger veto). Existing tests continue to
+  distinguish whole-bid Email from question/artifact delivery and preserve
+  canonical core ownership at page and halo boundaries.
+- The unfamiliar `SecureDrop` control publishes only when an exact source-bound
+  whole-bid relation classifies it as generic `electronic`; ambiguous or
+  relationless variants remain unresolved or discarded. Existing record tests
+  keep mixed relevance and relation gaps fail-closed and keep suppressed
+  evidence out of persisted Q&A.
+- Official local fixtures preserve 85 Edmonton cores in 3 batches and 116 CER
+  cores in 5 batches. Edmonton v5 control-plane-only bounds are 6,700 / 7,592 /
+  9,222 bytes (23,514 aggregate, 26,486 aggregate reserve; minimum per-batch
+  reserve 7,444) and dynamic format sizes are 39,037 / 35,676 / 43,521 bytes.
+  CER bounds are 6,014 / 5,942 / 5,931 / 7,423 / 9,131 bytes (34,441 aggregate,
+  15,559 aggregate reserve; minimum per-batch reserve 869) and dynamic format
+  sizes are 33,434 / 32,315 / 34,557 / 37,918 / 30,074 bytes. These are local
+  formatter/control measurements, not provider-token or full-response claims.
+
+### Changed files in T13
+
+- `src/lib/providers/openai.ts`
+- `tests/unit/openai-adapter.test.ts`
+- `tests/unit/submission-adjudication.test.ts`
+- `tests/golden/official-fixture-audit.test.ts`
+- `docs/specs/MH-001-rfp-xray/tasks.md`
+- This T13 section in `docs/specs/MH-001-rfp-xray/handoff-backend.md`
+
+`src/lib/analysis/submission-channel.ts` required no T13 edit: its internal
+absolute-offset verifier already performs the authoritative checked bounds,
+condition containment, ownership, source, confidence, and semantic checks after
+the private adapter converts the v5 wire.
+
+### Exact checks
+
+- `pnpm exec vitest run tests/unit/openai-adapter.test.ts tests/unit/submission-adjudication.test.ts tests/unit/record-authority.test.ts tests/unit/summary-recovery.test.ts --reporter=dot`:
+  PASS, 4 files and 165 tests.
+- The first local official measurement intentionally encountered the frozen v4
+  byte expectations after emitting the new v5 values; no product assertion
+  failed. After freezing those measured v5 values, the final
+  `$env:RFP_XRAY_FIXTURE_DIR='D:\monidhackson\.data\official-fixtures'; pnpm exec vitest run tests/golden/official-fixture-audit.test.ts --reporter=dot`
+  passed, 1 file and 3 tests; all five PDFs remained outside Git.
+- The first `pnpm check` stopped at five TypeScript errors in newly added test
+  fixture inference. After adding explicit test-only wire types, the final
+  `pnpm check` passed: ESLint and TypeScript passed, 58 test files passed/4
+  skipped, and 757 tests passed/10 skipped.
+- `pnpm build`: PASS; Next production compilation, TypeScript, 9 Workflow
+  steps, 5 workflows, and all 13 static-generation entries completed.
+- `pnpm test:e2e`: PASS, 14 browser tests passed and 2 credentialed live-storage
+  tests skipped.
+- `git diff --check`: PASS; only Git's Windows LF-to-CRLF notices were emitted.
+- Scoped changed-content credential-pattern scan: PASS, zero suspicious secret
+  values.
+
+### Confirmed, inferred, unknown, and next gate
+
+- Confirmed: wire v5 makes the condition coordinate system singular and
+  structurally bounded, while the server still rejects any condition outside
+  its exact verified relation.
+- Confirmed: unrelated ambiguity no longer asks the Agent to falsify an
+  unbounded understanding claim; plausible delivery ambiguity still blocks
+  source-ledger completion and cannot publish a submission method.
+- Confirmed: all local budget, one-call/no-retry, deadline, core ownership,
+  mixed-relevance, relation-gap, persisted-Q&A, official citation, build, and
+  browser regressions are green or unchanged.
+- Inferred: the narrower coverage definition and single condition coordinate
+  system address the T12 production classes of fifteen semantic uncertainties
+  and one condition mismatch without weakening safety.
+- Unknown: provider acceptance of wire v5 and actual post-T13 Edmonton audit
+  counts remain unproven because deployment and network/paid calls were
+  forbidden.
+- QA11 is the next independent gate. Deployment remains blocked until the
+  Reviewer returns `PASS` with P0=0 and P1=0.
+
+### Proposed long-term memory
+
+None. The T13 provider-private contract remains project-specific pending QA11
+and a later Chief-authorized controlled production run.

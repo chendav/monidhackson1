@@ -357,7 +357,7 @@ exclude_paths: [src/app/**, src/components/**, drizzle/**]
 edits_allowed: true
 acceptance: [AC-2, AC-4, AC-5, AC-9, AC-10]
 handoff: handoff-backend.md
-status: in_progress
+status: completed_accepted
 ```
 
 ## QA11 T13 contract review
@@ -372,7 +372,7 @@ exclude_paths: []
 edits_allowed: false
 acceptance: [AC-2, AC-4, AC-5, AC-9, AC-10, AC-11]
 handoff: qa_report.md
-status: blocked_on_T13
+status: completed_pass
 ```
 
 ## T8 Publication/submission authority separation
