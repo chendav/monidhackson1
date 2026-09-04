@@ -306,3 +306,40 @@ Edmonton/CER fixtures; full check, build, and browser tests.
 
 No deployment or paid run is authorized until independent QA11 returns PASS
 with P0=0 and P1=0.
+
+## T14 Addendum — Bind the contract, not live telemetry
+
+The first CER production attempt failed before paid dispatch because the
+application hashes the entire credentialed Monid inspect response. A non-paid
+reinspection confirmed that the response mixes stable parse identity, strict
+request schema, and price terms with live latency telemetry and descriptive
+catalog metadata. The whole-response hash is therefore not a usable contract.
+
+Chief disposition: ACCEPT one shared, versioned semantic projection used by
+both runtime and release attestation; REJECT blind hash refreshes, heuristic
+field-name stripping, or weakening paid-dispatch validation. The projection
+binds exact `context.dev /parse POST` identity, every validation-bearing request
+schema keyword, strict property set, and exact tiered USD price structure. Only
+an explicit allowlist of known telemetry and presentation fields is excluded;
+unknown schema or pricing semantics fail closed.
+
+Configured result, lifecycle, provider-status, cost paths, artifact hosts, and
+runtime types remain a separately labeled adapter contract. ZDR unavailable,
+observed seven-day expiry, and absence of early delete remain historically
+observed evidence rather than claims derived from inspect. Terminal responses
+continue to be validated on every paid run.
+
+The same semantic contract hash stays in the existing environment, attestation,
+and cost-provenance fields to avoid an API or database migration. Tests must
+prove telemetry-only changes keep the hash stable while identity, required
+properties, types, formats, enums, bounds, strictness, tier selector, amount,
+currency, charge unit, configured paths, or artifact hosts block dispatch.
+
+The provider describes a 25 MB input ceiling without a byte-valued schema
+limit. The existing 25 MiB application limit must not be described as
+provider-verified; T14 should conservatively use 25,000,000 bytes if that value
+is enforced in the same bounded change, otherwise retain the existing limit
+with an explicit unverified-unit risk and do not expand the claim.
+
+No second CER attempt is authorized until T14 passes focused tests and
+independent QA12 with P0=0/P1=0, then the exact deployment is re-attested.

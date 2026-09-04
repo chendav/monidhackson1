@@ -387,7 +387,7 @@ exclude_paths: [src/app/**, src/components/**, src/lib/analysis/**, drizzle/**]
 edits_allowed: true
 acceptance: [AC-3, AC-9, AC-10]
 handoff: handoff-backend.md
-status: design_in_progress
+status: in_progress
 ```
 
 ## QA12 T14 provider fingerprint review
