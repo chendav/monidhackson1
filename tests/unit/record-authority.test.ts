@@ -27,6 +27,7 @@ import {
 import { answerFromPersistedEvidence } from "@/lib/analysis/closed-world";
 import { reconcileVersionedFacts } from "@/lib/analysis/reconciliation";
 import { mergeDrafts } from "@/lib/providers/openai";
+import { createRecordAuthorityAudit } from "@/lib/runs/record-authority-audit";
 
 const sha = "7".repeat(64);
 
@@ -645,6 +646,14 @@ describe("T7 record-bound semantic authority", () => {
     expect(Object.keys(result.origin_record_key_to_merged_record_id)).toHaveLength(2);
     expect(merged.claims).toHaveLength(1);
     expect(merged.claims[0]?.claim_id).toBe("a-model-id");
+    const audit = createRecordAuthorityAudit(result);
+    expect(audit).toMatchObject({
+      version: 4,
+      complete: false,
+      integrity_complete: true,
+      package_veto: true,
+      counters: { relevance: { mixed: 1, missing: 0 } }
+    });
   });
 
   it("keeps different semantics that reuse one model ID separate", () => {
@@ -929,6 +938,85 @@ describe("T7 record-bound semantic authority", () => {
     expect(result.summary.submission_method).toBe("Email");
     expect(result.claims.some((claim) => claim.claim_text === submissionClause)).toBe(false);
     expect(result.requirements.some((requirement) => requirement.text === submissionClause)).toBe(false);
+  });
+
+  it("keeps a verified recovered evaluation field despite model s/u rules for that field", () => {
+    const email = "Bids must be submitted by email.";
+    const mandatory =
+      "A bid must comply with the requirements of the bid solicitation and meet all mandatory technical evaluation criteria to be declared responsive.";
+    const selection =
+      "The responsive bid with the lowest evaluated price will be recommended for award of a contract.";
+    const pages = [email, `4.2 Basis of Selection\n4.2.1 Mandatory Technical Criteria\n${mandatory} ${selection}`];
+    const analysis = draft({
+      summary: { ...draft().summary, submission_method: "Email",
+        current_selection_method: "Highest combined rating" },
+      evaluation: { rules: [{
+        id: "model-expanded-selection", topic: "award selection method",
+        field: "selection_method", value: "Highest combined rating",
+        document_sha256: sha, amendment_number: null, effect: "add",
+        citations: [citation(selection)]
+      }, {
+        id: "model-same-selection", topic: "award selection method",
+        field: "selection_method", value: "Lowest evaluated price",
+        document_sha256: sha, amendment_number: null, effect: "add",
+        citations: [citation(selection)]
+      }] }
+    });
+    const { authority, state } = verifyBundle({
+      pages,
+      analysis,
+      annotations: [["e", 0, "s"], ["e", 1, "u"]],
+      relationForPage: (_page, text) => relation(text, email)
+    });
+    expect(authority).toMatchObject({ complete: true, package_veto: true });
+    expect(authority.unresolved_reasons).toEqual(expect.arrayContaining([
+      "relationless_submission_record", "semantic_uncertainty"
+    ]));
+    const result = materializeAnalysis({
+      draft: analysis,
+      documents: [state.source],
+      manifests: [manifest(pages.length)],
+      costs: [],
+      submissionAdjudication: state.submission,
+      recordAuthority: authority,
+      expiresAt: new Date("2026-09-04T00:00:00.000Z")
+    }).result;
+    expect(result.summary.submission_method).toBeNull();
+    expect(result.evaluation.selection_method).toBe("Lowest evaluated price");
+    expect(result.summary.current_selection_method).toBe("Lowest evaluated price");
+    expect(result.evaluation.citations.length).toBeGreaterThan(0);
+    expect(result.evaluation.citations.every((citation) =>
+      citation.verified && citation.pdf_page_1based === 2
+    )).toBe(true);
+  });
+
+  it("preserves the authoritative model evaluation path when no field is recovered", () => {
+    const selection =
+      "The responsive bid with the lowest evaluated price will be recommended for award of a contract.";
+    const analysis = draft({
+      summary: { ...draft().summary, current_selection_method: "Lowest evaluated price" },
+      evaluation: { rules: [{
+        id: "model-only-selection", topic: "award selection method",
+        field: "selection_method", value: "Lowest evaluated price",
+        document_sha256: sha, amendment_number: null, effect: "add",
+        citations: [citation(selection)]
+      }] }
+    });
+    const { authority, state } = verifyBundle({
+      pages: [selection], analysis, annotations: [["e", 0, "n"]]
+    });
+    expect(authority).toMatchObject({ complete: true, package_veto: false });
+    const result = materializeAnalysis({
+      draft: analysis,
+      documents: [state.source],
+      manifests: [manifest(1)],
+      costs: [],
+      submissionAdjudication: state.submission,
+      recordAuthority: authority,
+      expiresAt: new Date("2026-09-04T00:00:00.000Z")
+    }).result;
+    expect(result.evaluation.selection_method).toBe("Lowest evaluated price");
+    expect(result.summary.current_selection_method).toBe("Lowest evaluated price");
   });
 
   it("carries s contributor lineage into a generated conflict and vetoes the method", () => {

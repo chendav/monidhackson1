@@ -33,7 +33,7 @@ const SubmissionVetoReasonSchema = z.object({
   exact_relevance_disagreement: CounterSchema
 }).strict();
 
-const CurrentRecordAuthorityAuditCliSchema = z.object({
+const Version3RecordAuthorityAuditCliSchema = z.object({
     version: z.literal(3),
     ...commonFields,
     counters: z.object({
@@ -62,17 +62,51 @@ const CurrentRecordAuthorityAuditCliSchema = z.object({
     }
   });
 
+const CurrentRecordAuthorityAuditCliSchema = z.object({
+    version: z.literal(4),
+    ...commonFields,
+    integrity_complete: z.boolean(),
+    package_veto: z.boolean(),
+    counters: z.object({
+      relevance: z.object({ s: CounterSchema, n: CounterSchema, u: CounterSchema,
+        mixed: CounterSchema, missing: CounterSchema }).strict(),
+      source_binding: z.object({ unlocated: CounterSchema, exact_bound: CounterSchema,
+        coverage_gap: CounterSchema, relation_gap: CounterSchema,
+        relation_conflict: CounterSchema }).strict(),
+      semantic_crosscheck: z.object({ consistent: CounterSchema, disagrees: CounterSchema,
+        unknown: CounterSchema }).strict(),
+      publication: z.object({ verified: CounterSchema, discarded: CounterSchema }).strict(),
+      publication_reason: PublicationReasonSchema,
+      submission_veto_reason: SubmissionVetoReasonSchema
+    }).strict()
+  }).strict().superRefine((audit, context) => {
+    const recordAxes = [audit.counters.relevance, audit.counters.source_binding,
+      audit.counters.semantic_crosscheck, audit.counters.publication,
+      audit.counters.publication_reason];
+    if (recordAxes.some((axis) => Object.values(axis).reduce((sum, value) => sum + value, 0) !==
+      audit.record_count)) {
+      context.addIssue({ code: "custom", message: "record_authority_counter_mismatch" });
+    }
+    if (Object.values(audit.counters.submission_veto_reason)
+      .reduce((sum, value) => sum + value, 0) > audit.record_count) {
+      context.addIssue({ code: "custom", message: "record_authority_veto_counter_mismatch" });
+    }
+    if (audit.complete !== (audit.integrity_complete && !audit.package_veto)) {
+      context.addIssue({ code: "custom", message: "record_authority_completeness_mismatch" });
+    }
+  });
+
 export const RecordAuthorityAuditCliSchema = z.union([
   z.object({ version: z.union([z.literal(1), z.literal(2)]), ...commonFields }).strict(),
+  Version3RecordAuthorityAuditCliSchema,
   CurrentRecordAuthorityAuditCliSchema
 ]);
 
 const RunIdSchema = z.string().uuid();
 
 export function formatRecordAuthorityAudit(runId, rawAudit) {
-  const id = RunIdSchema.parse(runId);
-  const audit = RecordAuthorityAuditCliSchema.parse(rawAudit);
-  return { run_id: id, ...audit };
+  RunIdSchema.parse(runId);
+  return RecordAuthorityAuditCliSchema.parse(rawAudit);
 }
 
 export async function readRecordAuthorityAudit(runId, databaseUrl, sqlFactory = neon) {

@@ -45,7 +45,9 @@ describe("record authority audit persistence", () => {
     expect(Object.keys(audit).toSorted()).toEqual([
       "complete",
       "counters",
+      "integrity_complete",
       "manifest_digest",
+      "package_veto",
       "receipt_byte_length",
       "receipt_limit_bytes",
       "record_count",
@@ -53,16 +55,18 @@ describe("record authority audit persistence", () => {
       "version"
     ]);
     expect(audit).toMatchObject({
-      version: 3,
+      version: 4,
       manifest_digest: manifest.record_manifest_digest,
       receipt_byte_length: manifest.receipt_byte_length,
       receipt_limit_bytes: MAX_RECORD_AUTHORITY_RECEIPT_BYTES,
       record_count: 0,
       complete: false,
+      integrity_complete: false,
+      package_veto: false,
       recorded_at: "2026-09-04T12:01:00.000Z"
     });
-    expect(audit.version === 3 && audit.counters).toEqual({
-      relevance: { s: 0, n: 0, u: 0, missing: 0 },
+    expect(audit.version === 4 && audit.counters).toEqual({
+      relevance: { s: 0, n: 0, u: 0, mixed: 0, missing: 0 },
       source_binding: { unlocated: 0, exact_bound: 0, coverage_gap: 0,
         relation_gap: 0, relation_conflict: 0 },
       semantic_crosscheck: { consistent: 0, disagrees: 0, unknown: 0 },
@@ -88,7 +92,7 @@ describe("record authority audit persistence", () => {
       ...audit,
       source_url: "https://private.invalid/tender.pdf"
     })).toThrow();
-    if (audit.version !== 3) throw new Error("expected_v3_audit");
+    if (audit.version !== 4) throw new Error("expected_v4_audit");
     const inconsistent = structuredClone(audit);
     inconsistent.counters.relevance.s = 1;
     expect(RecordAuthorityAuditSchema.safeParse(inconsistent).success).toBe(false);
@@ -109,7 +113,10 @@ describe("record authority audit persistence", () => {
       version: 1,
       record_manifest_digest: "1".repeat(64)
     }, new Date("2026-09-04T12:02:00Z"));
-    expect(legacy).toMatchObject({ version: 3, complete: false, record_count: 0 });
+    expect(legacy).toMatchObject({
+      version: 4, complete: false, integrity_complete: false,
+      package_veto: false, record_count: 0
+    });
     const legacyAudit = {
       manifest_digest: audit.manifest_digest,
       receipt_byte_length: audit.receipt_byte_length,
@@ -122,6 +129,27 @@ describe("record authority audit persistence", () => {
       ...legacyAudit,
       version: 1
     }).version).toBe(1);
+    const historicalV3 = {
+      version: 3,
+      ...legacyAudit,
+      counters: {
+        relevance: { s: 0, n: 0, u: 0, missing: 0 },
+        source_binding: { unlocated: 0, exact_bound: 0, coverage_gap: 0,
+          relation_gap: 0, relation_conflict: 0 },
+        semantic_crosscheck: { consistent: 0, disagrees: 0, unknown: 0 },
+        publication: { verified: 0, discarded: 0 },
+        publication_reason: { verified: 0, source_unlocated: 0, source_coverage_gap: 0,
+          source_relation_gap: 0, source_relation_conflict: 0, semantic_unknown: 0,
+          semantic_disagreement: 0, receipt_integrity: 0 },
+        submission_veto_reason: { exact_submission_coverage_gap: 0,
+          exact_submission_relation_gap: 0, exact_submission_relation_conflict: 0,
+          exact_non_submission_overlap: 0, exact_semantic_uncertainty: 0,
+          exact_relevance_disagreement: 0 }
+      }
+    };
+    expect(formatRecordAuthorityAudit(runId, historicalV3).version).toBe(3);
+    expect(JSON.stringify(formatRecordAuthorityAudit(runId, historicalV3)))
+      .not.toContain(runId);
   });
 
   it("round-trips the nullable audit through the Neon row mapping", () => {
@@ -187,5 +215,23 @@ describe("record authority audit persistence", () => {
     expect(exitCode).toBe(2);
     expect(stdout).toEqual([]);
     expect(stderr).toEqual(["record_authority_audit_not_found"]);
+  });
+
+  it("prints only the sanitized audit and never echoes the raw run id", async () => {
+    const audit = createRecordAuthorityAudit(
+      unresolvedRecordAuthority("fixture_incomplete"),
+      new Date("2026-09-04T12:01:00Z")
+    );
+    const stdout: string[] = [];
+    const exitCode = await runCli([runId], {
+      databaseUrl: "postgres://redacted",
+      reader: async (id: string) => formatRecordAuthorityAudit(id, audit),
+      stdout: (line: string) => stdout.push(line),
+      stderr: () => {}
+    });
+    expect(exitCode).toBe(0);
+    expect(stdout).toHaveLength(1);
+    expect(stdout[0]).not.toContain(runId);
+    expect(JSON.parse(stdout[0]!)).toEqual(audit);
   });
 });

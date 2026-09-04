@@ -46,14 +46,18 @@ function envelope(
   analysis: DraftAnalysis = emptyDraft(),
   relationsByCandidate: Record<string, unknown[]> = {}
 ) {
-  const withRelevance = <T extends object>(records: T[]) => records.map((record) => ({
+  type PrivateRelevance = "whole_bid_submission_channel" |
+    "not_whole_bid_submission_channel" | "uncertain";
+  const withRelevance = <T extends object>(records: T[]): Array<T & {
+    submission_relevance: PrivateRelevance;
+  }> => records.map((record) => ({
     ...record,
-    submission_relevance: "n" as const
+    submission_relevance: "not_whole_bid_submission_channel" as const
   }));
   const format = (request.text as { format: { schema: { properties: Record<string, unknown> } } }).format;
   const submission = format.schema.properties.submission_adjudication as {
     properties: {
-      v: { const: 2 };
+      v: { const: 3 };
       b: { const: string };
       l: { const: string };
       r: { required: string[] };
@@ -249,7 +253,7 @@ describe("OpenAI Responses structured output adapter", () => {
             unit.candidate_id,
             unit.relations.map((relation) => ({
               a: relation.relation_start_utf16,
-              b: relation.relation_end_utf16,
+              n: relation.relation_end_utf16 - relation.relation_start_utf16,
               s: relation.subject_scope,
               m: relation.modality,
               c: relation.channel,
@@ -312,6 +316,25 @@ describe("OpenAI Responses structured output adapter", () => {
     expect(format.schema.properties.submission_adjudication.properties.r.additionalProperties).toBe(false);
     const valid = envelope({ text: { format } });
     expect(schema.safeParse(valid).success).toBe(true);
+    const candidateId = binding.ordered_candidate_ids[0]!;
+    const boundedRelation = {
+      a: 0, n: 500, s: "ambiguous" as const, m: "unknown" as const,
+      c: "unspecified" as const, x: null, y: null, f: 0.9
+    };
+    valid.submission_adjudication.r[candidateId] = [boundedRelation];
+    expect(schema.safeParse(valid).success).toBe(true);
+    const zeroLength = structuredClone(valid);
+    (zeroLength.submission_adjudication.r[candidateId]![0] as { n: number }).n = 0;
+    expect(schema.safeParse(zeroLength).success).toBe(false);
+    const tooLong = structuredClone(valid);
+    (tooLong.submission_adjudication.r[candidateId]![0] as { n: number }).n = 501;
+    expect(schema.safeParse(tooLong).success).toBe(false);
+    const lowConfidence = structuredClone(valid);
+    (lowConfidence.submission_adjudication.r[candidateId]![0] as { f: number }).f = 0.899;
+    expect(schema.safeParse(lowConfidence).success).toBe(false);
+    expect(schema.safeParse({ ...valid, submission_adjudication: {
+      ...valid.submission_adjudication, v: 2
+    } }).success).toBe(false);
     const missing = structuredClone(valid);
     delete missing.submission_adjudication.r[binding.ordered_candidate_ids[0]!];
     expect(schema.safeParse(missing).success).toBe(false);
@@ -329,11 +352,47 @@ describe("OpenAI Responses structured output adapter", () => {
       claim_id: "claim-1", topic: "fact", claim_text: "A fact.", claim_type: "source",
       confidence: 1, document_sha256: sourceDocument.document_sha256,
       amendment_number: null, effect: "add", supersedes_claim_ids: [], citations: [],
-      submission_relevance: "n"
+      submission_relevance: "not_whole_bid_submission_channel"
     }];
     delete (missingRelevance.analysis.claims[0] as unknown as Record<string, unknown>)
       .submission_relevance;
     expect(schema.safeParse(missingRelevance).success).toBe(false);
+  });
+
+  it("delivers explicit relation uncertainty into the server fail-closed verifier", async () => {
+    const text = "Bids must be submitted through SecureDrop.";
+    const ledger = discoverSubmissionCandidateLedger([{
+      name: "source.pdf", sourceUrl: null, role: "base", amendmentNumber: null,
+      index: {
+        documentSha256: sourceDocument.document_sha256,
+        representationSha256: sha256Hex(text), pagesTotal: 1,
+        pages: [{ pdfPage1Based: 1, printedPageLabel: "1", text,
+          normalizedText: text.toLowerCase(), representationSha256: sha256Hex(text) }],
+        chunks: sourceDocument.evidence_chunks, embeddedJavaScriptDetected: false,
+        indexVersion: "pdfjs-1based-v1"
+      }
+    }]);
+    const client = fakeClient({
+      parse: async (request) => {
+        const output = envelope(request);
+        const candidateId = Object.keys(output.submission_adjudication.r)[0]!;
+        output.submission_adjudication.r[candidateId] = [{
+          a: 0, n: text.length, s: "ambiguous", m: "unknown", c: "unspecified",
+          x: null, y: null, f: 0.9
+        }];
+        return { id: "response-explicit-uncertainty", output_parsed: output,
+          usage: { input_tokens: 100, output_tokens: 100 } };
+      }
+    });
+    const result = await new OpenAIResponsesAdapter(testConfig(), client).extract([{
+      ...sourceDocument, parsed_markdown: text, submission_ledger: ledger
+    }], noopPaidCallbacks);
+    expect(result.submissionAdjudication).toMatchObject({
+      complete: false,
+      unresolved_reasons: ["semantic_uncertainty"]
+    });
+    expect(resolveVerifiedSubmissionChannel(result.submissionAdjudication))
+      .toMatchObject({ status: "unresolved", channel: null });
   });
 
   it("settles malformed dynamic delivery as failed and does not dispatch another paid call", async () => {
@@ -372,6 +431,34 @@ describe("OpenAI Responses structured output adapter", () => {
     })).rejects.toMatchObject({ code: "ANALYSIS_INCOMPLETE", retryable: false });
     expect(paidCalls).toBe(1);
     expect(settlements).toEqual(["failed"]);
+
+    let overflowCalls = 0;
+    const overflowSettlements: string[] = [];
+    const overflowClient = fakeClient({
+      parse: async (request) => {
+        overflowCalls += 1;
+        const malformed = envelope(request);
+        const firstCandidate = Object.keys(malformed.submission_adjudication.r)[0]!;
+        malformed.submission_adjudication.r[firstCandidate] = [{
+          a: Number.MAX_SAFE_INTEGER - 100, n: 500,
+          s: "ambiguous", m: "unknown", c: "unspecified",
+          x: null, y: null, f: 0.9
+        }];
+        return {
+          id: "response-overflow-private-delivery",
+          output_parsed: malformed,
+          usage: { input_tokens: 100, output_tokens: 100 }
+        };
+      }
+    });
+    await expect(new OpenAIResponsesAdapter(testConfig(), overflowClient).extract([{
+      ...sourceDocument, parsed_markdown: text, submission_ledger: ledger
+    }], {
+      beforePaidBatchDispatch: async () => {},
+      settlePaidBatch: async ({ status }) => { overflowSettlements.push(status); }
+    })).rejects.toMatchObject({ code: "ANALYSIS_INCOMPLETE", retryable: false });
+    expect(overflowCalls).toBe(1);
+    expect(overflowSettlements).toEqual(["failed"]);
   });
 
   it("delivers inline relevance for more than forty records without a positional sidecar", async () => {
@@ -394,6 +481,47 @@ describe("OpenAI Responses structured output adapter", () => {
     expect(result.analysis.requirements).toHaveLength(41);
     expect(result.recordAuthority).toMatchObject({ complete: true, package_veto: false });
     expect(result.recordAuthority?.records).toHaveLength(41);
+    expect(JSON.stringify(result.analysis)).not.toContain("submission_relevance");
+  });
+
+  it("decodes descriptive inline relevance across every public record collection", async () => {
+    const cited = [{ document_sha256: sourceDocument.document_sha256, chunk_id: "opaque",
+      evidence_quote: "Untrusted document text", section: null }];
+    const analysis: DraftAnalysis = {
+      ...emptyDraft(),
+      claims: [{ claim_id: "claim", topic: "submission", claim_text: "Untrusted document text",
+        claim_type: "source", confidence: 1, document_sha256: sourceDocument.document_sha256,
+        amendment_number: null, effect: "add", supersedes_claim_ids: [], citations: cited }],
+      requirements: [{ id: "requirement", topic: "payment", category: "financial",
+        text: "Untrusted document text", evidence_needed: null, consequence: null,
+        document_sha256: sourceDocument.document_sha256, amendment_number: null,
+        effect: "add", citations: cited }],
+      risks: [{ id: "risk", topic: "delivery", severity: "medium", category: "contractual",
+        finding: "Untrusted document text", impact: "Untrusted document text",
+        recommended_action: "Untrusted document text",
+        document_sha256: sourceDocument.document_sha256, amendment_number: null,
+        effect: "add", citations: cited }],
+      evaluation: { rules: [{ id: "evaluation", topic: "award", field: "selection_method",
+        value: "Untrusted document text", document_sha256: sourceDocument.document_sha256,
+        amendment_number: null, effect: "add", citations: cited }] }
+    };
+    const client = fakeClient({
+      parse: async (request) => {
+        const output = envelope(request, analysis);
+        output.analysis.claims[0]!.submission_relevance = "whole_bid_submission_channel";
+        output.analysis.requirements[0]!.submission_relevance =
+          "not_whole_bid_submission_channel";
+        output.analysis.risks[0]!.submission_relevance = "uncertain";
+        output.analysis.evaluation.rules[0]!.submission_relevance =
+          "whole_bid_submission_channel";
+        return { id: "response-descriptive-relevance", output_parsed: output,
+          usage: { input_tokens: 100, output_tokens: 500 } };
+      }
+    });
+    const result = await new OpenAIResponsesAdapter(testConfig(), client)
+      .extract([sourceDocument], noopPaidCallbacks);
+    expect(result.recordAuthority?.records.map((record) => [record.kind, record.relevance]))
+      .toEqual([["c", "s"], ["q", "n"], ["r", "u"], ["e", "s"]]);
     expect(JSON.stringify(result.analysis)).not.toContain("submission_relevance");
   });
 

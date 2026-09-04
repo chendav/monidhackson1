@@ -309,3 +309,79 @@ schema and actual T10 production audit values remain intentionally unknown until
 the separately controlled post-QA deployment/run. QA8 permits that controlled
 deployment gate; it does not convert the stale T9 production evidence into a
 release-ready result.
+
+## QA9 — T11 Provider-private bounded-relation repair
+
+```yaml
+verdict: PASS
+revision_round: 0
+p0: 0
+p1: 0
+p2: 0
+deployment_allowed: true
+reviewed_base: ed84568322113af168207810d6deeaeca6c3969d
+```
+
+Independent review found no remaining defect in the bounded T11 scope. The
+strict provider-private schema fixes wire `v=3`, batch and ledger literals, and
+the exact server-owned candidate-key object. Every private record collection
+requires descriptive relevance, which is mechanically decoded to `s|n|u` and
+removed before public Draft parsing (`src/lib/providers/openai.ts:186-272,
+276-300`). Relations carry nonnegative `a`, `n` in 1..500, and confidence in
+0.9..1; the decoder uses checked safe-integer addition (`openai.ts:314-329`).
+The existing downstream verifier still enforces candidate windows, nonempty
+spans, occurrence enclosure, condition containment, overlap agreement,
+prompt-taint, and explicit ambiguous/unknown `semantic_uncertainty`
+(`src/lib/analysis/submission-channel.ts:525-563`). Wire v2, length 0/501,
+confidence .899, missing/extra keys, wrong literals, missing relevance, and
+overflow all fail closed.
+
+The same generated v3 format is used by token-count preflight and paid parsing,
+with one non-retrying paid attempt per batch and existing aggregate token, cost,
+and deadline gates unchanged (`openai.ts:991-1011, 1081-1246`). An unfamiliar
+SecureDrop relation explicitly marked ambiguous/unknown at confidence .9 reaches
+the server veto and cannot become a decisive channel. Canonical equivalent
+records now use the full merge input when selecting merged IDs, and relevance
+disagreement is represented by the bounded `mixed` counter rather than
+misreported as missing (`src/lib/analysis/record-authority.ts:137-149,
+496-523`).
+
+Audit v4 strictly separates `integrity_complete` from `package_veto`, validates
+`complete === integrity_complete && !package_veto`, and keeps historical v3
+rows strict-readable (`src/lib/runs/record-authority-audit.ts:28-109, 121-137`).
+The operator reader uses a UUID only for the parameter-bound lookup and returns
+the strict audit allowlist without the raw run ID, body, URL, IDs, pages,
+offsets, or provider output (`scripts/read-record-authority-audit.mjs:36-112`).
+
+Recovered Evaluation precedence is keyed by verified document plus field, not
+model ID or value, so valid model rules for that same recovered field are
+excluded before reconciliation (`src/lib/analysis/materialize.ts:1655-1665`).
+The shipped s/u test, the no-recovery control, and an additional read-only
+in-memory probe with a separately source-valid contrary selection rule all kept
+the recovered `Lowest evaluated price`; the contrary rule was removed without
+creating a conflict.
+
+Independent commands and results:
+
+- Focused six-suite run: 6 files, 182 tests passed.
+- Official local fixture audit with `RFP_XRAY_FIXTURE_DIR`: Edmonton/CER 3/3
+  passed; v3 formatter/control-plane headroom matched the checked measurements.
+- `pnpm check`: ESLint and TypeScript passed; 58 files passed/4 skipped, 742
+  tests passed/10 skipped.
+- `pnpm build`: production build passed, including 9 Workflow steps, 5
+  workflows, and 13 generated page entries.
+- `$env:CI='1'; pnpm test:e2e`: 14 passed; 2 credentialed Railway live-storage
+  cases skipped as required by this review.
+- `node scripts/read-record-authority-audit.mjs THIS_RAW_RUN_ID_MUST_NOT_ECHO`:
+  exit 64 with only `record_authority_audit_invalid_run_id`.
+- Local dynamic-schema inspection confirmed format name
+  `rfp_xray_analysis_v3`, `strict=true`, exact required candidate keys with no
+  additional properties, `n` 1..500, and confidence .9..1.
+- `git diff --check`: passed with Windows line-ending notices only. Scoped
+  changed-content secret scan found zero key, token, private-key, credentialed
+  database-URL, or AWS-key matches. No public API/UI/SQL migration changed.
+
+Actual provider acceptance and post-T11 production counts remain intentionally
+unknown until the separately controlled deployment and paid falsification run.
+QA9 permits that controlled next gate; it does not itself establish final
+release readiness.

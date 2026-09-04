@@ -2548,3 +2548,129 @@ body persistence, channel lexicon, or Reviewer-verdict edit occurred.
 
 None. T10 is a project-specific provider contract and requires production
 falsification before any durable rule is proposed.
+
+## T11 Implementation — Provider-private bounded-relation repair
+
+This is the bounded T11 implementation handoff for QA9. It is implementation
+evidence, not self-certification. No network/provider call, credential access,
+paid call, deployment, database operation or migration, commit, push, public
+route, source-body persistence, channel lexicon, closing-date inference, or
+Reviewer-verdict edit occurred.
+
+### Implemented contracts
+
+1. The provider-private extraction wire is now version 3. Its strict dynamic
+   schema still requires the exact server-owned candidate keys plus literal
+   batch and ledger digests, but a relation now carries `start + length`; length
+   is structurally limited to 1..500 UTF-16 code units and confidence to
+   0.9..1. The decoder uses checked addition and rejects overflow as
+   non-retryable `ANALYSIS_INCOMPLETE`. Wire v2 is rejected. Existing server
+   window, occurrence, condition-containment, overlap, taint, unfamiliar-channel,
+   budget, deadline, and zero-retry checks are unchanged.
+2. Required inline record relevance is now the descriptive private enum
+   `whole_bid_submission_channel | not_whole_bid_submission_channel | uncertain`.
+   The server alone decodes it to the internal `s|n|u` receipt and strips it from
+   public Draft data. Explicit relation ambiguity/unknown remains representable
+   at decisive confidence and reaches the server's `semantic_uncertainty`
+   fail-closed result rather than being disguised as low confidence.
+3. Record-authority audit writes version 4. It separately exposes bounded
+   `integrity_complete` and `package_veto` booleans, while retaining `complete`
+   as their validated conjunction. Canonically merged relevance disagreement is
+   counted as fixed enum `mixed`, not `missing`. Historical v3 audit rows remain
+   strict-readable. The existing nullable JSONB column accepts v4; no SQL
+   migration or public contract changed.
+4. Canonical record-to-merged-ID planning now uses the same complete record set
+   as `mergeDrafts`, so equivalent records with different model IDs cannot select
+   inconsistent representative IDs. Multiple inline relevances still join
+   conservatively and veto submission safety as a merge disagreement.
+5. Once an Evaluation field is recovered and source-verified for a document,
+   model-authored rules for that same document and field are excluded from
+   reconciliation. Contrary model values and same-value/different-ID `s|u`
+   records therefore cannot clear the recovered field. The ordinary authoritative
+   model path remains covered when no field is recovered.
+6. The record-audit operator reader strictly accepts historical v1-v3 and current
+   v4 allowlists. It uses the UUID only as a bound lookup parameter and no longer
+   echoes the raw run ID; stdout contains only sanitized audit fields, never
+   source text, URLs, pages, offsets, record IDs, or provider output.
+
+### Offline falsification evidence
+
+- Local Structured Outputs formatting accepts wire v3 with exact dynamic keys
+  and literals. Tests reject v2, missing/extra candidates, wrong digests,
+  missing relevance, zero/501-length relations, confidence below 0.9, and
+  checked-add overflow. Malformed delivery produces one failed paid settlement,
+  no retry, and no later paid dispatch.
+- Descriptive relevance is decoded across Claim, Requirement, Risk, and
+  Evaluation. Explicit `ambiguous/unknown/unspecified` SecureDrop output reaches
+  `semantic_uncertainty` and a null unresolved channel. The former 40-record
+  positional boundary remains absent.
+- Merge tests distinguish `mixed=1, missing=0` while keeping package veto
+  observable independently of receipt integrity. Operator tests preserve strict
+  historical v3 parsing and reject inconsistent or additional fields.
+- Recovered Evaluation tests cover a contrary model value, same recovered value
+  under a different model ID with uncertainty, and the no-recovery authoritative
+  model control. Recovered citations remain exact and source-verified.
+- Official local measurements under wire v3 are empirical formatter/control
+  evidence, not provider-token or worst-case response claims. Edmonton dynamic
+  schemas are 29,156 / 31,736 / 31,736 bytes; control-plane envelopes are
+  4,744 / 5,308 / 5,659 bytes (15,711 aggregate), and the representative local
+  authority receipt remains 4,225 / 262,144 bytes. CER dynamic schemas are
+  25,716 / 26,576 / 25,716 / 28,296 / 23,998 bytes; control-plane envelopes are
+  4,152 / 3,955 / 4,377 / 4,488 / 6,121 bytes (23,093 aggregate), and its
+  representative local receipt remains 6,681 / 262,144 bytes.
+
+### Changed files
+
+- `src/lib/providers/openai.ts`
+- `src/lib/analysis/record-authority.ts`
+- `src/lib/analysis/materialize.ts`
+- `src/lib/runs/record-authority-audit.ts`
+- `scripts/read-record-authority-audit.mjs`
+- `tests/unit/openai-adapter.test.ts`
+- `tests/unit/record-authority.test.ts`
+- `tests/unit/record-authority-audit.test.ts`
+- `tests/integration/record-authority-audit.test.ts`
+- `tests/golden/official-fixture-audit.test.ts`
+- This T11 section in `docs/specs/MH-001-rfp-xray/handoff-backend.md`
+
+`src/lib/analysis/submission-channel.ts` required no T11 code edit: the existing
+server verifier already enforces checked source-window bounds after v3 decoding,
+condition containment, maximum quote length, minimum confidence, semantic
+uncertainty, overlap agreement, and prompt-taint gates.
+
+### Exact checks
+
+- `pnpm exec vitest run tests/unit/record-authority-audit.test.ts tests/integration/record-authority-audit.test.ts tests/unit/openai-adapter.test.ts tests/unit/record-authority.test.ts tests/unit/submission-adjudication.test.ts tests/unit/core-field-recovery-materialize.test.ts`:
+  PASS, 6 files and 182 tests.
+- `$env:RFP_XRAY_FIXTURE_DIR='D:\monidhackson\.data\official-fixtures'; pnpm exec vitest run tests/golden/official-fixture-audit.test.ts`:
+  PASS, 1 file and 3 tests; all fixture PDFs remained outside Git.
+- `pnpm check`: PASS; ESLint and TypeScript passed, 58 test files passed/4
+  skipped, and 742 tests passed/10 skipped.
+- `pnpm build`: PASS; Next production compilation, TypeScript, 9 Workflow steps,
+  5 workflows, and all 13 static-generation entries completed.
+- `pnpm test:e2e`: PASS, 14 browser tests passed and 2 credentialed live-storage
+  tests skipped.
+- `git diff --check`: PASS; only Git's Windows LF-to-CRLF notices were emitted.
+- Scoped changed-content credential-pattern scan: PASS, zero suspicious secret
+  values.
+
+### Confirmed, inferred, unknown, and next gate
+
+- Confirmed: the local provider schema formatter represents all T11 bounds and
+  exact dynamic keys; all required local falsifiers and regression gates above
+  pass without a provider call.
+- Confirmed: run and daily caps remain $2.00 and $20.00; extraction reserve,
+  token-count preflight, actual-plan request count, settlement, deadline, and
+  zero-retry paths were not changed.
+- Inferred: wire v3 removes the two production rejection classes observed in
+  T10 (relations longer than 500 cannot parse, and decisive relations below 0.9
+  cannot parse) while providing an explicit conservative uncertainty outlet.
+- Unknown: actual provider acceptance and post-T11 Edmonton audit counts remain
+  unproven because no deployment or paid/network run was authorized.
+- QA9 is the next independent gate. Only its `PASS` with P0=0/P1=0 can authorize
+  Chief-controlled deployment or production falsification.
+
+### Proposed long-term memory
+
+None. Wire v3 and audit v4 remain project-specific contracts pending independent
+QA9 and a later controlled production run.

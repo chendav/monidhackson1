@@ -135,7 +135,7 @@ function zeroCounts<const T extends readonly string[]>(keys: T): Record<T[number
 
 export function recordAuthorityDiagnosticCounters(manifest: VerifiedRecordAuthorityManifest) {
   const counters = {
-    relevance: { s: 0, n: 0, u: 0, missing: 0 },
+    relevance: { s: 0, n: 0, u: 0, mixed: 0, missing: 0 },
     source_binding: { unlocated: 0, exact_bound: 0, coverage_gap: 0, relation_gap: 0,
       relation_conflict: 0 },
     semantic_crosscheck: { consistent: 0, disagrees: 0, unknown: 0 },
@@ -144,7 +144,9 @@ export function recordAuthorityDiagnosticCounters(manifest: VerifiedRecordAuthor
     submission_veto_reason: zeroCounts(RECORD_AUTHORITY_SUBMISSION_VETO_REASON_KEYS)
   };
   for (const record of manifest.records) {
-    counters.relevance[record.relevance ?? "missing"] += 1;
+    const relevanceKey = record.relevance ??
+      (record.reason === "duplicate_record_relevance_disagreement" ? "mixed" : "missing");
+    counters.relevance[relevanceKey] += 1;
     counters.source_binding[record.source_binding] += 1;
     counters.semantic_crosscheck[record.semantic_crosscheck] += 1;
     counters.publication[record.publication] += 1;
@@ -502,9 +504,12 @@ function mergedIds(origins: OriginRecord[]) {
       const key = canonicalModelRecordSerialization(kind, value.record);
       groups.set(key, [...(groups.get(key) ?? []), value]);
     }
+    // Use the same complete record set as mergeDrafts. Passing only one
+    // representative per canonical group can choose a different public ID
+    // when equivalent records arrived with different model-authored IDs.
     const plan = new Map(planCanonicalRecordMerge(
       kind,
-      [...groups.values()].map((group) => group[0]!.record)
+      values.map((value) => value.record)
     ).map((item) => [item.canonicalSerialization, item]));
     for (const [canonical, group] of groups) {
       const mergedId = plan.get(canonical)?.mergedId;

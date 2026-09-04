@@ -1652,14 +1652,14 @@ export function materializeAnalysis(input: MaterializeInput): {
     }
     validEvaluationRules.push({ rule, citations: supportedCitations, document: document! });
   }
-  const verifiedRecoveredEvaluationKeys = new Set(validEvaluationRules.flatMap(({ rule }) =>
+  const verifiedRecoveredEvaluationFields = new Set(validEvaluationRules.flatMap(({ rule }) =>
     recoveredEvaluationIds.has(rule.id)
-      ? [`${rule.document_sha256}:${rule.field}:${normalizeEvidenceText(rule.value)}`]
+      ? [`${rule.document_sha256}:${rule.field}`]
       : []
   ));
   const reconciledEvaluationRules = validEvaluationRules.filter(({ rule }) =>
-    recoveredEvaluationIds.has(rule.id) || !verifiedRecoveredEvaluationKeys.has(
-      `${rule.document_sha256}:${rule.field}:${normalizeEvidenceText(rule.value)}`
+    recoveredEvaluationIds.has(rule.id) || !verifiedRecoveredEvaluationFields.has(
+      `${rule.document_sha256}:${rule.field}`
     )
   );
   unsupportedItemsRemoved += validEvaluationRules.length - reconciledEvaluationRules.length;
