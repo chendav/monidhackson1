@@ -81,14 +81,14 @@ current_release_evidence:
     mode: live
     dependencies: ready
   last_controlled_edmonton_run:
-    result: ready_but_core_accuracy_failed
+    result: golden_pass_with_noncritical_needs_review
     actual_cost_usd: 0.0036
-    estimated_cost_usd: 1.061024
+    estimated_cost_usd: 1.080240
     app_controlled_cleanup: confirmed
-    limitation: T12 left fifteen semantic uncertainties and one condition mismatch; T13 is accepted locally but not yet deployed or provider-tested.
-  evidence_boundary: Health and terminal READY do not override the failed core accuracy gate.
+    limitation: All seven declared Edmonton golden checks pass, but submission method and closing date remain explicitly withheld for review.
+  evidence_boundary: The legacy extra gate requiring Email failed; no claim is made that submission method or closing date resolved.
 
 release:
   status: NOT_READY
-  next_gate: Commit and deploy accepted T13, attest the exact build and provider contract, then run one controlled Edmonton pilot.
+  next_gate: Run the saved CER main-plus-three-amendment package once against the exact accepted deployment.
   remaining_after_edmonton: CER campaign, 12-citation review, final video, contest submission, and five publications.

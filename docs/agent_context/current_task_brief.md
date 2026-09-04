@@ -2,8 +2,9 @@
 
 - Task ID: MH-001
 - Title: RFP X-Ray contest MVP
-- Status: active; T13 passed independent QA11 with P0=0/P1=0/P2=1 and is
-  authorized for commit, exact deployment attestation, and one Edmonton proof
+- Status: active; T13 is deployed and Edmonton passed all seven declared golden
+  checks with submission method and closing date explicitly `needs_review`;
+  the CER production campaign is next
 - Chief owner: chief
 - Updated: 2026-09-04
 - Active packet: `docs/specs/MH-001-rfp-xray/`
@@ -92,9 +93,9 @@ cost. The product is document-only and does not search for tenders.
 
 ## Immediate Next Action
 
-Commit and deploy accepted T13, refresh exact-deployment runtime/provider
-attestations, then authorize one controlled Edmonton pilot. Do not start the
-ten-run or CER campaign until this first run passes the core gate.
+Reuse the saved local CER package and run one main-plus-three-amendment
+production proof against the exact attested T13 deployment. Do not reparse
+Edmonton or reopen the submission-field redesign.
 
 ## Verification Cadence
 

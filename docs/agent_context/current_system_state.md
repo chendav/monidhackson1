@@ -22,6 +22,14 @@
   The single P2 is runtime stripping of provider-forbidden unknown relation
   siblings; it does not affect authority and is deferred to avoid blocking the
   core production proof.
+- T13 commit `613da553d5cb001a332214c902d7b02097dcb206` is live as exact
+  deployment `dpl_HvFsb8jkyRkYLWFLpnRSuXem7Zqx`; runtime and provider
+  attestations are stored and health is fully ready.
+- The controlled Edmonton run reached READY with cleanup in 233706 ms for a
+  known total USD 1.083840. All seven declared golden checks and 29/29 local
+  source citation matches passed. Submission method and closing date remain
+  explicitly withheld as `needs_review`; the old extra Email gate failed and
+  will not trigger another redesign.
 
 Updated: 2026-09-04
 
