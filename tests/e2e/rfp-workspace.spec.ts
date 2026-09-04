@@ -328,6 +328,81 @@ test("keeps source input and the verified sample useful in the first desktop vie
   await expect(page.getByRole("button", { name: "Choose PDFs" })).toBeVisible();
 });
 
+test("loads an authenticated retained run from a UUID fragment without exposing it in the initial request", async ({ page }) => {
+  let createRequests = 0;
+  let sampleRequests = 0;
+  let statusRequests = 0;
+  let analysisRequests = 0;
+  const documentRequests: string[] = [];
+  page.on("request", (request) => {
+    if (request.isNavigationRequest() && request.resourceType() === "document") documentRequests.push(request.url());
+  });
+
+  await page.route("**/api/v1/runs", (route) => {
+    createRequests += 1;
+    return route.abort("blockedbyclient");
+  });
+  await page.route("**/api/v1/samples/edmonton", (route) => {
+    sampleRequests += 1;
+    return route.abort("blockedbyclient");
+  });
+  await page.route(`**/api/v1/runs/${RUN_ID}`, async (route) => {
+    statusRequests += 1;
+    const request = route.request();
+    const url = new URL(request.url());
+    expect(request.method()).toBe("GET");
+    expect(url.pathname).toBe(`/api/v1/runs/${RUN_ID}`);
+    expect(url.search).toBe("");
+    expect(request.headers().authorization).toBeUndefined();
+    expect(request.headers()["x-api-key"]).toBeUndefined();
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(status("ready", 100, true)),
+    });
+  });
+  await page.route(`**/api/v1/runs/${RUN_ID}/analysis`, async (route) => {
+    analysisRequests += 1;
+    const request = route.request();
+    const url = new URL(request.url());
+    expect(request.method()).toBe("GET");
+    expect(url.pathname).toBe(`/api/v1/runs/${RUN_ID}/analysis`);
+    expect(url.search).toBe("");
+    expect(request.headers().authorization).toBeUndefined();
+    expect(request.headers()["x-api-key"]).toBeUndefined();
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(sampleResult) });
+  });
+
+  await page.goto(`/#run_id=${RUN_ID}`);
+  await expect(page.getByRole("heading", { name: "File Bay Repair & Maintenance", level: 1 })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Delete analysis" })).toBeVisible();
+  expect(documentRequests).toHaveLength(1);
+  expect(new URL(documentRequests[0]!).hash).toBe("");
+  expect(new URL(documentRequests[0]!).search).toBe("");
+  expect(statusRequests).toBe(1);
+  expect(analysisRequests).toBe(1);
+  expect(createRequests).toBe(0);
+  expect(sampleRequests).toBe(0);
+});
+
+test("ignores query, invalid, ambiguous, or credential-bearing run_id links and remains idle", async ({ page }) => {
+  let runRequests = 0;
+  await page.route("**/api/v1/runs/**", (route) => {
+    runRequests += 1;
+    return route.abort("blockedbyclient");
+  });
+
+  await page.goto(`/?run_id=${RUN_ID}`);
+  await expect(page.getByRole("heading", { name: "Analyze a tender pack", level: 1 })).toBeVisible();
+  await page.goto("/#run_id=not-a-uuid");
+  await expect(page.getByRole("heading", { name: "Analyze a tender pack", level: 1 })).toBeVisible();
+  await page.goto(`/#run_id=${RUN_ID}&token=ignored`);
+  await expect(page.getByRole("heading", { name: "Analyze a tender pack", level: 1 })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Preparing your tender pack" })).toHaveCount(0);
+  await page.waitForTimeout(1_000);
+  expect(runRequests).toBe(0);
+});
+
 test("loads the Edmonton result across desktop and mobile with trust labels intact", async ({ page }) => {
   await page.route("**/api/v1/samples/edmonton", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(sampleResult) }));
   await page.goto("/");

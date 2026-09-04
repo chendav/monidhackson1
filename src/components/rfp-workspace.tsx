@@ -47,6 +47,7 @@ const MAX_FILES = 5;
 const MAX_FILE_BYTES = 25 * 1024 * 1024;
 const POLL_INTERVAL_MS = 900;
 const ICON_STROKE = 1.8;
+const RUN_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 type SourceMode = "url" | "upload";
 type DocumentRole = "base" | "amendment";
@@ -151,6 +152,15 @@ function humanize(value: string) {
 function resolveStatusUrl(runId: string, reportedStatusUrl: string) {
   const canonicalStatusUrl = `/api/v1/runs/${encodeURIComponent(runId)}`;
   return reportedStatusUrl === canonicalStatusUrl ? reportedStatusUrl : canonicalStatusUrl;
+}
+
+function resolveDeepLinkedRunId(hash: string) {
+  if (!hash.startsWith("#")) return null;
+  const parameters = new URLSearchParams(hash.slice(1));
+  const values = parameters.getAll("run_id");
+  if (Array.from(parameters.keys()).some((key) => key !== "run_id") ||
+    values.length !== 1 || !RUN_ID_PATTERN.test(values[0]!)) return null;
+  return values[0]!.toLowerCase();
 }
 
 async function parseApiError(response: Response): Promise<UiError> {
@@ -487,9 +497,34 @@ function RfpWorkspaceContent() {
   const requestRef = useRef<AbortController | null>(null);
   const idempotencyKeyRef = useRef<string | null>(null);
   const lastActionRef = useRef<"sample" | "analysis">("analysis");
+  const deepLinkInitializedRef = useRef(false);
 
   useEffect(() => {
     const activation = window.setTimeout(() => setInteractiveReady(true), 0);
+    return () => window.clearTimeout(activation);
+  }, []);
+
+  useEffect(() => {
+    if (deepLinkInitializedRef.current) return;
+    const linkedRunId = resolveDeepLinkedRunId(window.location.hash);
+    if (!linkedRunId) return;
+    const activation = window.setTimeout(() => {
+      if (deepLinkInitializedRef.current) return;
+      deepLinkInitializedRef.current = true;
+      requestRef.current?.abort();
+      idempotencyKeyRef.current = null;
+      lastActionRef.current = "analysis";
+      setRunId(linkedRunId);
+      setStatusUrl(resolveStatusUrl(linkedRunId, ""));
+      setRunStatus(null);
+      setResult(null);
+      setIsSample(false);
+      setUiError(null);
+      setValidationError(null);
+      setLocalMessage("Loading retained analysis");
+      setLocalProgress(4);
+      setPhase("polling");
+    }, 0);
     return () => window.clearTimeout(activation);
   }, []);
 
