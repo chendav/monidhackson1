@@ -476,6 +476,42 @@ verdict: PASS
 findings: { P0: 0, P1: 0, P2: 0 }
 ```
 
+## T17 Selector-scoped physical alignment
+
+```yaml
+id: T17
+owner_profile: backend
+objective: Replace the production-falsified whole-fragment prerequisite with authenticated selector-scoped alignment from the exact selected Monid substring to one contiguous PDF.js physical-page slice.
+depends_on: [QA14]
+include_paths: [src/lib/analysis/record-authority.ts, src/lib/providers/openai.ts, tests/unit/record-authority.test.ts, tests/unit/openai-adapter.test.ts, tests/golden/**, docs/specs/MH-001-rfp-xray/**]
+exclude_paths: [src/app/**, src/components/**, drizzle/**, scripts/live-verify.mjs]
+edits_allowed: true
+acceptance: [AC-2, AC-4, AC-5, AC-6, AC-9, AC-10]
+handoff: handoff-backend.md
+status: completed_accepted
+revision_round: 1
+revision_scope: [P1_QA15_TARGET_COMPATIBILITY_GLYPH_CAN_BE_PARTIALLY_SELECTED]
+constraints: [no_paid_calls, no_remote_or_Monid_reparse, local_PDFjs_indexing_allowed, selector_source_hash_and_coordinates_authenticated, exact_PDFjs_quote_required, unique_single_page_binding, ambiguity_and_paraphrase_fail_closed, unchanged_provider_and_cost_limits]
+```
+
+## QA15 T17 selector-alignment review
+
+```yaml
+id: QA15
+owner_profile: reviewer
+objective: Independently falsify selector-scoped alignment against harmless whole-fragment drift, repeated selections, surrounding-context disambiguation, tables, Unicode, wrong document, wrong fragment, coordinate mutation, cross-page spans, deleted negation, paraphrase, and all prior QA14 counterexamples.
+depends_on: [T17]
+include_paths: [src/lib/analysis/record-authority.ts, src/lib/providers/openai.ts, tests/unit/record-authority.test.ts, tests/unit/openai-adapter.test.ts, tests/golden/**]
+exclude_paths: []
+edits_allowed: false
+acceptance: [AC-2, AC-4, AC-5, AC-6, AC-9, AC-10, AC-11]
+handoff: qa_report.md
+status: completed_pass
+revision_round: 1
+verdict: PASS
+findings: { P0: 0, P1: 0, P2: 0 }
+```
+
 ## T8 Publication/submission authority separation
 
 ```yaml

@@ -884,3 +884,133 @@ the accepted Revision-1 product source is unchanged. No full suite, build,
 official fixture, browser test, network/provider/paid call, deployment,
 database action, credential access, commit, or push was performed. QA14
 Revision 2 permits the ordinary Chief release-candidate gate.
+
+## QA15 — T17 selector-scoped physical alignment
+
+```yaml
+verdict: REQUEST_CHANGES
+revision_round: 0
+p0: 0
+p1: 1
+p2: 0
+deployment_allowed: false
+reviewed_base: 64a1100591e6874569c1f64170007bd6a7444414
+```
+
+### P1_QA15_TARGET_COMPATIBILITY_GLYPH_CAN_BE_PARTIALLY_SELECTED
+
+The selector-scoped candidate search treats every normalized target unit as an
+independent match boundary, even when several units came from one raw PDF.js
+compatibility glyph. `alignmentUnits` expands `ﬁ` into `f`,`i` and `ﬃ` into
+`f`,`f`,`i`, with every expanded unit retaining the same raw start/end. The
+candidate builder then slices any matching subset of those units and derives
+the public quote from the shared full raw glyph without checking that the raw
+slice's complete normalized value equals the selected source value
+(`src/lib/analysis/record-authority.ts:703-715`).
+
+An independent direct probe of the real `buildDocumentSourceMap` and
+`resolveSemanticSpan` reproduced all of the following:
+
+- selected Monid `f` against PDF.js `ﬁ` returned non-null public evidence `ﬁ`;
+- selected Monid `i` against PDF.js `ﬁ` returned non-null public evidence `ﬁ`;
+- selected Monid `ff` against PDF.js `ﬃ` returned non-null public evidence `ﬃ`;
+- the intended complete positive selected `fi` against PDF.js `ﬁ` also returned
+  public evidence `ﬁ`.
+
+The first three cases bind extra substantive normalized characters outside the
+selected span. They violate the T17 invariant that context/normalization cannot
+change evidence bounds or repair a selected mismatch, and can make a
+model-authored value authoritative for a different PDF value. Minimum
+acceptance: require every candidate's first and last normalized target units to
+enclose complete raw PDF units (or equivalently re-normalize the exact raw
+candidate slice and require exact equality with the selected normalized value),
+then add negative `f`/`i` versus `ﬁ` and `ff` versus `ﬃ` tests while retaining
+the complete `fi` versus `ﬁ` positive. Authority re-resolution must apply the
+same fence.
+
+### Passing independent evidence
+
+- A separate read-only resolver matrix confirmed unique selected text survives
+  unrelated whole-fragment drift; zero matches and uncontextualized multiple
+  matches return null; exact adjacent context selects one existing same-page
+  candidate; duplicated, mutated, and cross-page context remain null; context
+  never enters or widens the returned raw quote.
+- The same matrix rejected wrong document, deleted `not`, reordered values,
+  paraphrase, `10²` versus `102`, and non-table `A || B` versus `A B`.
+- A real v2 authority probe accepted the unmodified selector binding and
+  discarded changed source hash, selector start/end, alignment literal,
+  document/page/quote hashes, physical start/end, and wrong-fragment source map
+  as `invalid_private_source_binding`.
+- `pnpm exec vitest run tests/unit/record-authority.test.ts tests/unit/openai-adapter.test.ts --reporter=dot`:
+  PASS, 2 files / 101 tests. Existing all-four-collection, dynamic-fragment,
+  authority, normalization, T15 budget, call, retry, and deadline checks remain
+  green, but none covers a partial target ligature.
+- With `RFP_XRAY_FIXTURE_DIR=D:\monidhackson\.data\official-fixtures`,
+  `pnpm exec vitest run tests/golden/official-fixture-audit.test.ts -t "verifies every CER" --reporter=dot`:
+  PASS, 1 selected test / 2 skipped, with only the pre-existing non-fatal PDF.js
+  `TT: undefined function: 21` warnings.
+- `src/lib/providers/openai.ts` and `src/lib/config.ts` have no T17 diff, so the
+  v6 wire, dynamic enum, T15 cost/call/retry/deadline paths are unchanged.
+  `git diff --check` passed with workspace LF-to-CRLF notices only.
+
+No implementation or test file, full suite, build, browser test,
+network/provider/paid call, deployment, database action, credential access,
+commit, or push was performed. The P1 blocks deployment; broader passing
+evidence need not be rerun until this exact target-boundary fence is revised.
+
+## QA15 Revision 1 — Complete target compatibility-glyph boundaries
+
+```yaml
+verdict: PASS
+revision_round: 1
+p0: 0
+p1: 0
+p2: 0
+deployment_allowed: true
+reviewed_base: 64a1100591e6874569c1f64170007bd6a7444414
+```
+
+The failure-scoped delta closes
+`P1_QA15_TARGET_COMPATIBILITY_GLYPH_CAN_BE_PARTIALLY_SELECTED`. Candidate
+construction now rejects a target slice whose preceding or following normalized
+unit shares the selected boundary unit's raw PDF origin, then independently
+normalizes the complete raw PDF slice and requires exact equality with the
+selected normalized Monid value
+(`src/lib/analysis/record-authority.ts:703-726`). Record authority continues to
+re-run this same resolver, so the fence is applied again before publication.
+
+An independent direct probe of the real resolver produced the required exact
+boundary behavior:
+
+- selected `f` against raw PDF.js `ﬁ`: `null`;
+- selected `i` against raw PDF.js `ﬁ`: `null`;
+- selected `ff` against raw PDF.js `ﬃ`: `null`;
+- complete selected `fi` against raw PDF.js `ﬁ`: non-null, with the byte-exact
+  public quote `ﬁ`, physical range `[0,1)`, and current alignment literal.
+
+The raw-slice equality is not inferred from the unit boundary alone: the second
+check re-tokenizes the exact raw slice under the narrow non-Markdown target
+allowlist and compares it to the complete selected value. Thus a compatibility
+expansion cannot add an unselected substantive target unit.
+
+Independent verification:
+
+- `pnpm exec vitest run tests/unit/record-authority.test.ts tests/unit/openai-adapter.test.ts --reporter=dot`:
+  PASS, 2 files / 102 tests. This reruns selector/source/hash/alignment/physical
+  mutation fences, context ambiguity/elimination, the exact QA14 normalization
+  counterexamples, all record collections, source-map re-resolution, dynamic
+  enum, and existing T15 budget/call/retry/deadline checks.
+- With `RFP_XRAY_FIXTURE_DIR=D:\monidhackson\.data\official-fixtures`,
+  `pnpm exec vitest run tests/golden/official-fixture-audit.test.ts -t "verifies every CER" --reporter=dot`:
+  PASS, 1 selected test / 2 skipped, with only the pre-existing non-fatal PDF.js
+  `TT: undefined function: 21` warnings.
+- `src/lib/providers/openai.ts` and `src/lib/config.ts` have no T17 delta;
+  provider wire, output allocation, cost reserve, call count, retries, and
+  deadlines are unchanged. `git diff --check` passed with workspace LF-to-CRLF
+  notices only.
+
+No implementation/test edit, full suite, build, browser test,
+network/provider/paid call, deployment, database action, credential access,
+commit, or push was performed by the Reviewer. QA15 Revision 1 permits the
+ordinary Chief release-candidate gate; it does not establish production
+selector recovery coverage by itself.

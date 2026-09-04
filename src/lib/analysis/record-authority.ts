@@ -11,7 +11,7 @@ import type { CitationDocument } from "@/lib/evidence/citations";
 
 export const RECORD_AUTHORITY_ENVELOPE_VERSION = 2 as const;
 export const RECORD_AUTHORITY_VERSION = 3 as const;
-export const RECORD_SOURCE_ALIGNMENT_VERSION = "monid-pdfjs-utf16-v1" as const;
+export const RECORD_SOURCE_ALIGNMENT_VERSION = "monid-pdfjs-selector-utf16-v2" as const;
 // T10 carries relevance inline on every private model record. This bound is the
 // sum of the strict private Draft collection maxima and is a server-only guard;
 // it is no longer a positional provider sidecar or a 40-record delivery limit.
@@ -100,13 +100,16 @@ export interface AlignedSourceFragment {
   source_text_length: number;
   source_representation_sha256: string;
   source_units: AlignmentUnit[];
-  document_units: AlignmentUnit[];
-  match_starts: number[];
 }
 
 export interface DocumentSourceMap {
   alignment_version: typeof RECORD_SOURCE_ALIGNMENT_VERSION;
   fragments: Map<string, AlignedSourceFragment>;
+  pages_by_document: Map<string, Array<{
+    pdfPage1Based: number;
+    text: string;
+    units: AlignmentUnit[];
+  }>>;
 }
 
 export interface ResolvedSemanticSpan {
@@ -619,20 +622,6 @@ function alignmentUnits(
   return units;
 }
 
-function documentAlignmentUnits(document: CitationDocument) {
-  const units: AlignmentUnit[] = [];
-  for (const page of document.index.pages) {
-    if (units.length > 0 && units.at(-1)?.value !== " ") {
-      units.push({ value: " ", rawStart: 0, rawEnd: 0, pdfPage1Based: null });
-    }
-    units.push(...alignmentUnits(page.text, {
-      markdown: false,
-      pdfPage1Based: page.pdfPage1Based
-    }));
-  }
-  return units;
-}
-
 function everyMatch(value: string, needle: string) {
   if (!needle) return [];
   const matches: number[] = [];
@@ -650,31 +639,20 @@ export function buildDocumentSourceMap(
   fragments: SourceMapFragment[],
   documents: CitationDocument[]
 ): DocumentSourceMap {
-  const documentUnits = new Map(documents.map((document) => [
+  const pagesByDocument = new Map(documents.map((document) => [
     document.index.documentSha256,
-    documentAlignmentUnits(document)
+    document.index.pages.map((page) => ({
+      pdfPage1Based: page.pdfPage1Based,
+      text: page.text,
+      units: alignmentUnits(page.text, {
+        markdown: false,
+        pdfPage1Based: page.pdfPage1Based
+      })
+    }))
   ]));
   const mapped = new Map<string, AlignedSourceFragment>();
   for (const fragment of fragments) {
     if (mapped.has(fragment.source_fragment_id)) continue;
-    const literalSourceUnits = alignmentUnits(fragment.text, {
-      markdown: false,
-      pdfPage1Based: null
-    });
-    const targetUnits = documentUnits.get(fragment.document_sha256) ?? [];
-    const targetValue = targetUnits.map((unit) => unit.value).join("");
-    const literalMatches = everyMatch(
-      targetValue,
-      literalSourceUnits.map((unit) => unit.value).join("")
-    );
-    // Prefer literal alignment whenever it is unique. Markdown layout removal
-    // is an allowlisted fallback, not a transformation applied to exact text.
-    // A repeated literal fragment remains ambiguous instead of being repaired
-    // by dropping representation characters.
-    const sourceUnits = literalMatches.length === 0
-      ? alignmentUnits(fragment.text, { markdown: true, pdfPage1Based: null })
-      : literalSourceUnits;
-    const sourceValue = sourceUnits.map((unit) => unit.value).join("");
     mapped.set(fragment.source_fragment_id, {
       source_fragment_id: fragment.source_fragment_id,
       document_sha256: fragment.document_sha256,
@@ -682,15 +660,20 @@ export function buildDocumentSourceMap(
       source_text: fragment.text,
       source_text_length: fragment.text.length,
       source_representation_sha256: sha256Hex(fragment.text),
-      source_units: sourceUnits,
-      document_units: targetUnits,
-      match_starts: literalMatches.length === 0
-        ? everyMatch(targetValue, sourceValue)
-        : literalMatches
+      source_units: alignmentUnits(fragment.text, {
+        markdown: true,
+        pdfPage1Based: null
+      })
     });
   }
-  return { alignment_version: RECORD_SOURCE_ALIGNMENT_VERSION, fragments: mapped };
+  return {
+    alignment_version: RECORD_SOURCE_ALIGNMENT_VERSION,
+    fragments: mapped,
+    pages_by_document: pagesByDocument
+  };
 }
+
+const SOURCE_CONTEXT_UNITS = 64;
 
 export function resolveSemanticSpan(
   sourceMap: DocumentSourceMap,
@@ -701,8 +684,8 @@ export function resolveSemanticSpan(
   const selectorEnd = selector.start_utf16 + selector.length_utf16;
   if (!fragment || !Number.isSafeInteger(selector.start_utf16) || selector.start_utf16 < 0 ||
     !Number.isSafeInteger(selector.length_utf16) || selector.length_utf16 < 1 ||
-    !Number.isSafeInteger(selectorEnd) || selectorEnd > fragment.source_text_length ||
-    fragment.match_starts.length !== 1) return null;
+    selector.length_utf16 > 500 || !Number.isSafeInteger(selectorEnd) ||
+    selectorEnd > fragment.source_text_length) return null;
   const intersectingUnits = fragment.source_units.filter((unit) =>
     unit.rawStart < selectorEnd && unit.rawEnd > selector.start_utf16
   );
@@ -716,22 +699,68 @@ export function resolveSemanticSpan(
   if (overlappingUnits.length === 0) return null;
   const firstSourceUnit = fragment.source_units.indexOf(overlappingUnits[0]!);
   const lastSourceUnit = fragment.source_units.indexOf(overlappingUnits.at(-1)!);
-  const matchStart = fragment.match_starts[0]!;
-  const targetUnits = fragment.document_units.slice(
-    matchStart + firstSourceUnit,
-    matchStart + lastSourceUnit + 1
+  const selectedValue = overlappingUnits.map((unit) => unit.value).join("");
+  const candidates = (sourceMap.pages_by_document.get(fragment.document_sha256) ?? []).flatMap(
+    (page) => {
+      const pageValue = page.units.map((unit) => unit.value).join("");
+      return everyMatch(pageValue, selectedValue).flatMap((matchStart) => {
+        const targetUnits = page.units.slice(matchStart, matchStart + overlappingUnits.length);
+        if (targetUnits.length !== overlappingUnits.length) return [];
+        const firstTarget = targetUnits[0]!;
+        const lastTarget = targetUnits.at(-1)!;
+        const precedingTarget = page.units[matchStart - 1];
+        const followingTarget = page.units[matchStart + targetUnits.length];
+        const sharesRawOrigin = (left: AlignmentUnit | undefined, right: AlignmentUnit) =>
+          left?.rawStart === right.rawStart && left.rawEnd === right.rawEnd;
+        if (sharesRawOrigin(precedingTarget, firstTarget) ||
+          sharesRawOrigin(followingTarget, lastTarget)) return [];
+        const evidenceStart = firstTarget.rawStart;
+        const evidenceEnd = lastTarget.rawEnd;
+        const evidenceQuote = page.text.slice(evidenceStart, evidenceEnd);
+        const normalizedEvidence = alignmentUnits(evidenceQuote, {
+          markdown: false,
+          pdfPage1Based: page.pdfPage1Based
+        }).map((unit) => unit.value).join("");
+        return evidenceQuote && evidenceQuote.length <= 500 && normalizedEvidence === selectedValue
+          ? [{ page, matchStart, evidenceStart, evidenceEnd, evidenceQuote }]
+          : [];
+      });
+    }
   );
-  const pageNumber = targetUnits[0]?.pdfPage1Based;
-  if (!pageNumber || targetUnits.some((unit) => unit.pdfPage1Based !== pageNumber)) return null;
-  const evidenceStart = targetUnits[0]!.rawStart;
-  const evidenceEnd = targetUnits.at(-1)!.rawEnd;
+  let survivors = candidates;
+  if (survivors.length > 1) {
+    const leftContext = fragment.source_units.slice(
+      Math.max(0, firstSourceUnit - SOURCE_CONTEXT_UNITS),
+      firstSourceUnit
+    );
+    const rightContext = fragment.source_units.slice(
+      lastSourceUnit + 1,
+      lastSourceUnit + 1 + SOURCE_CONTEXT_UNITS
+    );
+    if (leftContext.length === 0 && rightContext.length === 0) return null;
+    const leftValue = leftContext.map((unit) => unit.value).join("");
+    const rightValue = rightContext.map((unit) => unit.value).join("");
+    survivors = survivors.filter(({ page, matchStart }) => {
+      const leftStart = matchStart - leftContext.length;
+      const rightStart = matchStart + overlappingUnits.length;
+      if (leftContext.length > 0 && (leftStart < 0 ||
+        page.units.slice(leftStart, matchStart).map((unit) => unit.value).join("") !== leftValue)) {
+        return false;
+      }
+      return rightContext.length === 0 ||
+        page.units.slice(rightStart, rightStart + rightContext.length)
+          .map((unit) => unit.value).join("") === rightValue;
+    });
+  }
+  if (survivors.length !== 1) return null;
+  const { page: alignedPage, evidenceStart, evidenceEnd, evidenceQuote } = survivors[0]!;
+  const pageNumber = alignedPage.pdfPage1Based;
   const document = documents.find((item) =>
     item.index.documentSha256 === fragment.document_sha256
   );
   const page = document?.index.pages.find((item) => item.pdfPage1Based === pageNumber);
   if (!page || evidenceEnd <= evidenceStart || evidenceEnd > page.text.length) return null;
-  const evidenceQuote = page.text.slice(evidenceStart, evidenceEnd);
-  if (!evidenceQuote || evidenceQuote.length > 500) return null;
+  if (page.text.slice(evidenceStart, evidenceEnd) !== evidenceQuote) return null;
   return {
     document_sha256: fragment.document_sha256,
     chunk_id: fragment.chunk_id,
@@ -782,18 +811,10 @@ export function selectorsForEvidenceRepresentation(
   if (!evidenceValue) return [];
   const selectors: SemanticSpanSelector[] = [];
   for (const fragment of sourceMap.fragments.values()) {
-    if (fragment.document_sha256 !== evidence.document_sha256 ||
-      fragment.match_starts.length !== 1) continue;
-    const matchStart = fragment.match_starts[0]!;
-    const targetValue = fragment.document_units.map((unit) => unit.value).join("");
-    for (const targetStart of everyMatch(targetValue, evidenceValue)) {
-      const targetEnd = targetStart + evidenceUnits.length - 1;
-      const targetUnits = fragment.document_units.slice(targetStart, targetEnd + 1);
-      if (targetUnits.length !== evidenceUnits.length || targetUnits.some((unit) =>
-        unit.pdfPage1Based !== evidence.pdf_page_1based
-      )) continue;
-      const sourceStartIndex = targetStart - matchStart;
-      const sourceEndIndex = targetEnd - matchStart;
+    if (fragment.document_sha256 !== evidence.document_sha256) continue;
+    const sourceValue = fragment.source_units.map((unit) => unit.value).join("");
+    for (const sourceStartIndex of everyMatch(sourceValue, evidenceValue)) {
+      const sourceEndIndex = sourceStartIndex + evidenceUnits.length - 1;
       const sourceStartUnit = fragment.source_units[sourceStartIndex];
       const sourceEndUnit = fragment.source_units[sourceEndIndex];
       if (!sourceStartUnit || !sourceEndUnit || sourceEndIndex < sourceStartIndex) continue;

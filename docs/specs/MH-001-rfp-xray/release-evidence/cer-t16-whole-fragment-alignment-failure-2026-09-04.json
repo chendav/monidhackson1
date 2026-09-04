@@ -1,0 +1,33 @@
+{
+  "evidence_class": "sanitized_production_diagnostic",
+  "git_commit_sha": "64a1100591e6874569c1f64170007bd6a7444414",
+  "deployment_id": "dpl_EAa9iNpVEFQgYM1K5PaFKRbQ3hxS",
+  "run_id_sha256": "de868237b42838adf7b012798f75005c161ff73211e9682551f63f4a702b718e",
+  "terminal_status": "partial",
+  "cleanup_confirmed": true,
+  "elapsed_ms": 208512,
+  "conservative_total_micro_usd": 1193270,
+  "monid_parse_calls_succeeded": 4,
+  "openai_extraction_batches_succeeded": 5,
+  "record_authority": {
+    "record_count": 194,
+    "integrity_complete": true,
+    "package_veto": false,
+    "verified": 0,
+    "discarded": 194,
+    "source_unlocated": 194
+  },
+  "submission_adjudication": {
+    "expected_candidate_count": 116,
+    "verified_candidate_count": 112,
+    "expected_page_count": 75,
+    "covered_page_count": 75,
+    "expected_source_fragment_count": 25,
+    "verified_source_fragment_count": 25,
+    "condition_mismatch": 1,
+    "semantic_uncertainty": 1,
+    "ownership_mismatch": 2
+  },
+  "privacy": "No run UUID, source URL, signed URL, tender body, evidence quote, provider response, or secret is retained in this artifact.",
+  "verdict": "NOT_READY"
+}

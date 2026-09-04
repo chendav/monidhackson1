@@ -44,10 +44,10 @@ regression_checks:
 review:
   required: true
   verdict: PASS
-  active_review_task: QA14
-  revision_round: 2
-  starts_after: T16 Revision 2 integration-fixture handoff independently reviewed
-  implementation_handoff: handoff-backend.md T16 Revision 2 — Pipeline authority-audit fixture migration
+  active_review_task: QA15
+  revision_round: 1
+  starts_after: T17 Revision 1 implementation handoff independently reviewed
+  implementation_handoff: handoff-backend.md T17 Revision 1 — Complete raw compatibility-glyph boundaries
   active_failures: []
   p0: 0
   p1: 0
@@ -93,5 +93,5 @@ current_release_evidence:
 
 release:
   status: NOT_READY
-  next_gate: Commit and deploy the accepted T16 candidate, refresh exact runtime/provider attestations and health, then run the saved CER package once.
+  next_gate: Commit/deploy/attest T17, then run one CER proof after the daily production budget window resets.
   remaining_after_edmonton: CER campaign, 12-citation review, final video, contest submission, and five publications.

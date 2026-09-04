@@ -3510,3 +3510,119 @@ deployment, credential access, database action, commit, or push occurred. The
 only Revision 2 implementation file is
 `tests/integration/record-authority-audit.test.ts`, plus this handoff and the
 T16 task-status update. QA14 must independently adjudicate the frozen revision.
+
+## T17 Implementation — Selector-scoped physical alignment
+
+T17 replaces the production-falsified whole-fragment prerequisite with a
+selector-scoped proof. This is implementation evidence for QA15, not
+self-approval. No network/provider or paid call, deployment, database action,
+credential access, commit, push, full suite, or build occurred.
+
+### Implemented authority boundary
+
+- The authenticated source tuple remains the issued fragment ID, its SHA-256,
+  and the model-selected UTF-16 start/length. The dynamic fragment enum and
+  private citation wire `rfp_xray_analysis_v6` are unchanged.
+- `buildDocumentSourceMap` now pre-indexes allowlisted units independently for
+  every PDF.js physical page. It no longer requires the surrounding 10k Monid
+  fragment to align anywhere in the document.
+- `resolveSemanticSpan` slices and validates only the selected source range,
+  applies the already-reviewed QA14 transformations, and searches each page of
+  the selector's exact document independently. A candidate exists only for a
+  consecutive monotonic unit match; its evidence is the exact contiguous raw
+  PDF.js slice and remains capped at 500 UTF-16 code units.
+- Exactly one physical candidate binds directly. If the selected units repeat,
+  at most 64 immediate normalized units from each available side of the same
+  authenticated fragment are used only as an exact, same-page elimination
+  witness. Context cannot create a candidate, repair selected text, rank
+  candidates, change evidence bounds, cross a page, or enter the public quote.
+  No context, mutated context, or multiple survivors fail closed.
+- The private alignment literal is bumped to
+  `monid-pdfjs-selector-utf16-v2`. Record authority continues to re-run the
+  resolver from the ephemeral batch source map and requires full canonical
+  binding equality, so old T16 bindings and mutated tuples cannot publish.
+- The explicit Unicode/Markdown allowlist, `10²`/`102` and `A || B`/`A B`
+  counterexample fences, dynamic fragment enum, submission core ownership,
+  provider call count, one-attempt policy, T15 token/cost limits, context caps,
+  and deadlines are unchanged.
+
+### Changed implementation and tests
+
+- `src/lib/analysis/record-authority.ts`
+- `tests/unit/record-authority.test.ts`
+- `tests/golden/official-fixture-audit.test.ts`
+- `docs/specs/MH-001-rfp-xray/tasks.md`
+- This T17 handoff section.
+
+No `src/lib/providers/openai.ts` change was required; its v6 selector contract,
+dynamic fragment enum, temporary source-map handoff, and T15 allocator already
+fit the selector-scoped resolver.
+
+### Exact local evidence
+
+- `pnpm exec vitest run tests/unit/record-authority.test.ts tests/unit/openai-adapter.test.ts --reporter=dot`:
+  PASS, 2 files and 101 tests.
+- The new regressions prove a unique clause survives unrelated heading/footer
+  drift, a clause repeated on two pages binds only through exact adjacent
+  same-page context, and missing or mutated context remains ambiguous. All
+  prior T16/QA14 normalization, selector mutation, record-kind, authority, and
+  provider-schema tests remain green.
+- With `RFP_XRAY_FIXTURE_DIR=D:\monidhackson\.data\official-fixtures`,
+  `pnpm exec vitest run tests/golden/official-fixture-audit.test.ts -t "verifies every CER" --reporter=dot`:
+  PASS, 1 selected test and 2 unrelated skips. This includes an exact CER
+  golden clause embedded between unrelated synthetic Monid heading/footer
+  drift and returns the byte-for-byte PDF.js clause. Existing non-fatal PDF.js
+  `TT: undefined function: 21` warnings remain.
+- Targeted ESLint over the implementation and three focused test paths: PASS.
+- `pnpm exec tsc --noEmit`: PASS.
+- `git diff --check`: PASS.
+
+### Remaining proof boundary
+
+The synthetic drift fixture proves the scope property but cannot estimate how
+many of the purged 194 production selectors will bind. Raw Monid fragments and
+private model output were intentionally not retained, and no provider rerun was
+authorized. QA15 must independently falsify selector ambiguity, context
+elimination, exact quote bounds, prior QA14 counterexamples, and authority
+re-resolution before Chief considers a controlled production proof.
+
+## T17 Revision 1 — Complete raw compatibility-glyph boundaries
+
+This revision closes only QA15 finding
+`P1_QA15_TARGET_COMPATIBILITY_GLYPH_CAN_BE_PARTIALLY_SELECTED`. It is frozen
+implementation evidence for independent re-review, not self-approval.
+
+- For every candidate, the first and last normalized PDF.js units must now
+  cover their complete originating raw character. A match is rejected when the
+  preceding or following normalized unit shares the same raw start/end, which
+  prevents selecting only part of an expanded compatibility glyph.
+- The exact contiguous raw PDF.js slice is independently normalized under the
+  same explicit allowlist and must equal the complete selected Monid unit
+  sequence. This is a second fence against evidence that contains substantive
+  units outside the selector.
+- Full selected `fi` still binds raw PDF.js `ﬁ`. Selected `f` or `i` cannot bind
+  `ﬁ`, and selected `ff` cannot bind the first two units of raw `ﬃ`.
+- Record authority already re-runs this resolver before publication, so the
+  same boundary applies to v2 authority verification without another code
+  path. T17 context elimination and every QA14 transform/counterexample remain
+  unchanged.
+
+Changed files are limited to `src/lib/analysis/record-authority.ts`, the direct
+regression in `tests/unit/record-authority.test.ts`, this handoff, and the T17
+task-status update.
+
+Exact checks:
+
+- `pnpm exec vitest run tests/unit/record-authority.test.ts tests/unit/openai-adapter.test.ts --reporter=dot`:
+  PASS, 2 files and 102 tests.
+- With `RFP_XRAY_FIXTURE_DIR=D:\monidhackson\.data\official-fixtures`,
+  `pnpm exec vitest run tests/golden/official-fixture-audit.test.ts -t "verifies every CER" --reporter=dot`:
+  PASS, 1 selected test and 2 unrelated skips; only the existing non-fatal
+  PDF.js `TT: undefined function: 21` warnings appeared.
+- Targeted ESLint over the changed product/test paths: PASS.
+- `pnpm exec tsc --noEmit`: PASS.
+- `git diff --check`: PASS with workspace LF-to-CRLF notices only.
+
+No provider/network or paid call, full suite, build, deployment, database
+action, credential access, commit, or push occurred. The v6 provider wire,
+dynamic fragment enum, T15 budgets, calls, retries, and deadlines are unchanged.

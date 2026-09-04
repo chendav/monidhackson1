@@ -39,6 +39,32 @@
   release-candidate gate passed `pnpm check` with 777 tests and 10 skipped,
   `pnpm build` with 13 static/dynamic application routes and five workflows,
   and Playwright 14/14 with two credentialed live-storage cases skipped.
+- T16 commit `64a1100591e6874569c1f64170007bd6a7444414` was deployed as
+  `dpl_EAa9iNpVEFQgYM1K5PaFKRbQ3hxS`; runtime/provider attestations and public
+  health passed. The production daily cap was raised from USD 22 to USD 23 to
+  admit the one fixed USD 2 reservation; the per-run cap stayed USD 2.
+- The controlled T16 CER run completed four Monid parses, five OpenAI batches,
+  and cleanup in 208,512 ms for a conservative USD 1.193270, but ended partial.
+  Record authority received 194 records and marked all 194 `source_unlocated`;
+  this falsifies the whole-fragment alignment assumption. The submission ledger
+  independently improved to 112/116 verified candidates, with only one
+  `condition_mismatch`, one `semantic_uncertainty`, and two
+  `ownership_mismatch`.
+- T17 must align only the selected Monid substring within an authenticated
+  source fragment to one PDF.js physical span. It must not search a model-
+  authored paraphrase or relax ambiguity/page/document/negation checks. No
+  further provider call is authorized before QA15.
+- T17 implementation moved to selector-scoped page search and passed focused
+  101/101 plus local CER 1/1. QA15 nevertheless reproduced one P1: target-side
+  compatibility glyph expansion can be sliced mid-glyph, allowing selected
+  `f` or `i` to bind raw PDF `ﬁ`, and selected `ff` to bind raw `ﬃ`. Revision 1
+  must require complete raw-glyph enclosure and normalized equivalence.
+- T17 Revision 1 passed independent QA15 with P0=0/P1=0/P2=0. Its release-
+  candidate gate passed `pnpm check` with 780 tests and 10 skipped, production
+  build, and Playwright 14/14 with two credentialed live-storage tests skipped.
+  The current production day already has more than USD 22 million-microdollars
+  of conservative commitments, so another fixed USD 2 reservation must wait
+  for the next daily budget window rather than raising the USD 23 cap again.
 
 ## 2026-09-04 T15 production boundary
 

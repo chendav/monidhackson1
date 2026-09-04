@@ -1838,3 +1838,86 @@ describe("T16 deterministic Monid-to-PDF.js source binding", () => {
     }
   });
 });
+
+describe("T17 selector-scoped physical alignment", () => {
+  it("binds a unique selected clause despite unrelated surrounding fragment drift", () => {
+    const clause = "Invoices are payable within 30 days.";
+    const source = document([`Official heading\n${clause}\nOfficial footer`]);
+    const fragmentText = `Unrelated Monid heading\n${clause}\nDifferent layout footer`;
+    const sourceMap = buildDocumentSourceMap([{
+      source_fragment_id: "drift", document_sha256: sha, chunk_id: null, text: fragmentText
+    }], [source]);
+    const resolved = resolveSemanticSpan(sourceMap, {
+      source_fragment_id: "drift",
+      start_utf16: fragmentText.indexOf(clause),
+      length_utf16: clause.length
+    }, [source]);
+    expect(resolved?.evidence_quote).toBe(clause);
+    expect(resolved?.binding).toMatchObject({
+      pdf_page_1based: 1,
+      evidence_quote_sha256: sha256Hex(clause),
+      alignment_version: RECORD_SOURCE_ALIGNMENT_VERSION
+    });
+  });
+
+  it("requires selectors to cover an entire raw compatibility-glyph expansion", () => {
+    const ligatureSource = document(["ﬁ ﬃ"]);
+    const resolves = (text: string, rawStart: number, rawLength = text.length) => {
+      const sourceMap = buildDocumentSourceMap([{
+        source_fragment_id: `glyph-${rawStart}-${text}`,
+        document_sha256: sha,
+        chunk_id: null,
+        text
+      }], [ligatureSource]);
+      return resolveSemanticSpan(sourceMap, {
+        source_fragment_id: `glyph-${rawStart}-${text}`,
+        start_utf16: rawStart,
+        length_utf16: rawLength
+      }, [ligatureSource]);
+    };
+
+    expect(resolves("fi", 0)?.evidence_quote).toBe("ﬁ");
+    expect(resolves("f", 0)).toBeNull();
+    expect(resolves("i", 0)).toBeNull();
+    expect(resolves("ff", 0)).toBeNull();
+  });
+
+  it("uses exact same-page adjacent context only to eliminate repeated-page candidates", () => {
+    const clause = "Submit electronically.";
+    const source = document([
+      `Section Alpha\n${clause}\nEnd Alpha`,
+      `Section Beta\n${clause}\nEnd Beta`
+    ]);
+    const contextualFragment = `Section Beta\n${clause}\nEnd Beta`;
+    const contextualMap = buildDocumentSourceMap([{
+      source_fragment_id: "contextual", document_sha256: sha, chunk_id: null,
+      text: contextualFragment
+    }], [source]);
+    const resolved = resolveSemanticSpan(contextualMap, {
+      source_fragment_id: "contextual",
+      start_utf16: contextualFragment.indexOf(clause),
+      length_utf16: clause.length
+    }, [source]);
+    expect(resolved?.binding.pdf_page_1based).toBe(2);
+    expect(resolved?.evidence_quote).toBe(clause);
+
+    const ambiguousMap = buildDocumentSourceMap([{
+      source_fragment_id: "ambiguous-context", document_sha256: sha, chunk_id: null,
+      text: clause
+    }], [source]);
+    expect(resolveSemanticSpan(ambiguousMap, {
+      source_fragment_id: "ambiguous-context", start_utf16: 0, length_utf16: clause.length
+    }, [source])).toBeNull();
+
+    const mutatedContext = `Section Gamma\n${clause}\nEnd Gamma`;
+    const mutatedMap = buildDocumentSourceMap([{
+      source_fragment_id: "mutated-context", document_sha256: sha, chunk_id: null,
+      text: mutatedContext
+    }], [source]);
+    expect(resolveSemanticSpan(mutatedMap, {
+      source_fragment_id: "mutated-context",
+      start_utf16: mutatedContext.indexOf(clause),
+      length_utf16: clause.length
+    }, [source])).toBeNull();
+  });
+});

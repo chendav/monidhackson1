@@ -545,3 +545,113 @@ unchanged where possible. Rollback restores the old decoder and continues to
 discard unlocated Markdown quotes; no data migration is required. Chief
 disposition: **ACCEPT** only the saved-artifact alignment experiment and
 independent QA14 gate. No provider rerun is authorized by this review.
+
+## T17 Addendum — Prove the selected span, not its 10k container
+
+The controlled T16 production proof falsified the source map's alignment unit,
+not the private selector ontology. All provider work and cleanup completed and
+the response contained valid fragment selectors, but all 194 model records were
+`source_unlocated`. Static inspection shows why: `buildDocumentSourceMap` first
+requires the complete Monid fragment to occur exactly once in the concatenated
+PDF.js document units, and `resolveSemanticSpan` rejects every selector when
+that whole-fragment `match_starts` count is not one. One unrelated heading,
+table-layout, page-boundary, or other representation difference anywhere in a
+roughly 10k fragment therefore revokes every otherwise exact selected span.
+
+Chief disposition: **ACCEPT** a selector-scoped saved-fixture experiment and
+independent QA15; **REJECT** broader normalization, fuzzy matching, or another
+provider run before that gate. Production proves that whole-fragment alignment
+has effectively zero CER coverage. It does not prove how many of the 194
+purged private selections a selector-scoped resolver will recover.
+
+The canonical authority unit remains the authenticated tuple
+`(source_fragment_id, source_representation_sha256, start_utf16, length_utf16)`.
+The minimum source-map change is to stop storing a whole-fragment physical
+origin as a prerequisite. For each selector, the server must instead:
+
+1. Require the fragment ID to be in that batch's exact dynamic enum, recover
+   the exact server-issued fragment and representation hash, check UTF-16
+   bounds, and slice only the selected source range. Full authenticated fragment
+   text may still be tokenized to decide whether a selected `|` belongs to a
+   structurally valid Markdown table; it is not required to align as a body.
+2. Transform selected units only with the QA14 allowlist: whitespace runs,
+   explicitly listed presentation glyphs, removable zero-width/soft-hyphen
+   artifacts, and delimiters proven by the complete Markdown table grammar.
+   There is no unrestricted NFKC, case fold, edit distance, stemming, synonym,
+   loose pipe stripping, punctuation-wide deletion, or reordering.
+3. Search each physical PDF.js page of the selector's exact document
+   independently. A candidate exists only when every substantive selected unit
+   maps monotonically to consecutive normalized page units. Construct its raw
+   bounds from the first and last mapped units and return only the exact,
+   contiguous PDF.js page slice, still at most 500 UTF-16 code units. Searching
+   page by page makes a cross-page candidate impossible.
+4. Bind only one surviving physical candidate across the document. Zero or
+   multiple candidates remain `source_unlocated`. Record authority must rerun
+   this same resolver from the exact ephemeral source map and require complete
+   binding equality, preserving QA14's mutation fence.
+
+Authenticated source-side context may safely disambiguate repeated selected
+text, but only as an eliminative uniqueness witness. When the selected units
+have multiple exact physical candidates, the server may take a fixed bounded
+number of immediately preceding and following units from the same authenticated
+fragment and test them, under the same narrow transform, immediately adjacent
+to each candidate on that same page. Context can remove candidates; it cannot
+create a selected-span candidate, alter its raw bounds, cross a page, widen the
+public quote, repair an unmatched selected unit, or win by a similarity score.
+At least one non-empty contextual side must participate and exactly one
+candidate must remain; otherwise resolution fails closed. Thus a repeated
+`Submit electronically` can be distinguished by an exact adjacent section or
+row label, while repeated or representation-incompatible context remains
+ambiguous. The public citation is still only the model-selected exact PDF.js
+slice; contextual units are neither evidence nor persisted body content.
+
+This does not require a provider representation change. Citation wire v6
+already supplies the fragment ID and UTF-16 range, and the dynamic literal
+manifest already authenticates its namespace. Bump only the private alignment
+semantic version so old bindings fail closed; keep the public Draft, database,
+record receipt shape, provider input/output envelopes, 50,000-token package
+balance, USD 0.495 OpenAI reserve, one attempt per batch, deadlines, and zero
+retry invariant unchanged. Pre-index normalized PDF.js units per page and cache
+resolution by selector tuple. Existing record/citation maxima bound work; an
+implementation resource-limit breach fails the batch without a retry or a
+partial authoritative binding.
+
+The smallest no-provider falsification fixture needs no saved Monid output. It
+constructs a server-authenticated synthetic fragment containing an exact CER
+golden clause, places a harmless non-aligning heading/table/layout mutation
+outside the selected coordinates, and feeds a fake strict response selecting
+only that clause. The old whole-fragment resolver returns null; the proposed
+resolver must return the unique byte-for-byte PDF.js page slice. This proves the
+scope property without reconstructing or retaining a production body. A second
+synthetic pair repeats the selected clause on two pages: unique authenticated
+adjacent context must reduce it to the correct single page, while identical,
+missing, non-adjacent, cross-page, or mutated context must leave it unbound.
+
+QA15 must additionally falsify: a selected superscript `10²` against `102`; a
+non-table `A || B` against `A B`; deleted `not`; reordered values; paraphrase;
+wrong document or fragment ID; changed representation hash or selector
+coordinate; a split surrogate; zero/over-500 length; ambiguous same-page and
+cross-page repeats; and any authority re-resolution mismatch. Positive controls
+must cover whitespace, line endings, the reviewed ligature map, complete
+Markdown tables whose grammar is classified using the enclosing fragment, all
+four record collections, distinct identical selections, physical midpoint/core
+ownership, and unfamiliar SecureDrop. Public quotes must equal exact PDF.js
+slices, and call count, retries, schemas, T15 floors, cost reserve, and deadlines
+must be unchanged.
+
+The hypothesis is falsified if an unrelated fragment difference still revokes
+an otherwise unique selected span, if contextual evidence causes a selected
+text mismatch to bind, if any ambiguity is resolved by ranking rather than a
+single exact contextual witness, if a public quote includes unselected context
+or differs from its raw page slice, or if authoritative re-resolution accepts a
+changed source tuple. Without the purged Monid body/private response, local
+tests cannot establish the production recovery rate; only a later reviewed
+controlled proof may do that.
+
+Migration is private and reversible. Replace whole-fragment `match_starts` with
+selector-scoped resolution while retaining authenticated fragment text and
+page indexes ephemerally, bump the alignment literal, and reject prior literals.
+No stored-body or public-data migration is needed. Rollback restores the T16
+whole-fragment resolver and safely returns to discarding these records; it must
+not fall back to free-quote search or tolerant matching. No deployment or paid
+run is authorized until QA15 passes with P0=0 and P1=0.

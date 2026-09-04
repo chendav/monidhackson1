@@ -10,6 +10,7 @@ import {
   RECORD_AUTHORITY_ENVELOPE_VERSION,
   RECORD_SOURCE_ALIGNMENT_VERSION,
   RecordAuthorityEnvelopeSchema,
+  buildDocumentSourceMap,
   resolveSemanticSpan,
   selectorsForEvidenceRepresentation,
   verifyRecordAuthorities
@@ -605,6 +606,26 @@ describe("optional official-PDF local audit (PDFs are never committed)", () => {
         quote: "Any requirement marked \"No\" or left blank will result in the bid being declared non-responsive.", document: CER_DOCUMENTS[3]
       }
     ];
+    const driftQuote = representativeQuotes[0]!;
+    const driftFragmentText = `Unrelated Monid heading and layout\n${driftQuote.quote}\n` +
+      "Unrelated Monid footer and table rendering";
+    const driftSourceMap = buildDocumentSourceMap([{
+      source_fragment_id: "f".repeat(32),
+      document_sha256: driftQuote.document.sha256,
+      chunk_id: null,
+      text: driftFragmentText
+    }], candidateDocuments);
+    const driftResolved = resolveSemanticSpan(driftSourceMap, {
+      source_fragment_id: "f".repeat(32),
+      start_utf16: driftFragmentText.indexOf(driftQuote.quote),
+      length_utf16: driftQuote.quote.length
+    }, candidateDocuments);
+    expect(driftResolved?.evidence_quote).toBe(driftQuote.quote);
+    expect(driftResolved?.binding).toMatchObject({
+      document_sha256: driftQuote.document.sha256,
+      evidence_quote_sha256: sha256Hex(driftQuote.quote),
+      alignment_version: RECORD_SOURCE_ALIGNMENT_VERSION
+    });
     const representativeDrafts = extractionPlan.sourceMaps.map(() => emptyDraft());
     for (const item of representativeQuotes) {
       const requirement = representativeRequirement({
@@ -701,14 +722,8 @@ describe("optional official-PDF local audit (PDFs are never committed)", () => {
           fragment.document_sha256 === citation.document_sha256
         )
       );
-      const citedPage = candidateDocuments.find((document) =>
-        document.index.documentSha256 === citation.document_sha256
-      )?.index.pages.find((page) => page.pdfPage1Based === citation.pdf_page_1based);
       expect(fragmentMatches, `source selector for ${citation.document_name} p${citation.pdf_page_1based}; ` +
-        `fragments=${sourceMapFragments.length}; uniquely_aligned=${sourceMapFragments.filter((fragment) =>
-          fragment.match_starts.length === 1).length}; exact_page_occurrences=${citedPage?.text.split(
-          citation.evidence_quote
-        ).length ?? 0}`)
+        `fragments=${sourceMapFragments.length}`)
         .not.toHaveLength(0);
       const match = fragmentMatches[0]!;
       const resolved = resolveSemanticSpan(match.sourceMap, match.selector, candidateDocuments);

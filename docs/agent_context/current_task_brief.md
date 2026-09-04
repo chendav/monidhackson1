@@ -18,8 +18,18 @@
   while expecting v2 publication. T16 Revision 2 migrated that fixture and
   passed independent QA14 Revision 2 with P0=0/P1=0/P2=0. The resumed release-
   candidate gate passed 777 tests, production build, and Playwright 14/14 with
-  two credentialed storage tests skipped. Commit, exact deployment,
-  attestations, health, and one controlled CER proof remain.
+  two credentialed storage tests skipped. Commit `64a1100591e6874569c1f64170007bd6a7444414`
+  was deployed and attested as `dpl_EAa9iNpVEFQgYM1K5PaFKRbQ3hxS` with a
+  USD 23 daily cap and unchanged USD 2 run cap. The one controlled CER proof
+  completed all providers and cleanup but falsified T16: all 194 model records
+  were `source_unlocated` because whole 10k Monid fragments did not align to
+  the PDF.js document representation. T17 selector-scoped implementation passed
+  its focused suite but QA15 found one P1: a selector can consume only part of a
+  target compatibility glyph expansion (`f` or `i` binding raw `ﬁ`). T17
+  Revision 1 closed that boundary and passed independent QA15 with P0=0/P1=0/
+  P2=0. The one T17 release-candidate gate passed 780 tests, production build,
+  and Playwright 14/14 with two credentialed storage cases skipped. Commit,
+  exact deployment, attestations, and a later budget-admissible CER proof remain.
 - Chief owner: chief
 - Updated: 2026-09-04
 - Active packet: `docs/specs/MH-001-rfp-xray/`
@@ -108,10 +118,10 @@ cost. The product is document-only and does not search for tenders.
 
 ## Immediate Next Action
 
-Commit the accepted T16 candidate, deploy that exact commit, refresh runtime and
-provider attestations, verify public health, then perform one controlled CER
-main-plus-three-amendment proof from saved local PDFs. Do not rerun Edmonton or
-repeat CER if the result is partial; retain and diagnose the result instead.
+Commit and deploy the accepted T17 candidate, refresh exact runtime/provider
+attestations and public health. Do not run another paid CER while today's fixed
+USD 2 reservation would exceed the USD 23 daily cap; use the next budget window
+for exactly one controlled proof.
 
 ## Verification Cadence
 
