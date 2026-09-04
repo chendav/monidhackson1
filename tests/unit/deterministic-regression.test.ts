@@ -157,6 +157,48 @@ function baseRunOptions() {
 }
 
 describe("repository-owned deterministic regression verifier", () => {
+  it("pins all 81 source-binding tests and rejects an identity-name drift", async () => {
+    const regression = await regressionPromise;
+    const definition = regression.DETERMINISTIC_REGRESSION_CASES.find((item) =>
+      item.id === "source-binding-and-submission-safety"
+    )!;
+    expect(definition).toMatchObject({
+      expectedExecuted: 81,
+      expectedIdentitySha256: "32e00055f84c91fe2979a6487317896c0515cfcf990d2c86ab1b2ef7857abdf0"
+    });
+    expect(definition.pattern).toContain("T21 selector-authenticated presentation materialization");
+
+    const child = spawnSync(process.execPath, [
+      path.resolve("node_modules/vitest/vitest.mjs"),
+      "run",
+      definition.file,
+      "-t",
+      definition.pattern,
+      "--reporter=json",
+      "--no-file-parallelism"
+    ], {
+      cwd: path.resolve("."),
+      env: { ...process.env, NODE_ENV: "test", CI: "true", NO_COLOR: "1" },
+      encoding: "utf8",
+      shell: false,
+      maxBuffer: 2 * 1024 * 1024
+    });
+    expect(child.status, child.stderr).toBe(0);
+    expect(regression.validateStructuredTestResult(child.stdout, definition)).toMatchObject({
+      executed_test_count: 81,
+      passed_test_count: 81,
+      skipped_test_count: 0,
+      test_identity_sha256: definition.expectedIdentitySha256
+    });
+
+    const drifted = JSON.parse(child.stdout) as {
+      testResults: Array<{ assertionResults: Array<{ fullName: string }> }>;
+    };
+    drifted.testResults[0]!.assertionResults[0]!.fullName += " identity drift";
+    expect(() => regression.validateStructuredTestResult(JSON.stringify(drifted), definition))
+      .toThrow("REGRESSION_TEST_SUMMARY_MISMATCH:source-binding-and-submission-safety");
+  }, 15_000);
+
   it("runs exactly ten fixed JSON-reporter cases and emits a body-free reviewed-test manifest", async () => {
     const regression = await regressionPromise;
     const seen: string[] = [];

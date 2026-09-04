@@ -678,3 +678,34 @@ revision_round: 2
 verdict: PASS
 findings: { P0: 0, P1: 0, P2: 0 }
 ```
+
+## T22 Include T21 safety tests in fixed release evidence
+
+```yaml
+id: T22
+owner_profile: backend
+objective: Extend the reviewed deterministic release selection to execute and identity-pin all 19 T21 projection tests instead of reporting them as skipped.
+depends_on: [QA19]
+include_paths: [scripts/deterministic-regression.mjs, tests/unit/deterministic-regression.test.ts, docs/specs/MH-001-rfp-xray/**, docs/agent_context/**]
+exclude_paths: [src/**, tests/e2e/**, videos/**]
+edits_allowed: true
+acceptance: [AC-5, AC-6, AC-9, AC-10]
+status: completed_handoff
+```
+
+## QA20 T22 release-manifest review
+
+```yaml
+id: QA20
+owner_profile: reviewer
+objective: Verify that the fixed runner executes and pins all 81 selected record-authority tests and still rejects count, identity, source, fixture, and candidate drift.
+depends_on: [T22]
+include_paths: [scripts/deterministic-regression.mjs, tests/unit/deterministic-regression.test.ts, docs/specs/MH-001-rfp-xray/**]
+exclude_paths: []
+edits_allowed: false
+acceptance: [AC-5, AC-6, AC-9, AC-10, AC-11]
+status: completed_pass
+revision_round: 0
+verdict: PASS
+findings: { P0: 0, P1: 0, P2: 0 }
+```

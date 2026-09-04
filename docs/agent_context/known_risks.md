@@ -4,6 +4,11 @@ Updated: 2026-09-04
 
 ## T21 deterministic materialization risks
 
+- Development override: production daily budget is USD 30 for the next
+  deployment under the user's explicit development-cap waiver; per-run USD 2
+  and no automatic paid retry remain unchanged.
+- Release evidence must include the 19 T21 projection tests. A 10/10 receipt
+  that still selects only the prior 62 record-authority tests is insufficient.
 - A presentation projection must never become public evidence or a general
   Markdown sanitizer. It is valid only for an exact, unique, single-page,
   SHA-bound selector and must use the same versioned allowlist as physical

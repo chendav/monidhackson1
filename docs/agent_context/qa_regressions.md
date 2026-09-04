@@ -4,6 +4,7 @@ Updated: 2026-09-04
 
 | ID | Fragile behavior | Required check | Last result |
 |---|---|---|---|
+| QR-93 | A frozen release selection silently skips newly added safety tests | Pin the T7/T9/T16/T17/T21 identity and exact executed count; reject count, name, or digest drift | QA20 PASS; 81/81 independently verified, full-name mutation rejected |
 | QR-92 | An exact-bound Monid value with approved presentation markers fails typed Claim/Evaluation comparison, or projection mutates public evidence | Bind projection to selector/source/version; validate typed values against it while keeping public quote byte-exact PDF.js; negative twins for every scalar/role | QA19 PASS; contextual, intraword, backtick, repeat, mutation, and raw-quote cases pass |
 | QR-91 | Requirement/Risk topic text accidentally routes a non-summary record through summary field validators | Summary routing applies only to Claims; non-Claims retain specialized category/scalar/polarity/effect/lineage gates and cannot populate summary | QA19 PASS; non-Claim taxonomy publishes while Claims remain strict |
 | QR-90 | Submission-format, copies, signature, or deadline facts are mistaken for whole-bid delivery channels | Classify relevance independently of Requirement category; require concrete channel plus whole_bid/ambiguous overlap before an `n` conflict; keep `s` fail-closed | QA18 PASS; functional `n`/`s`, question-email, deadline-unspecified, relation-gap, and relation-conflict cases pass |

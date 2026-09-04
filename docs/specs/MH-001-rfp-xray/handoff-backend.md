@@ -3864,3 +3864,23 @@ Exact local evidence:
 
 No network/provider/paid call, deployment, credential access, commit, or push
 occurred during T21 implementation.
+
+## T22 — Include T21 safety tests in fixed release evidence
+
+Status: `completed_handoff`; release-evidence implementation independently
+approved by QA20 with P0=0/P1=0. Its P2 document tense finding was corrected.
+
+- The fixed `source-binding-and-submission-safety` selection now includes T21
+  together with T7, T9, T16, and T17.
+- Its exact execution contract is 81 passed, zero skipped, with identity SHA-256
+  `32e00055f84c91fe2979a6487317896c0515cfcf990d2c86ab1b2ef7857abdf0`.
+- A direct test executes the production argv, verifies the exact count and
+  identity, mutates one full test name, and proves the verifier rejects the
+  changed summary.
+- Direct selection and verifier: PASS 81/81; deterministic-regression unit
+  suite: PASS 12/12; scoped ESLint, typecheck, and diff-check: PASS.
+
+Changed paths are limited to `scripts/deterministic-regression.mjs` and
+`tests/unit/deterministic-regression.test.ts`. No application logic,
+network/provider call, paid call, deployment, credential access, or commit
+occurred during T22 implementation.

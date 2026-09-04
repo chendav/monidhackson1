@@ -4,10 +4,13 @@
 
 This section supersedes T20 and older current-state text below.
 
+- T22 is complete and QA20 PASS (P0=0/P1=0): the fixed release selection now
+  includes all 81 record-authority tests, including 19 T21 cases. The remaining
+  release step is to commit, deploy, and collect current-candidate evidence.
 - QA19 Revision 2 passed with P0=0/P1=0 after closing contextual projection
   provenance and stale Edmonton packing-fixture findings. The next gate is an
   atomic candidate commit and immutable deployment, not more extraction tuning.
-- T20 commit `55c2e04cc2e71252513d90db4e5e066fcb8b5e43` is deployed as
+- The preceding T20 commit `55c2e04cc2e71252513d90db4e5e066fcb8b5e43` was deployed as
   `dpl_EK7UXxWdvC6BbuMqCm7EbSz7Pkvg`; runtime/provider attestations, exact
   health, public smoke 4/4, and saved-fixture regression 10/10 passed.
 - Its single authorized shuffled CER run ended `partial` after 217,413 ms and

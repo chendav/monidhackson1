@@ -44,9 +44,9 @@ regression_checks:
 review:
   required: true
   verdict: PASS
-  active_review_task: QA19
-  revision_round: 2
-  starts_after: T21 implementation handoff
+  active_review_task: QA20
+  revision_round: 0
+  starts_after: T22 implementation handoff
   implementation_handoff: handoff-backend.md
   active_failures: []
   p0: 0
@@ -72,15 +72,15 @@ governance_may_change_automatically: false
 
 current_release_evidence:
   observed_at: 2026-09-04
-  deployed_commit: 55c2e04cc2e71252513d90db4e5e066fcb8b5e43
-  deployment_id: dpl_EK7UXxWdvC6BbuMqCm7EbSz7Pkvg
+  deployed_commit: 2fb219a2ae9077a9540584f2c76e30ecbd3c71dd
+  deployment_id: dpl_ChbE1KHu9PNH8HSEhRLbRger5yvz
   public_url: https://rfp-xray.vercel.app
   health:
     http_status: 200
     status: ok
     mode: live
     dependencies: ready
-  deterministic_regression: 10/10 passed against saved official fixtures
+  deterministic_regression: T20 passed 10/10; current candidate awaits T22 manifest validation
   repository_gate: T21 passed 828 tests with 12 designed skips, official PDF audit 3/3, QA19 focus 244/244, live-verifier 24/24, lint, typecheck, and production build
   production_smoke: 4/4 passed
   last_controlled_cer_run:
@@ -89,5 +89,5 @@ current_release_evidence:
 
 release:
   status: NOT_READY
-  next_gate: Commit the QA19-approved T21 candidate, deploy immutably, refresh attestations and health/smoke, then permit exactly one budget-admitted CER proof without automatic retry.
+  next_gate: Record QA20 PASS, commit/redeploy the candidate, and produce its current 10/10 receipt before one budget-admitted CER proof.
   remaining_after_cer: 12-citation review, one Edmonton signed-PUT proof, final independent review, final video, contest submission, and five publications.

@@ -2,13 +2,24 @@
 
 ## 2026-09-04 T21 authoritative release state
 
+- Commit `2fb219a2ae9077a9540584f2c76e30ecbd3c71dd` was deployed as
+  `dpl_ChbE1KHu9PNH8HSEhRLbRger5yvz`. Runtime attestation
+  `ad42c06ffe11073acc19772d92e58d5bb6eb24ddbe9e6676c677bfb3951cf9fc`
+  and provider attestation
+  `b978661783ac3053795bb0e7b85eab1fd97671e2b9da98f9a2282eb5d02a1fbc`
+  were stored; exact health is `ok/live` and public smoke passed 4/4.
+- The deterministic release runner stopped with
+  `REGRESSION_TEST_SUMMARY_MISMATCH`: its frozen record-authority selection
+  contained the prior 62 tests while T21 adds 19 relevant safety tests. T22 now
+  pins all 81 tests; QA20 independently passed with P0=0/P1=0 and 12/12 direct
+  verifier tests. The new clean candidate still needs its 10/10 receipt.
 - QA19 Revision 2 is PASS with P0=0 and P1=0. The fixture-free full suite
   passed 828 tests with 12 designed skips; official PDF audit passed 3/3;
   focused QA passed 244/244; live-verifier passed 24/24; production build,
   lint, and typecheck passed.
-- Current `HEAD`/`origin/main` and production are exact at
-  `55c2e04cc2e71252513d90db4e5e066fcb8b5e43`; deployment is
-  `dpl_EK7UXxWdvC6BbuMqCm7EbSz7Pkvg`.
+- The preceding T20 deployment was commit
+  `55c2e04cc2e71252513d90db4e5e066fcb8b5e43` at
+  `dpl_EK7UXxWdvC6BbuMqCm7EbSz7Pkvg`; it is historical evidence below.
 - The one T20 CER proof is terminal `partial`, cleanup-confirmed, retained, and
   non-retryable. Sanitized identity SHA-256 is
   `74e70c79bbe2870b16e1dad868b294a67150f1bec44f972a97b48d58b1bf5cf8`.
@@ -19,9 +30,8 @@
 - Despite 101 verified records, public materialization emitted no active
   requirements or evaluation fields. T21 is a deterministic validation repair,
   not a parser, model, infrastructure, or search change.
-- The T21 candidate is approved but not yet committed or deployed. No paid
-  provider proof occurs before immutable deployment, fresh attestations, and
-  health/smoke.
+- T21 is committed and deployed. T22 changes only release verification and
+  passed QA20 before the next committed-candidate proof.
 
 ## 2026-09-04 T20 authoritative release state
 
