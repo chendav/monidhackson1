@@ -11,6 +11,141 @@ function displayText(value: string) {
   return value.replace(/\s+/g, " ").trim();
 }
 
+const NUMBERED_SUMMARY_HEADING = /^\s*(\d+(?:\.\d+)*)\.?\s+summary\s*$/i;
+const NUMBERED_SECTION_HEADING = /^\s*(\d+(?:\.\d+)*)\.?\s+\S/;
+const SUMMARY_EXCLUDED_CONTENT =
+  /\b(?:table of contents|security requirements?|security clearance|security screening|for more information|refer to|consult|website|web site|https?:\/\/|www\.)\b/i;
+const SUMMARY_META_CONTENT =
+  /\b(?:this (?:bid )?solicitation is divided|the annexes include|instructions? to bidders?|submission deadline|closing date|enquir(?:y|ies)|debriefings?|ignore (?:all|any|the|previous)|system prompt|language model|artificial intelligence|follow (?:these|the) instructions?|execute (?:code|commands?)|call (?:a )?tool|browse the (?:web|internet)|reveal (?:the )?prompt)\b/i;
+const NON_AFFIRMATIVE_SUMMARY_CONTENT =
+  /\b(?:if|unless|subject to|provided that|assuming|pending|proposed|potential|anticipated)\b|\b(?:may|might|could|would|should)\b|\b(?:is|are|was|were|must|shall|will|does|do|did|can)\s+not\b|\b(?:never|no longer|cannot)\b/i;
+const SCOPE_CONTENT =
+  /\b(?:work|services?|goods?|suppl(?:y|ies)|deliverables?|assets?|equipment|facilit(?:y|ies)|sites?|locations?|projects?|contracts?|solutions?|systems?|products?|streams?|maintenance|repairs?|construction|installation|support|operations?)\b/i;
+
+interface SummarySentence {
+  page: number;
+  text: string;
+  section: string;
+}
+
+function sectionDepth(value: string) {
+  return value.split(".").length;
+}
+
+function completeSummarySentences(value: string): string[] {
+  const withoutPageFurniture = value
+    .split(/\r?\n/)
+    .filter((line) => !/^\s*(?:request for proposal\s*:|page\s+\d+\s+of\s+\d+)\s*$/i.test(line))
+    .join(" ");
+  const normalized = displayText(withoutPageFurniture)
+    .replace(/^\d+(?:\.\d+)*\.?\s+/, "");
+  if (!normalized) return [];
+  return normalized
+    .split(/(?<=[.!?])\s+(?=(?:\d+(?:\.\d+)*\.?\s+)?[A-Z])/u)
+    .map((sentence) => sentence.replace(/^\d+(?:\.\d+)*\.?\s+/, "").trim())
+    .filter((sentence) => /^[\p{L}\p{N}]/u.test(sentence) && /[.!?]$/.test(sentence) &&
+      sentence.length >= 24 && sentence.length <= 500);
+}
+
+function affirmativeSubstantiveSummarySentence(value: string) {
+  if (SUMMARY_EXCLUDED_CONTENT.test(value) || SUMMARY_META_CONTENT.test(value) ||
+    NON_AFFIRMATIVE_SUMMARY_CONTENT.test(value)) return false;
+  return (value.match(/[\p{L}]{2,}/gu)?.length ?? 0) >= 5;
+}
+
+function summarySectionSentences(document: SourceAnchorDocument): SummarySentence[] {
+  let active: { number: string; depth: number; section: string } | null = null;
+  const slices: Array<{ page: number; text: string; section: string }> = [];
+
+  for (const page of document.index.pages) {
+    const lines = page.text.split(/\r?\n/);
+    if (!active && /(?:^|\n)\s*(?:table of )?contents\s*(?:\n|$)/i.test(page.text)) continue;
+    let body: string[] = [];
+    for (const line of lines) {
+      if (!active) {
+        const heading = NUMBERED_SUMMARY_HEADING.exec(line);
+        if (!heading) continue;
+        active = {
+          number: heading[1],
+          depth: sectionDepth(heading[1]),
+          section: `${heading[1]} Summary`
+        };
+        continue;
+      }
+
+      const nextHeading = NUMBERED_SECTION_HEADING.exec(line);
+      if (nextHeading && sectionDepth(nextHeading[1]) <= active.depth &&
+        nextHeading[1] !== active.number) {
+        if (body.length > 0) {
+          slices.push({ page: page.pdfPage1Based, text: body.join("\n"), section: active.section });
+        }
+        active = null;
+        body = [];
+        break;
+      }
+      body.push(line);
+    }
+    if (active && body.length > 0) {
+      slices.push({ page: page.pdfPage1Based, text: body.join("\n"), section: active.section });
+    }
+    // One physical, numbered Summary section is enough. Continuing after its
+    // boundary could accidentally bind a later annex summary to the package.
+    if (!active && slices.length > 0) break;
+  }
+
+  return slices.flatMap((slice) => completeSummarySentences(slice.text).map((text) => ({
+    page: slice.page,
+    text,
+    section: slice.section
+  })));
+}
+
+/**
+ * Recover only prose physically enclosed by a numbered Summary section in a
+ * base solicitation. These source-owned claims give materialization a safe
+ * alternative when a model-generated summary is missing or paraphrased.
+ */
+export function recoverSummarySectionAnchors(
+  _draft: DraftAnalysis,
+  documents: SourceAnchorDocument[]
+): DraftAnalysis["claims"] {
+  const recovered: DraftAnalysis["claims"] = [];
+  for (const document of documents) {
+    if (document.role !== "base") continue;
+    const substantive = summarySectionSentences(document)
+      .filter((sentence) => affirmativeSubstantiveSummarySentence(sentence.text));
+    const overview = substantive[0];
+    if (!overview) continue;
+
+    const add = (sentence: SummarySentence, topic: "overview" | "scope", ordinal: number) => {
+      recovered.push({
+        claim_id: `server-anchor-${document.index.documentSha256.slice(0, 12)}-p${sentence.page}-summary-${topic}-${ordinal}`,
+        topic,
+        claim_text: sentence.text,
+        claim_type: "source",
+        confidence: 1,
+        document_sha256: document.index.documentSha256,
+        amendment_number: document.amendmentNumber,
+        effect: "add",
+        citations: [{
+          document_sha256: document.index.documentSha256,
+          chunk_id: null,
+          evidence_quote: sentence.text,
+          section: sentence.section
+        }],
+        supersedes_claim_ids: []
+      });
+    };
+
+    add(overview, "overview", 1);
+    substantive.slice(1)
+      .filter((sentence) => SCOPE_CONTENT.test(sentence.text))
+      .slice(0, 25)
+      .forEach((sentence, index) => add(sentence, "scope", index + 1));
+  }
+  return recovered;
+}
+
 function clauseThroughFirstBoundary(value: string) {
   const boundedResources = /\b(?:propose|provide)\s+up to\s+\w+\s*\(\s*\d+\s*\)\s+resources?\s+and\s+provide\s+detailed\s+resumes?\s+for\s+each\b/i.exec(value);
   if (boundedResources) {

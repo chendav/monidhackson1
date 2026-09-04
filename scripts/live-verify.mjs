@@ -863,7 +863,7 @@ function hasFact(analysis, predicate) {
   return allFacts(analysis).some((fact) => predicate(fact, textOfFact(fact)));
 }
 
-function validateEdmontonGolden(analysis, document) {
+export function validateEdmontonGolden(analysis, document) {
   if (
     analysis.package_completeness !== "unverified" || analysis.quality.pages_total !== 55 ||
     analysis.evaluation?.mandatory_gate !== true || analysis.evaluation?.rated_threshold !== null ||
@@ -878,14 +878,20 @@ function validateEdmontonGolden(analysis, document) {
 
   const mandatory = (Array.isArray(analysis.requirements) ? analysis.requirements : [])
     .filter((requirement) => requirement.category === "mandatory" && requirement.status === "active");
-  const mandatorySections = new Set(mandatory.flatMap((requirement) =>
-    (Array.isArray(requirement.citations) ? requirement.citations : [])
+  const mandatoryCriteria = mandatory.filter((requirement) =>
+    (Array.isArray(requirement.citations) ? requirement.citations : []).some((citation) =>
+      citation.document_sha256 === document.sha256 && citation.pdf_page_1based === 43 &&
+      /^M\d{1,3}$/.test(String(citation.section ?? "").trim().toUpperCase())
+    )
+  );
+  const mandatorySections = new Set(mandatoryCriteria.flatMap((requirement) =>
+    requirement.citations
       .filter((citation) => citation.document_sha256 === document.sha256 && citation.pdf_page_1based === 43)
       .map((citation) => String(citation.section ?? "").trim().toUpperCase())
   ));
   if (
-    mandatory.length !== 4 || ["M1", "M2", "M3", "M4"].some((section) => !mandatorySections.has(section)) ||
-    !mandatory.some((requirement) =>
+    mandatoryCriteria.length !== 4 || ["M1", "M2", "M3", "M4"].some((section) => !mandatorySections.has(section)) ||
+    !mandatoryCriteria.some((requirement) =>
       /\bup to\s+(?:three|3)\b/i.test(requirement.text ?? "") &&
       factHasCitation(requirement, (citation) => citation.pdf_page_1based === 43)
     )
@@ -902,13 +908,16 @@ function validateEdmontonGolden(analysis, document) {
     fail("EDMONTON_SECURITY_GATE_FAILED", "golden_validation");
   }
 
-  const annexConflict = (Array.isArray(analysis.conflicts) ? analysis.conflicts : []).find((conflict) => {
+  const conflicts = Array.isArray(analysis.conflicts) ? analysis.conflicts : [];
+  const annexConflict = conflicts.find((conflict) => {
     const values = new Set((conflict.candidate_values ?? []).map((value) => String(value).toLowerCase()));
     const pages = citationPagesForSha(conflict, document.sha256);
     return conflict.status === "conflicted" && values.has("annex d") && values.has("annex e") &&
       pages.has(17) && pages.has(43);
   });
-  if (!annexConflict) fail("EDMONTON_ANNEX_CONFLICT_GATE_FAILED", "golden_validation");
+  if (!annexConflict || conflicts.length !== 1) {
+    fail("EDMONTON_ANNEX_CONFLICT_GATE_FAILED", "golden_validation");
+  }
 
   const flattenedText = stableJson({
     summary: analysis.summary,
@@ -921,7 +930,7 @@ function validateEdmontonGolden(analysis, document) {
   }
   return {
     golden_checks: 7,
-    mandatory_active_count: mandatory.length,
+    mandatory_active_count: mandatoryCriteria.length,
     source_pages: 55,
     package_completeness_unverified: true
   };

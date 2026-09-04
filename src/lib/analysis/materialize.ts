@@ -14,7 +14,8 @@ import {
 } from "@/lib/analysis/reconciliation";
 import {
   recoverMandatoryTableAnchors,
-  recoverSecurityChecklistConflictAnchors
+  recoverSecurityChecklistConflictAnchors,
+  recoverSummarySectionAnchors
 } from "@/lib/analysis/source-anchors";
 import {
   allCitationsVerified,
@@ -900,7 +901,12 @@ export function materializeAnalysis(input: MaterializeInput): {
 } {
   const generatedAt = input.generatedAt ?? new Date();
   const receipts: QuoteVerificationReceipt[] = [];
-  const recoveredClaims = recoverSecurityChecklistConflictAnchors(input.draft, input.documents);
+  const recoveredSummaryClaims = recoverSummarySectionAnchors(input.draft, input.documents);
+  const recoveredSummaryClaimIds = new Set(recoveredSummaryClaims.map((claim) => claim.claim_id));
+  const recoveredClaims = [
+    ...recoverSecurityChecklistConflictAnchors(input.draft, input.documents),
+    ...recoveredSummaryClaims
+  ];
   const recoveredRequirements = recoverMandatoryTableAnchors(input.draft, input.documents);
   const recoveredClaimIds = new Set(recoveredClaims.map((claim) => claim.claim_id));
   const recoveredRequirementIds = new Set(recoveredRequirements.map((requirement) => requirement.id));
@@ -909,6 +915,12 @@ export function materializeAnalysis(input: MaterializeInput): {
     return /^annex\s+[a-z]$/i.test(claim.claim_text.trim()) &&
       /security requirements?\s+check\s*list/i.test(sourceText)
       ? `${claim.document_sha256}:${normalizeEvidenceText(claim.claim_text)}`
+      : null;
+  };
+  const summaryAnchorKey = (claim: DraftAnalysis["claims"][number]) => {
+    const topic = normalizeEvidenceText(claim.topic);
+    return (topic === "overview" || topic === "scope") && claim.claim_text.trim()
+      ? `${claim.document_sha256}:${topic}:${normalizeEvidenceText(claim.claim_text)}`
       : null;
   };
   const mandatoryAnchorKey = (requirement: DraftAnalysis["requirements"][number]) => {
@@ -1010,7 +1022,7 @@ export function materializeAnalysis(input: MaterializeInput): {
     if (!sourceConsistent || !scalarSupported || !proseOrTypedFieldSupported || !fieldBound) {
       unsupportedItemsRemoved += 1;
       truthReviewItems += 1;
-      if (claim.effect !== "delete") {
+      if (claim.effect !== "delete" && matchingCitations.length > 0) {
         reviewClaims.push({
           claim_id: claim.claim_id,
           claim_text: claim.claim_text,
@@ -1029,9 +1041,13 @@ export function materializeAnalysis(input: MaterializeInput): {
   const verifiedRecoveredSecurityKeys = new Set(validClaimDrafts.flatMap(({ claim }) =>
     recoveredClaimIds.has(claim.claim_id) ? securityAnchorKey(claim) ?? [] : []
   ));
+  const verifiedRecoveredSummaryKeys = new Set(validClaimDrafts.flatMap(({ claim }) =>
+    recoveredSummaryClaimIds.has(claim.claim_id) ? summaryAnchorKey(claim) ?? [] : []
+  ));
   const reconciledClaimDrafts = validClaimDrafts.filter(({ claim }) =>
     recoveredClaimIds.has(claim.claim_id) ||
-    !verifiedRecoveredSecurityKeys.has(securityAnchorKey(claim) ?? "")
+    (!verifiedRecoveredSecurityKeys.has(securityAnchorKey(claim) ?? "") &&
+      !verifiedRecoveredSummaryKeys.has(summaryAnchorKey(claim) ?? ""))
   );
   unsupportedItemsRemoved += validClaimDrafts.length - reconciledClaimDrafts.length;
 
@@ -1463,9 +1479,13 @@ export function materializeAnalysis(input: MaterializeInput): {
   const activeClaimSources = effectiveClaimFacts.flatMap((fact) => {
     if (fact.status !== "active") return [];
     const draft = reconciledClaimDrafts.find((item) => item.claim.claim_id === fact.id)?.claim;
-    return draft ? [{ topic: draft.topic, value: fact.value, citations: fact.citations }] : [];
+    return draft ? [{ id: fact.id, topic: draft.topic, value: fact.value, citations: fact.citations }] : [];
   });
   const uniqueSourceSummaryValue = (field: SummaryField) => {
+    // Do not authorize this fallback from the model-controlled topic. The
+    // scalar fields that call it have field-specific source-relation checks
+    // (cover labels, closing relation, or whole-bid channel), while overview
+    // and scope use only server-owned Summary anchors below.
     const candidates = activeClaimSources.flatMap((source) =>
       source.citations.some((citation) => citationSupportsSummaryValue(field, source.value, citation))
         ? [source.value]
@@ -1485,10 +1505,6 @@ export function materializeAnalysis(input: MaterializeInput): {
       normalizeEvidenceText(evaluationValues.selection_method) === normalized &&
       uniqueEvaluationCitations.some((citation) => citationSupportsSummaryValue(field, value, citation))
     );
-    if (field === "scope" && requirements.some((requirement) =>
-      requirement.status === "active" && normalizeEvidenceText(requirement.text) === normalized &&
-      requirement.citations.some((citation) => citationSupportsSummaryValue(field, value, citation))
-    )) return true;
     return activeClaimSources.some((source) =>
       SUMMARY_TOPIC_PATTERNS[field].test(source.topic) && normalizeEvidenceText(source.value) === normalized &&
       source.citations.some((citation) => citationSupportsSummaryValue(field, value, citation))
@@ -1496,23 +1512,130 @@ export function materializeAnalysis(input: MaterializeInput): {
   };
   const supportedOrUniqueSource = (field: SummaryField, preferred: string | null) =>
     sourceSupportsSummary(field, preferred) ? preferred : uniqueSourceSummaryValue(field);
+  const recoveredActiveSummaryValues = (topic: "overview" | "scope") => {
+    const unique = new Map<string, string>();
+    for (const source of activeClaimSources) {
+      if (!recoveredSummaryClaimIds.has(source.id) || source.topic !== topic ||
+        source.citations.length === 0 || source.citations.some((citation) => !citation.verified)) continue;
+      unique.set(normalizeEvidenceText(source.value), source.value);
+    }
+    return [...unique.values()];
+  };
+  const recoveredOverviewValues = recoveredActiveSummaryValues("overview");
+  const recoveredScopeValues = recoveredActiveSummaryValues("scope");
+  const safeTitle = supportedOrUniqueSource("title", input.draft.summary.title)
+    ?? "Document-only RFP analysis";
+  const sourceBackedOverview = recoveredOverviewValues.length === 1
+    ? recoveredOverviewValues[0]
+    : sourceSupportsSummary("overview", input.draft.summary.overview)
+      ? input.draft.summary.overview
+      : null;
+  const usedTitleAsOverviewFallback = sourceBackedOverview === null &&
+    safeTitle !== "Document-only RFP analysis";
+
+  const activeSubmissionRequirements = requirements.filter((requirement) =>
+    requirement.status === "active" && requirement.category === "submission"
+  );
+  const preferredSubmission = supportedOrUniqueSource(
+    "submission_method",
+    input.draft.summary.submission_method
+  );
+  const submissionLabels: Record<SubmissionMethodSignature, string> = {
+    email: "Email",
+    portal: "Portal",
+    electronic: "Electronic submission",
+    fax: "Fax",
+    postal_mail: "Postal mail",
+    courier: "Courier",
+    hand_delivery: "Hand delivery"
+  };
+  const submissionCandidates = new Map<SubmissionMethodSignature, {
+    citations: Citation[];
+    requirementIds: Set<string>;
+  }>();
+  let ambiguousSubmissionRecoveryEvidence = false;
+  const recordSubmissionEvidence = (citation: Citation, requirementId?: string) => {
+    if (!citation.verified) return;
+    const relationSignatures = new Set(submissionRelationClauses(citation)
+      .flatMap((clause) => [...submissionMethodSignatures(clause)]));
+    if (relationSignatures.size > 1) {
+      // One verified citation affirmatively authorizes several whole-bid
+      // channels. Ignoring it could make a different single-channel quote
+      // look package-wide unique, so disable summary publication altogether.
+      ambiguousSubmissionRecoveryEvidence = true;
+      return;
+    }
+    if (relationSignatures.size !== 1) return;
+    const signature = [...relationSignatures][0];
+    if (!citationSupportsSubmissionMethod(submissionLabels[signature], citation)) return;
+    const existing = submissionCandidates.get(signature);
+    submissionCandidates.set(signature, {
+      citations: deduplicateCitations([...(existing?.citations ?? []), citation]),
+      requirementIds: new Set([
+        ...(existing?.requirementIds ?? []),
+        ...(requirementId ? [requirementId] : [])
+      ])
+    });
+  };
+  for (const requirement of activeSubmissionRequirements) {
+    for (const citation of requirement.citations) recordSubmissionEvidence(citation, requirement.id);
+  }
+  // A model summary claim can be the only publishable whole-bid evidence in a
+  // small document. Include its independently verified citation in the same
+  // package-wide uniqueness gate, but never grant authority from its topic.
+  for (const source of activeClaimSources) {
+    for (const citation of source.citations) recordSubmissionEvidence(citation);
+  }
+  const recoveredSubmission = !ambiguousSubmissionRecoveryEvidence && submissionCandidates.size === 1
+    ? [...submissionCandidates.entries()][0]
+    : null;
+  const preferredSubmissionSignatures = preferredSubmission
+    ? submissionMethodSignatures(preferredSubmission)
+    : new Set<SubmissionMethodSignature>();
+  const preferredSubmissionMatchesPackage = Boolean(
+    preferredSubmission && recoveredSubmission && preferredSubmissionSignatures.size === 1 &&
+    preferredSubmissionSignatures.has(recoveredSubmission[0])
+  );
+  if (!preferredSubmission && recoveredSubmission && recoveredSubmission[1].requirementIds.size > 0) {
+    const [signature, evidence] = recoveredSubmission;
+    let claimId = `server-derived-submission-method-${signature}`;
+    while (claims.some((claim) => claim.claim_id === claimId)) claimId += "-verified";
+    claims.push({
+      claim_id: claimId,
+      claim_text: submissionLabels[signature],
+      claim_type: "derived",
+      status: "active",
+      confidence: 1,
+      citations: evidence.citations,
+      formula_and_inputs: {
+        formula: "unique affirmative whole-bid submission channel in active verified submission requirements",
+        inputs: {
+          channel: signature,
+          source_requirement_ids: [...evidence.requirementIds].sort().join(",")
+        }
+      }
+    });
+  }
   const safeSummary = {
-    title: supportedOrUniqueSource("title", input.draft.summary.title)
-      ?? "Document-only RFP analysis",
+    title: safeTitle,
     solicitation_number: supportedOrUniqueSource(
       "solicitation_number",
       input.draft.summary.solicitation_number
     ),
     issuer: supportedOrUniqueSource("issuer", input.draft.summary.issuer),
     closing_date: supportedOrUniqueSource("closing_date", input.draft.summary.closing_date),
-    overview: sourceSupportsSummary("overview", input.draft.summary.overview)
-      ? input.draft.summary.overview
-      : "Only server-verified, cited facts from the supplied documents are included below.",
-    scope: input.draft.summary.scope.filter((item) => sourceSupportsSummary("scope", item)),
-    submission_method: supportedOrUniqueSource(
-      "submission_method",
-      input.draft.summary.submission_method
-    ),
+    overview: sourceBackedOverview ?? safeTitle,
+    scope: [...new Map([
+      ...input.draft.summary.scope
+        .filter((item) => sourceSupportsSummary("scope", item))
+        .map((item) => [normalizeEvidenceText(item), item] as const),
+      ...recoveredScopeValues.map((item) => [normalizeEvidenceText(item), item] as const)
+    ]).values()],
+    submission_method: preferredSubmissionMatchesPackage
+      ? preferredSubmission
+      : !preferredSubmission && recoveredSubmission && recoveredSubmission[1].requirementIds.size > 0
+        ? submissionLabels[recoveredSubmission[0]]
+        : null,
     current_selection_method: sourceSupportsSummary(
       "current_selection_method",
       input.draft.summary.current_selection_method
@@ -1550,13 +1673,24 @@ export function materializeAnalysis(input: MaterializeInput): {
       ? [`${citation.document_sha256}:${citation.pdf_page_1based}`]
       : []
   ));
-  const draftEvaluationFields = new Set(input.draft.evaluation.rules
-    .filter((rule) => rule.effect !== "delete").map((rule) => rule.field)).size;
-  const criticalClaims = draftRequirements.filter((item) => item.effect !== "delete").length +
-    input.draft.risks.filter((risk) => risk.effect !== "delete" && risk.severity !== "low").length +
-    draftEvaluationFields + conflicts.length;
-  const criticalClaimsCited = activeRequirements.length +
-    risks.filter((risk) => risk.severity !== "low").length + evaluationFieldsSupported + conflicts.length;
+  // Measure the one population the user can actually inspect. Rejected model
+  // candidates are disclosed by unsupported_items_removed; counting them in
+  // this denominator while counting only published items in the numerator
+  // would turn successful fail-closed filtering into a false citation gap.
+  // Keep this population aligned with the release verifier's visible groups.
+  const criticalCitationGroups = [
+    ...claims.filter((claim) => claim.claim_type !== "unknown").map((claim) => claim.citations),
+    ...requirements.map((requirement) => requirement.citations),
+    uniqueEvaluationCitations,
+    ...risks.map((risk) => risk.citations),
+    ...conflicts.map((conflict) => conflict.citations)
+  ];
+  const criticalClaims = criticalCitationGroups.length;
+  const criticalClaimsCited = criticalCitationGroups.filter((citations) =>
+    citations.length > 0 && citations.every((citation) =>
+      citation.verified && citation.pdf_page_1based !== null
+    )
+  ).length;
   const actualMicroUsd = input.costs.reduce((total, event) => total + (event.actual_micro_usd ?? 0), 0);
   const estimatedMicroUsd = input.costs.reduce(
     (total, event) => total + (event.actual_micro_usd === null ? event.estimated_micro_usd ?? 0 : 0),
@@ -1610,7 +1744,7 @@ export function materializeAnalysis(input: MaterializeInput): {
       pages_total: input.manifests.reduce((total, manifest) => total + manifest.pages, 0),
       pages_covered: coveredPages.size,
       critical_claims: criticalClaims,
-      critical_claims_cited: Math.min(criticalClaims, criticalClaimsCited),
+      critical_claims_cited: criticalClaimsCited,
       citations_verified: allVisibleCitations.filter((citation) => citation.verified).length,
       unsupported_items_removed: unsupportedItemsRemoved,
       search_events: 0,
@@ -1618,6 +1752,9 @@ export function materializeAnalysis(input: MaterializeInput): {
       warnings: [
         "Analysis is restricted to the supplied documents.",
         "Context.dev zero-data retention is not enabled; an upstream artifact expiry of seven days was observed in the release contract spike.",
+        ...(usedTitleAsOverviewFallback
+          ? ["No independently source-backed overview was extracted; the verified solicitation title is shown as the subject."]
+          : []),
         ...(rejectedCitationCandidates > 0
           ? [`${rejectedCitationCandidates} model-supplied citation candidate(s) could not be independently located and were omitted.`]
           : [])

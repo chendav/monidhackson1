@@ -717,10 +717,32 @@ function groupedFacts(input: VersionedFact[]) {
   return groups;
 }
 
-function scalarValuesConflict(candidates: VersionedFact[]) {
+function sharedServerConflictIdentity(candidates: VersionedFact[]) {
   if (candidates.length < 2) return false;
+  // A model topic is only a presentation label. A conflict requires one
+  // identity closed by a server-owned key or verified source classifier. The
+  // explicit projection-horizon classifier remains for source wording such
+  // as "projections extend to 2050/2055", which intentionally has no closed
+  // sourceKeyForSegment form.
+  const identities = new Set(candidates.map((fact) =>
+    closedFactIdentity(fact) ?? (
+      canonicalTopicKey(fact) === "derived:projection-horizon"
+        ? "derived:projection-horizon"
+        : null
+    )
+  ));
+  return identities.size === 1 && !identities.has(null);
+}
+
+function scalarValuesConflict(candidates: VersionedFact[]) {
+  if (!sharedServerConflictIdentity(candidates)) return false;
   const signatures = candidates.map((fact) => [...extractAssertionTokens(fact.value)].toSorted().join("|"));
   return signatures.every(Boolean) && new Set(signatures).size > 1;
+}
+
+function replacementValuesConflict(candidates: VersionedFact[]) {
+  return candidates.some((fact) => fact.effect === "replace") &&
+    sharedServerConflictIdentity(candidates);
 }
 
 function closedCategoricalValuesConflict(candidates: VersionedFact[]) {
@@ -787,7 +809,7 @@ export function reconcileVersionedFacts(input: VersionedFact[]): {
         if (!distinctValues.has(key)) distinctValues.set(key, fact.value);
       }
       const conflictAtStage = distinctValues.size > 1 && (
-        candidates.some((fact) => fact.effect === "replace") || scalarValuesConflict(candidates) ||
+        replacementValuesConflict(candidates) || scalarValuesConflict(candidates) ||
         closedCategoricalValuesConflict(candidates)
       );
       if (conflictAtStage) {

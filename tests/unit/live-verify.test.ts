@@ -54,6 +54,10 @@ const runnerPromise = import(new URL("../../scripts/live-verify.mjs", import.met
     pages: Map<string, string[]>,
     options?: { requireLiveCosts?: boolean }
   ) => Record<string, unknown>;
+  validateEdmontonGolden: (
+    analysis: Record<string, unknown>,
+    document: { sha256: string }
+  ) => { golden_checks: number; mandatory_active_count: number };
   summarizeAttemptCost: (
     costs: Record<string, unknown> | null,
     terminalReportedMicroUsd: number | null,
@@ -822,6 +826,53 @@ describe("paid-live verifier deterministic campaign", () => {
     ))).toBe(true);
     expect(cases[9]).toMatchObject({ caseId: "edmonton-10", ingressMode: "signed_put" });
     expect(cases.filter((item) => item.ingressMode === "signed_put")).toHaveLength(1);
+  });
+
+  it("scopes the Edmonton M1-M4 gate to the mandatory-criteria table", async () => {
+    const runner = await runnerPromise;
+    const analysis = createEdmontonSampleResult();
+    analysis.requirements.push({
+      id: "integrity-documentation",
+      category: "mandatory",
+      status: "active",
+      text: "The Bidder must provide the required documentation, as applicable.",
+      evidence_needed: null,
+      consequence: null,
+      citations: [{
+        document_sha256: EDMONTON_SHA256,
+        document_name: "edmonton-100022184-A.pdf",
+        source_url: EDMONTON_SOURCE_URL,
+        pdf_page_1based: 15,
+        printed_page_label: "15 of 47",
+        section: "5.2.1",
+        evidence_quote: "The Bidder must provide the required documentation, as applicable.",
+        verified: true,
+        verification_method: "exact"
+      }]
+    });
+
+    expect(runner.validateEdmontonGolden(
+      analysis as unknown as Record<string, unknown>,
+      { sha256: EDMONTON_SHA256 }
+    )).toMatchObject({ golden_checks: 7, mandatory_active_count: 4 });
+  });
+
+  it("rejects any additional Edmonton conflict beyond the audited Annex D/E conflict", async () => {
+    const runner = await runnerPromise;
+    const analysis = createEdmontonSampleResult();
+    analysis.conflicts.push({
+      id: "false-delivery-conflict",
+      topic: "delivery",
+      status: "conflicted",
+      candidate_values: ["2 business days", "3 business days"],
+      safe_answer: "Clarification is required.",
+      citations: [analysis.requirements[0].citations[0], analysis.requirements[1].citations[0]]
+    });
+
+    expect(() => runner.validateEdmontonGolden(
+      analysis as unknown as Record<string, unknown>,
+      { sha256: EDMONTON_SHA256 }
+    )).toThrow(/EDMONTON_ANNEX_CONFLICT_GATE_FAILED/);
   });
 
   it("fingerprints critical structure and physical pages, not volatile prose or record ids", async () => {

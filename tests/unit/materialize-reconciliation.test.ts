@@ -234,6 +234,89 @@ describe("server-owned materialization and reconciliation", () => {
     expect(result.blocking_unknowns).toContain("No substantive source-backed analysis could be verified.");
   });
 
+  it("does not publish a non-unknown review claim when no citation matches the source", () => {
+    const value = addMinimumCoverage(draft([]));
+    value.claims = [{
+      claim_id: "unmatched-source-claim",
+      topic: "contract value",
+      claim_text: "The contract value is 5000000 CAD.",
+      claim_type: "source",
+      confidence: 1,
+      document_sha256: baseSha,
+      amendment_number: null,
+      effect: "add",
+      citations: [citation(baseSha, "This sentence is absent from the physical PDF page.")],
+      supersedes_claim_ids: []
+    }];
+    const result = materializeAnalysis({
+      draft: value,
+      documents: [{
+        name: "base.pdf", sourceUrl: null, index: baseIndex,
+        role: "base", amendmentNumber: null
+      }],
+      manifests: [manifests[0]], costs: [], expiresAt: new Date("2026-09-03T00:00:00Z")
+    }).result;
+
+    expect(result.claims.find((claim) => claim.claim_id === "unmatched-source-claim"))
+      .toBeUndefined();
+    expect(result.quality.unsupported_items_removed).toBeGreaterThanOrEqual(1);
+    expect(result.quality.critical_claims).toBe(result.quality.critical_claims_cited);
+  });
+
+  it("measures citation coverage over the published fact groups only", () => {
+    const value = addMinimumCoverage(draft([]));
+    value.claims = [{
+      claim_id: "verified-term",
+      topic: "contract end date",
+      claim_text: "Contract end date 2045.",
+      claim_type: "source",
+      confidence: 1,
+      document_sha256: baseSha,
+      amendment_number: null,
+      effect: "add",
+      citations: [citation(baseSha, "Contract end date 2045.")],
+      supersedes_claim_ids: []
+    }];
+    value.requirements.push({
+      id: "rejected-requirement",
+      topic: "unsupported delivery window",
+      document_sha256: baseSha,
+      amendment_number: null,
+      effect: "add",
+      category: "delivery",
+      text: "Delivery is required within 99 days.",
+      evidence_needed: null,
+      consequence: null,
+      citations: [citation(baseSha, "This requirement is absent from the physical PDF page.")]
+    });
+    const result = materializeAnalysis({
+      draft: value,
+      documents: [{
+        name: "base.pdf", sourceUrl: null,
+        index: index(baseSha, [
+          "Contract end date 2045.",
+          "The bidder must submit a signed form. A bid that fails a mandatory requirement will be non-compliant."
+        ]),
+        role: "base", amendmentNumber: null
+      }],
+      manifests: [manifests[0]], costs: [], expiresAt: new Date("2026-09-03T00:00:00Z")
+    }).result;
+    const groups = [
+      ...result.claims.filter((claim) => claim.claim_type !== "unknown").map((claim) => claim.citations),
+      ...result.requirements.map((requirement) => requirement.citations),
+      result.evaluation.citations,
+      ...result.risks.map((risk) => risk.citations),
+      ...result.conflicts.map((conflict) => conflict.citations)
+    ];
+
+    expect(result.quality.critical_claims).toBe(groups.length);
+    expect(result.quality.critical_claims_cited).toBe(groups.length);
+    expect(groups.every((citations) => citations.length > 0 && citations.every((citation) =>
+      citation.verified && citation.pdf_page_1based !== null
+    ))).toBe(true);
+    expect(result.quality.unsupported_items_removed).toBeGreaterThanOrEqual(1);
+  });
+
   it("keeps an unknown replacement out of reconciliation and marks it for clarification", () => {
     const value = addMinimumCoverage(draft([]));
     value.claims = [
@@ -291,10 +374,10 @@ describe("server-owned materialization and reconciliation", () => {
       manifests, costs: [], expiresAt: new Date("2026-09-03T00:00:00Z")
     }).result;
     expect(result.claims.map((claim) => [claim.claim_id, claim.status])).toEqual([
-      ["wrong-year", "needs_review"],
-      ["wrong-date", "needs_review"],
-      ["wrong-document", "needs_review"]
+      ["wrong-year", "needs_review"]
     ]);
+    expect(result.claims.find((claim) => claim.claim_id === "wrong-date")).toBeUndefined();
+    expect(result.claims.find((claim) => claim.claim_id === "wrong-document")).toBeUndefined();
     expect(result.quality.unsupported_items_removed).toBeGreaterThanOrEqual(3);
   });
 
@@ -1669,6 +1752,142 @@ describe("server-owned materialization and reconciliation", () => {
     ]);
     expect(result.conflicts).toHaveLength(1);
     expect(result.conflicts[0].candidate_values.toSorted()).toEqual(["2050", "2055"]);
+    expect(result.facts.every((fact) => fact.status === "conflicted")).toBe(true);
+  });
+
+  it("does not treat separate delivery obligations as a scalar conflict when the model reuses a generic topic", () => {
+    const result = reconcileVersionedFacts([
+      {
+        id: "maintenance-window", topic: "delivery",
+        value: "Maintenance must be completed within 2 business days of a request.",
+        documentSha256: baseSha, documentRole: "base", amendmentNumber: null, effect: "add",
+        citations: [verifiedCitation(
+          baseSha,
+          "Maintenance must be completed within 2 business days of a request.",
+          20
+        )]
+      },
+      {
+        id: "regular-repair-window", topic: "delivery",
+        value: "Regular repairs must be completed within 3 business days.",
+        documentSha256: baseSha, documentRole: "base", amendmentNumber: null, effect: "add",
+        citations: [verifiedCitation(
+          baseSha,
+          "Regular repairs must be completed within 3 business days.",
+          21
+        )]
+      },
+      {
+        id: "urgent-assessment-window", topic: "delivery",
+        value: "Urgent repair assessment must be completed within 2 business days.",
+        documentSha256: baseSha, documentRole: "base", amendmentNumber: null, effect: "add",
+        citations: [verifiedCitation(
+          baseSha,
+          "Urgent repair assessment must be completed within 2 business days.",
+          22
+        )]
+      }
+    ]);
+
+    expect(result.conflicts).toEqual([]);
+    expect(result.facts.every((fact) => fact.status === "active")).toBe(true);
+  });
+
+  it("does not conflict source-authorized unrelated replacements that share only a generic model topic", () => {
+    const result = reconcileVersionedFacts([
+      {
+        id: "deductible-base", topic: "insurance update", value: "5000 CAD",
+        documentSha256: baseSha, documentRole: "base", amendmentNumber: null, effect: "add",
+        citations: [verifiedCitation(baseSha, "Insurance deductible is 5000 CAD.", 10)]
+      },
+      {
+        id: "contact-base", topic: "insurance update", value: "Bob",
+        documentSha256: baseSha, documentRole: "base", amendmentNumber: null, effect: "add",
+        citations: [verifiedCitation(baseSha, "Insurance contact is Bob.", 11)]
+      },
+      {
+        id: "deductible-amendment", topic: "insurance update", value: "7500 CAD",
+        documentSha256: amendmentSha, documentRole: "amendment", amendmentNumber: "001",
+        effect: "replace",
+        citations: [verifiedCitation(
+          amendmentSha,
+          "Insurance deductible is changed to 7500 CAD.",
+          2
+        )]
+      },
+      {
+        id: "contact-amendment", topic: "insurance update", value: "Alice",
+        documentSha256: amendmentSha, documentRole: "amendment", amendmentNumber: "001",
+        effect: "replace",
+        citations: [verifiedCitation(
+          amendmentSha,
+          "Insurance contact is changed to Alice.",
+          3
+        )]
+      }
+    ]);
+
+    expect(result.unauthorizedMutationIds).toEqual([]);
+    expect(result.conflicts).toEqual([]);
+    expect(result.facts.find((fact) => fact.id === "deductible-base")?.status).toBe("superseded");
+    expect(result.facts.find((fact) => fact.id === "contact-base")?.status).toBe("superseded");
+    expect(result.facts.find((fact) => fact.id === "deductible-amendment")?.status).toBe("active");
+    expect(result.facts.find((fact) => fact.id === "contact-amendment")?.status).toBe("active");
+  });
+
+  it("fails closed when only a generic delivery topic suggests the same scalar obligation", () => {
+    const result = reconcileVersionedFacts([
+      {
+        id: "repair-window-a", topic: "delivery",
+        value: "Repairs must be completed within 2 business days.",
+        documentSha256: baseSha, documentRole: "base", amendmentNumber: null, effect: "add",
+        citations: [verifiedCitation(
+          baseSha,
+          "Repairs must be completed within 2 business days.",
+          20
+        )]
+      },
+      {
+        id: "repair-window-b", topic: "delivery",
+        value: "Repairs must be completed within 3 business days.",
+        documentSha256: baseSha, documentRole: "base", amendmentNumber: null, effect: "add",
+        citations: [verifiedCitation(
+          baseSha,
+          "Repairs must be completed within 3 business days.",
+          21
+        )]
+      }
+    ]);
+
+    expect(result.conflicts).toEqual([]);
+    expect(result.facts.every((fact) => fact.status === "active")).toBe(true);
+  });
+
+  it("still reports a scalar conflict when verified source clauses establish one closing-date identity", () => {
+    const result = reconcileVersionedFacts([
+      {
+        id: "closing-a", topic: "deadline", value: "September 1, 2026",
+        documentSha256: baseSha, documentRole: "base", amendmentNumber: null, effect: "add",
+        citations: [verifiedCitation(
+          baseSha,
+          "Solicitation closing date: September 1, 2026.",
+          1
+        )]
+      },
+      {
+        id: "closing-b", topic: "deadline", value: "September 2, 2026",
+        documentSha256: baseSha, documentRole: "base", amendmentNumber: null, effect: "add",
+        citations: [verifiedCitation(
+          baseSha,
+          "Solicitation closing date: September 2, 2026.",
+          2
+        )]
+      }
+    ]);
+
+    expect(result.conflicts).toHaveLength(1);
+    expect(new Set(result.conflicts[0]?.candidate_values))
+      .toEqual(new Set(["September 1, 2026", "September 2, 2026"]));
     expect(result.facts.every((fact) => fact.status === "conflicted")).toBe(true);
   });
 
