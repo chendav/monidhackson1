@@ -655,3 +655,102 @@ No stored-body or public-data migration is needed. Rollback restores the T16
 whole-fragment resolver and safely returns to discarding these records; it must
 not fall back to free-quote search or tolerant matching. No deployment or paid
 run is authorized until QA15 passes with P0=0 and P1=0.
+
+## Release-validation addendum — Reviewed regression; sample production once
+
+Status: **ACCEPTED AS REFRAMED BY CHIEF AFTER QA16**. This section
+supersedes the earlier proposal to retain provider-shaped intermediates. No
+such intermediate artifact is required or claimed by T18.
+
+### Evidence classes
+
+The release gate separates three facts that have different evidence units:
+
+1. `deterministic_regression=10/10`: ten reviewed repository test selections,
+   executed in separate provider-free child processes with exact structured
+   identities and counts;
+2. `live_edmonton=1/1`: one accepted signed-PUT Edmonton production run; and
+3. `live_cer=1/1`: one accepted shuffled four-document CER production run.
+
+The first class is regression evidence only. It does not show provider
+acceptance, provider determinism, production Workflow behavior, live source
+cleanup, wallet movement, cost, Q&A, Turnstile, signed ingress, or reviewer
+citation clicks. Those facts remain attached only to their live or independent
+review evidence.
+
+### Reviewed repository regression manifest
+
+The repository owns exactly ten named Vitest cases. Every case has a fixed test
+file, fixed `-t` selection, fixed arguments, expected executed/pass count, and
+expected SHA-256 of the sorted full test identities. Each case runs in a new
+Node process with `shell:false`, a credential-stripped environment, a bounded
+timeout/output, and the Vitest JSON reporter.
+
+A case passes only if its structured report has the exact reviewed identity and
+count, every selected test passed, and failed, pending/skipped, todo, and
+pending-suite counts are all zero. Exit zero alone is never evidence: zero
+matches, a renamed selection, a skipped suite, count drift, malformed JSON, or
+an incomplete report fails closed.
+
+The manifest binds candidate HEAD; runner, test, Vitest configuration,
+`package.json`, lockfile, and official-manifest hashes; exact Node and Vitest
+versions; fixed case manifest; per-case structured summaries; and the saved
+official PDF set. Tracked or untracked changes to product, test, script,
+configuration, dependency, or official-manifest inputs invalidate the run.
+These inputs are rechecked after every child and before the atomic body-free
+receipt is written below ignored `.data/`.
+
+The official-PDF case requires the saved Edmonton file and all four saved CER
+files. Every byte length and SHA-256 must equal the official manifest; a missing
+file cannot become a skipped test. The remaining cases exercise the frozen
+Edmonton/CER facts, shuffled amendment behavior, idempotency/admission resume,
+cleanup failure and delayed completion, source-binding and unfamiliar-channel
+safety, structured-output incompleteness/usage accounting, and budget
+mutation. Passing this manifest means only that the reviewed repository
+regressions passed on the named candidate.
+
+### Point-in-time live proofs
+
+After the exact candidate is committed, deployed, freshly attested, healthy,
+and within the existing daily/per-run reserve, run exactly:
+
+- one Edmonton production analysis through signed PUT, requiring CORS and
+  one-time replay fencing, READY, app-controlled cleanup, Edmonton golden
+  facts, independently matched physical-page citations, grounded Q&A, complete
+  cost accounting, and its observed end-to-end and Q&A latency; and
+- one CER production analysis in deliberately shuffled base/amendment order,
+  requiring READY, complete provider responses, cleanup, correct version chain
+  and M3 replacement, the cited 2050/2055 conflict, grounded Q&A, complete cost
+  accounting, and its observed latency.
+
+The wallet delta is reconciled against these live attempts. A failure returns
+to sanitized audit evidence and the smallest local falsifier; it is not retried
+to select a nicer result. The two latency values are observations, not a
+distribution.
+
+### Non-substitutable publication gates
+
+Repository regression evidence can never satisfy exact-deployment runtime and
+provider attestations, public health and Turnstile mutation, signed ingress,
+provider response acceptance, production Workflow/API orchestration,
+application cleanup, wallet/provider-cost reconciliation, upstream-retention
+disclosure, the production recovery canary, the independent 12-citation
+review, the full release-candidate gate, or final Reviewer approval. It also
+cannot support a median, P95, provider stability rate, or cleanup reliability
+rate.
+
+The former ten-Edmonton-plus-one-CER paid campaign remains available only as an
+explicit benchmark. Any percentiles from that optional campaign must be
+labelled benchmark measurements and are not a default publication condition.
+
+### Falsification and rollback
+
+The split fails closed if any named test is absent, skipped, todo, failed,
+renamed, or count-drifted; a semantic input or dependency changes; an official
+PDF is absent or hash-mismatched; repository regression evidence is used to
+fill a live-only field; either live package fails on the reviewed deployment;
+or release copy turns a single observation into a statistical claim.
+
+Rollback may restore the stricter paid benchmark, but never permits skipping
+live cleanup/cost/Q&A, exact-deployment evidence, citation review, or
+independent QA.

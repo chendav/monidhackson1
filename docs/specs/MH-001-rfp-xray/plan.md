@@ -45,15 +45,18 @@ Task ID: MH-001
 - Level 3 release-candidate gate: full lint/typecheck/unit/integration/golden,
   build, and Playwright. Run once before independent acceptance/deployment, and
   again only if Reviewer-requested code changes invalidate it.
-- Level 4 production proof: one paid full-document run only after independent
-  PASS and exact-deployment attestation. Ten-run stability and CER campaigns
-  occur only after the first Edmonton core result succeeds.
-- Reuse `.data/official-fixtures/` and ignored `.data/` replay artifacts. Every
+- Level 4 production proof: after independent PASS and exact-deployment
+  attestation, require the reviewed repository deterministic regression manifest at
+  10/10, one accepted Edmonton production run, and one accepted shuffled CER
+  production run. Record the two live latencies only as point-in-time
+  observations. The former ten-Edmonton-plus-one-CER paid campaign is an
+  explicit opt-in benchmark, never a default release condition.
+- Reuse `.data/official-fixtures/` and ignored `.data/` regression receipts. Every
   cached artifact must record source SHA-256, schema/prompt/wire versions, and
   generation provenance; a mismatch invalidates the cache. Never commit raw
   PDFs, page text, Markdown, provider bodies, signed URLs, or credentials.
 - Never use a full production run to debug a module when a redacted audit plus a
-  deterministic local replay can falsify it.
+  deterministic local regression can falsify it.
 - Reviewer verifies acceptance IDs locally and at least 12 critical citations
   in the accepted production build.
 

@@ -512,6 +512,42 @@ verdict: PASS
 findings: { P0: 0, P1: 0, P2: 0 }
 ```
 
+## T18 Split deterministic regression from live release proof
+
+```yaml
+id: T18
+owner_profile: backend
+objective: Replace the obsolete eleven-paid-run release gate with a reviewed repository deterministic regression manifest at 10/10, live Edmonton 1/1, and shuffled live CER 1/1 evidence, without claiming provider-shaped execution, while preserving the former campaign as an opt-in benchmark and retaining every live-only safety gate.
+depends_on: [QA15]
+include_paths: [scripts/live-verify.mjs, scripts/deterministic-regression.mjs, tests/unit/live-verify.test.ts, tests/unit/deterministic-regression.test.ts, vitest.config.ts, package.json, pnpm-lock.yaml, tests/golden/**, tests/integration/**, tests/unit/**, docs/specs/MH-001-rfp-xray/**, docs/agent_context/**]
+exclude_paths: [src/**, drizzle/**, videos/**]
+edits_allowed: true
+acceptance: [AC-3, AC-4, AC-5, AC-6, AC-9, AC-10]
+handoff: handoff-backend.md
+status: completed_handoff_revision_3
+revision_round: 3
+revision_scope: [FULL_GATE_EXTERNAL_FIXTURE_ENV_ABSENCE_MUST_SKIP_OUTSIDE_RUNNER]
+constraints: [no_network, no_provider_calls, no_paid_work, repository_runner_executes_ten_named_non_skipped_tests, structured_test_identity_count_and_status_required, saved_official_PDF_hashes_required, runner_manifest_config_dependency_and_test_sources_hash_bound_to_candidate_commit, no_provider_shaped_execution_or_intermediate_artifact_claim, no_externally_self_signed_pass_json, old_eleven_run_mode_remains_opt_in, no_p95_or_stability_claim_from_single_runs, regression_cannot_satisfy_live_cleanup_ingress_provider_cost_or_review]
+```
+
+## QA16 T18 release-evidence review
+
+```yaml
+id: QA16
+owner_profile: reviewer
+objective: Independently falsify evidence-class separation, exact non-skipped deterministic-regression summaries, source/config/dependency binding, benchmark opt-in behavior, live-only cleanup/cost/citation gates, and removal of unsupported provider-shaped, percentile, or stability claims.
+depends_on: [T18]
+include_paths: [scripts/live-verify.mjs, scripts/deterministic-regression.mjs, tests/unit/live-verify.test.ts, tests/unit/deterministic-regression.test.ts, vitest.config.ts, package.json, pnpm-lock.yaml, tests/golden/**, tests/integration/**, tests/unit/**, docs/specs/MH-001-rfp-xray/**, docs/agent_context/**]
+exclude_paths: [src/**, drizzle/**, videos/**]
+edits_allowed: false
+acceptance: [AC-3, AC-4, AC-5, AC-6, AC-9, AC-10, AC-11]
+handoff: qa_report.md
+status: completed_pass
+revision_round: 3
+verdict: PASS
+findings: { P0: 0, P1: 0, P2: 0 }
+```
+
 ## T8 Publication/submission authority separation
 
 ```yaml

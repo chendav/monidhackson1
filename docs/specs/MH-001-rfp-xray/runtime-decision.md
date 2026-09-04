@@ -159,8 +159,11 @@ half-migrated second analysis path.
 2. Require health 200 and validate the deployed guest flow.
 3. Continue observing Railway Cron and GitHub redundancy; health must remain
    fresh and no manual dispatch may be counted as scheduled evidence.
-4. Run ten Edmonton analyses and one complete CER analysis under the existing
-   budget caps, verify cleanup/cost/latency, and review at least 12 citations.
+4. Run the reviewed repository deterministic regression manifest at 10/10,
+   followed by one signed-PUT Edmonton live analysis and one shuffled complete
+   CER live analysis under the existing budget caps. Verify live-only
+   cleanup/cost/Q&A and the two observed latencies, then review at least 12
+   citations. The former 10+1 paid campaign is opt-in benchmark evidence only.
 5. Complete the final video, contest submission, and five social publications.
 
 S3, runtime, and provider receipts are scheduled for refresh on Sep 9 and

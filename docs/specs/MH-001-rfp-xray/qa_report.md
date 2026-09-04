@@ -1014,3 +1014,297 @@ network/provider/paid call, deployment, database action, credential access,
 commit, or push was performed by the Reviewer. QA15 Revision 1 permits the
 ordinary Chief release-candidate gate; it does not establish production
 selector recovery coverage by itself.
+
+## QA16 — T18 release-evidence split
+
+```yaml
+verdict: REQUEST_CHANGES
+revision_round: 0
+p0: 0
+p1: 2
+p2: 0
+deployment_allowed: false
+reviewed_base: a15df0ea742fb7fd0964979a77762cb8d88a4ede
+```
+
+### P1_QA16_EXIT_ZERO_CAN_ATTEST_ZERO_EXECUTED_REPLAY_TESTS
+
+The replay runner treats a Vitest child as a passed replay case using only
+`exit_code === 0`, a null signal, and a syntactically valid diagnostic-output
+hash (`scripts/deterministic-replay.mjs:217-236`). It never parses or requires
+an executed test count, forbids skipped/todo tests, or binds the selected test
+identities/counts. Vitest returns zero for a valid file whose `-t` pattern
+matches no tests. An independent provider-free reproduction ran the exact
+runner shape with `tests/golden/edmonton.test.ts` and a nonexistent pattern;
+Vitest reported `Test Files 1 skipped` and `Tests 8 skipped`, then exited 0.
+Thus a renamed test, stale pattern, or committed `.skip` can be recorded as a
+successful replay case and ultimately as `passed_cases: 10`.
+
+The unit harness confirms the same trust boundary: its `successfulChild`
+contains no test result at all, only exit/signal/output metadata, and ten such
+objects are accepted as authenticated PASS evidence
+(`tests/unit/deterministic-replay.test.ts:30-37,41-94`). The fresh-process
+result hash likewise contains only test-source hash, command, exit code, and
+signal, not an oracle result (`scripts/deterministic-replay.mjs:237-259`).
+
+The execution dependency fence is incomplete as well. Dirty-state checking is
+limited to `src`, `tests`, `scripts`, and the official manifest
+(`scripts/deterministic-replay.mjs:114-133`), while the spawned Vitest process
+also automatically consumes the repository's `vitest.config.ts`; that file and
+the package/lock/runtime identity are neither rejected when dirty nor included
+in the replay receipt. This is another route for selected-test semantics to
+drift without invalidating the claimed runner/oracle authentication.
+
+Minimum acceptance: consume a machine-readable Vitest result and require the
+reviewed exact test identities/counts to execute with zero failed, skipped,
+todo, or unselected cases; fail closed on reporter parse/incompleteness. Bind
+and dirty-check every local execution-semantic input, including Vitest config
+and dependency/runtime identities. Add exact zero-match, all-skipped, renamed
+pattern, and dirty-config counterexamples. Diagnostic stdout/stderr hashing may
+remain non-authoritative.
+
+### P1_QA16_TEST_PROCESS_PROXY_IS_NOT_THE_ACCEPTED_REPLAY_BUNDLE_OR_ORACLE
+
+The accepted design requires an immutable local `ReplayBundle` and sanitized
+`ReplayCassette` containing hash-bound Monid/PDF.js/provider intermediates and
+complete structured responses, followed by ten declared perturbations through
+the production decode/reconciliation/authority/materialization/Q&A path and an
+independent assertion of the complete Edmonton golden analysis
+(`reframing_review.md:678-744`). The implementation has no bundle, cassette,
+provider-intermediate manifest, or replay pipeline. Its entire case manifest is
+ten Vitest file/pattern pairs (`scripts/deterministic-replay.mjs:26-37`), and a
+search of the runner/tests finds no ReplayBundle/ReplayCassette input at all.
+
+Cases 1/2 and 3/4 simply repeat identical commands in separate processes.
+There is no same-process second execution, distinct synthetic run/time IDs,
+stable-JSON/key-order perturbation, resume immediately before extraction
+settlement or reconciliation/materialization, cleanup-maintenance replay, or
+mutation-then-clean state-poisoning proof. The remaining entries select groups
+of pre-existing unit/integration tests; they do not start from one hash-bound
+Edmonton bundle and do not require each positive case to emit the same
+canonical golden analysis. The claimed pair equality is tautological because
+the digest is derived from the identical command/source/exit tuple rather than
+the produced semantic result (`scripts/deterministic-replay.mjs:248-259`). CER
+is likewise run as a test source, not as the required captured shuffled-package
+replay with a bound cassette.
+
+Minimum acceptance: implement the frozen ReplayBundle/ReplayCassette manifest
+and all ten declared state/perturbation cases against production-shaped replay
+entry points. For each positive case, independently compare the materialized
+analysis, citations, authority, Q&A, costs, event counts, and terminal cleanup
+projection to the frozen Edmonton oracle; require the declared fail-closed
+state for negative branches and a clean recovery after mutation. Hash-bind all
+bundle/cassette provenance and semantic versions, and retain the separate CER
+shuffled/permutation golden replay.
+
+### Passing independent evidence and boundaries
+
+- `pnpm exec vitest run tests/unit/deterministic-replay.test.ts tests/unit/live-verify.test.ts --reporter=dot --no-file-parallelism`: PASS, 2 files / 25 passed / 1 environment-dependent skipped.
+- The seven fixed oracle source files run once with a credential-stripped
+  process: PASS, 7 files / 136 tests. This establishes the current tests are
+  green, but it cannot repair the two replay-attestation defects above.
+- Exact zero-match reproduction: `node node_modules/vitest/vitest.mjs run tests/golden/edmonton.test.ts -t '__qa16_pattern_that_matches_nothing__' --reporter=dot --no-file-parallelism`: exit 0 with 8/8 tests skipped.
+- Static review confirmed `shell:false`, fixed argv, `.data/**/*.json`
+  containment and symlink rejection, benchmark double opt-in, exactly one
+  signed-PUT Edmonton live case, deliberately shuffled CER order, live-only
+  cleanup/cost/wallet/Q&A gates, and no release median/P95/stability field.
+- `.env.local` exists, but Vite's default loader projects only `VITE_` keys and
+  the repository has no explicit `dotenv`/`loadEnv`; provider/database key names
+  are not `VITE_`-prefixed. Focused commands also stripped inherited provider,
+  paid, database, storage, and deployment variables. No network/provider call
+  was observed or authorized.
+- On Windows, child timeout/output-limit rejection occurs before `close`; the
+  later Promise resolution is ignored and cannot turn the case into PASS.
+  Concurrent stdout/stderr ordering affects only `diagnostic_output_sha256`,
+  which is excluded from the canonical result digest. No separate finding is
+  raised for either behavior.
+- `git diff --check`: PASS except workspace LF-to-CRLF notices. Scoped changed-
+  file secret-value scan: zero matches.
+
+No product/test edit, network/provider/paid call, full suite, build, deployment,
+credential use, commit, or push was performed. The two P1 findings block the
+release-candidate deployment gate; existing live evidence must not be generated
+from this replay receipt.
+
+## QA16 Revision 1 — Reviewed deterministic regression
+
+```yaml
+verdict: REQUEST_CHANGES
+revision_round: 1
+p0: 0
+p1: 1
+p2: 0
+deployment_allowed: false
+reviewed_base: a15df0ea742fb7fd0964979a77762cb8d88a4ede
+```
+
+The Chief's revised architecture explicitly defines the local evidence as a
+reviewed repository `deterministic_regression`, not a provider replay. Under
+that superseding definition, both Round-0 findings are closed: the runner now
+parses Vitest JSON and binds exact counts, paths, full-name identities and
+statuses, while the removed ReplayBundle/ReplayCassette requirement is no
+longer part of T18 acceptance.
+
+### P1_QA16_REV1_OFFICIAL_PDF_SET_NOT_RECHECKED_AFTER_FIRST_CASE
+
+The saved official PDF set is verified exactly once before the first child at
+`scripts/deterministic-regression.mjs:289-295`. The default snapshot executed
+before/after every child and before receipt write rechecks HEAD, dirty inputs,
+hashed repository files, and runtime identity, but never calls
+`verifyOfficialFixtureSet` or rereads the PDF byte lengths/hashes
+(`scripts/deterministic-regression.mjs:297-307,342,368-370`). Only the first
+fixed child reads those PDFs; the later Edmonton/CER and regression test files
+do not consume `RFP_XRAY_FIXTURE_DIR`.
+
+An independent instrumentation of the real runner used ten successful
+structured child summaries and counted fixture verification calls. It returned
+`fixtureChecks=1`, `cases=10`, and `verdict=pass`. Therefore deleting, replacing,
+or symlink-swapping an official PDF after the first case does not invalidate the
+remaining cases or the final PASS receipt. The receipt can claim the original
+`official_fixture_set_sha256` while the retained source set no longer matches
+it. This violates the accepted reframe's requirement that official inputs be
+rechecked after every child and before atomic receipt write
+(`reframing_review.md:695-705`).
+
+Minimum acceptance: include `verifyOfficialFixtureSet(resolvedFixtureDirectory,
+rawManifest)` in the default snapshot, require its canonical result to equal the
+initial `officialFixtures`, and execute that snapshot after every child and
+immediately before writing as already arranged. Add deletion, byte mutation,
+SHA mutation, and fixture-directory/symlink swap counterexamples occurring
+after case 1; each must stop without writing PASS. Retain the current positive
+five-file fixture-set result.
+
+### Closed Round-0 findings and passing evidence
+
+- The real ten selections were independently spawned with fixed Vitest JSON
+  reporter arguments and passed `validateStructuredTestResult`. Executed counts
+  were exactly `2,8,8,7,7,11,2,48,54,6`; every frozen full-name SHA-256 matched.
+- An actual zero-match Vitest selection still exited 0, but its JSON report was
+  rejected by the revised validator. Independent synthetic mutations for all-
+  skipped, todo, executed-count drift, full-name drift, wrong file path, and
+  suite-status drift were also rejected. The focused suite covers malformed
+  JSON, renamed identities and child failure.
+- Missing fixture directory, changed byte length, and changed SHA-256 all fail
+  before case execution. The finding above concerns the uncovered mid-run/final
+  revalidation window, not initial validation.
+- `pnpm exec vitest run tests/unit/deterministic-regression.test.ts tests/unit/live-verify.test.ts tests/golden/deterministic-regression-official.test.ts --reporter=dot --no-file-parallelism` with the local official fixture directory: PASS, 3 files / 31 tests.
+- Current dirty/untracked `scripts`/`tests` inputs caused the real runner to stop
+  with `REGRESSION_REPOSITORY_INPUTS_DIRTY`. Source inspection confirms the
+  protected set includes `src`, `tests`, `scripts`, `vitest.config.ts`,
+  `package.json`, `pnpm-lock.yaml`, and the official manifest, with semantic
+  hashes plus Node/Vitest version, ABI and entry hash rechecked during the run.
+- Injected child environments contained only OS process basics, `NODE_ENV`,
+  `CI`, `NO_COLOR`, and `RFP_XRAY_FIXTURE_DIR`; no provider, paid, database,
+  storage, or deployment variable survived. Commands use fixed argv,
+  `process.execPath`, and `shell:false`. Output paths outside `.data`, including
+  traversal, were rejected.
+- Static/live-verifier focused checks retain the separate two-run release gate:
+  one signed-PUT Edmonton and one shuffled CER, each requiring live validated
+  Q&A/citations, cleanup, complete cost, wallet reconciliation, and budget.
+  Benchmark mode still requires its explicit second opt-in. Regression evidence
+  cannot satisfy these live records or the separate 12-citation review.
+- Release aggregation exposes only two observed latency values; median, P95,
+  consistency, and stability remain benchmark-only. A repository-wide copy
+  scan found no current user-facing ReplayBundle, ReplayCassette, provider
+  replay, or provider-determinism claim.
+- Child timeout/output-limit settlement is single-shot on Windows; later close
+  cannot reverse rejection. Concurrent stdout/stderr ordering affects only the
+  diagnostic digest. `git diff --check` passed apart from line-ending notices;
+  scoped secret-value scan returned zero matches.
+
+No product/test edit, network/provider/paid call, full suite, build, deployment,
+credential use, commit, or push was performed. The remaining P1 blocks the
+release candidate until the official fixture set is revalidated throughout the
+same evidence run.
+
+## QA16 Revision 2 — Continuous official-fixture snapshot
+
+```yaml
+verdict: PASS
+revision_round: 2
+p0: 0
+p1: 0
+p2: 0
+deployment_allowed: true
+reviewed_base: a15df0ea742fb7fd0964979a77762cb8d88a4ede
+```
+
+The failure-scoped revision closes
+`P1_QA16_REV1_OFFICIAL_PDF_SET_NOT_RECHECKED_AFTER_FIRST_CASE`. The runner pins
+the fixture directory's real path plus device/inode, performs the initial
+complete five-document bytes/SHA verification, and repeats both the directory
+identity and complete fixture-set verification in every snapshot
+(`scripts/deterministic-regression.mjs:190-205,312-340`). The existing snapshot
+positions produce exactly 13 complete checks: initial, pre-run, ten post-child,
+and immediately pre-write (`scripts/deterministic-regression.mjs:341,375,402`).
+
+Independent verification:
+
+- Instrumenting the real runner with real official-fixture verification and
+  ten accepted structured child summaries returned exactly
+  `checks=13`, `cases=10`, `verdict=pass`.
+- The focused Revision-2 suite passed 35/35 tests across
+  `deterministic-regression`, `live-verify`, and the official-PDF pin test. Its
+  real temporary-directory adversaries delete and replace a PDF after case 1,
+  mutate a PDF immediately before the evidence write, and replace the complete
+  directory with identical bytes; every mutation fails before PASS is written
+  (`tests/unit/deterministic-regression.test.ts:313-410`).
+- All ten real fixed Vitest JSON selections independently passed the exact
+  structured identity validator with counts `2,8,8,7,7,11,2,48,54,6`.
+- Source review confirms document count and fixture-set digest must equal the
+  initial result on every snapshot, while directory path/device/inode must
+  remain identical. Missing files and byte/SHA mismatches continue to fail
+  closed.
+- Round-0 protections remain: exact test count/full-name/path/status validation,
+  fixed argv, `shell:false`, clean child environment, protected repository and
+  runtime inputs, contained output path, separate live-only evidence, benchmark
+  opt-in, and no release percentile/stability claim.
+- `git diff --check` passed with line-ending notices only. No network/provider/
+  paid call, full suite, build, deployment, credential use, commit, or push was
+  performed.
+
+QA16 Revision 2 permits the ordinary release-candidate commit/deploy/attestation
+sequence. It does not itself supply either live production proof or the
+independent 12-citation review.
+
+## QA16 Revision 3 — External-fixture collection compatibility
+
+```yaml
+verdict: PASS
+revision_round: 3
+p0: 0
+p1: 0
+p2: 0
+deployment_allowed: true
+reviewed_base: a15df0ea742fb7fd0964979a77762cb8d88a4ede
+```
+
+The final failure-scoped change preserves the repository's optional external-
+fixture convention without weakening release evidence. The official regression
+test now selects `describe.skip` only when `RFP_XRAY_FIXTURE_DIR` is absent
+(`tests/golden/deterministic-regression-official.test.ts:6-8,31-46`). It no
+longer throws during ordinary fixture-free collection.
+
+Independent verification:
+
+- With `RFP_XRAY_FIXTURE_DIR` removed and provider/paid/database/storage
+  variables stripped, the official file exited 0 with exactly one skipped file
+  and two skipped tests; no collection error occurred.
+- Under the same fixture-free environment,
+  `tests/unit/deterministic-regression.test.ts` passed 11/11. Its direct child
+  JSON assertion confirms the two skipped tests are rejected as
+  `REGRESSION_TEST_SUMMARY_MISMATCH:official-pdf-hash-pins`, because the frozen
+  runner case still requires exactly two executed/passed identities
+  (`tests/unit/deterministic-regression.test.ts:253-276`).
+- With `RFP_XRAY_FIXTURE_DIR=D:\monidhackson\.data\official-fixtures`, the
+  official file passed 2/2.
+- `scripts/deterministic-regression.mjs` and its evidence schema are unchanged
+  from accepted Revision 2. The source still performs the initial, pre-run, ten
+  post-child, and pre-write fixture validations, including complete set digest
+  and directory realpath/device/inode identity. The Revision-2 unit gate still
+  asserts exactly 13 calls.
+- No network/provider/paid call, full suite, build, deployment, credential use,
+  commit, or push was performed.
+
+QA16 Revision 3 permits the ordinary release-candidate commit/deploy/attestation
+sequence. It does not supply live Edmonton/CER or 12-citation evidence.

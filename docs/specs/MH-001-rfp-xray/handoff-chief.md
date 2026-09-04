@@ -108,7 +108,10 @@ and long-term source storage remain out of scope.
 1. Redeploy once with the configured production Turnstile values and refresh
    both exact-deployment receipts.
 2. Require health 200 and verify real guest mutations.
-3. Run the capped ten-run Edmonton benchmark and four-document CER campaign.
+3. Require the reviewed repository regression manifest at 10/10, then run one
+   capped signed-PUT Edmonton live proof and one capped shuffled
+   four-document CER live proof. Run the legacy 10+1 campaign only through its
+   explicit benchmark opt-in.
 4. Complete an independent production review of at least 12 high-risk links.
 5. Record the truthful under-90-second video, register, submit, and publish on
    all five required social platforms.

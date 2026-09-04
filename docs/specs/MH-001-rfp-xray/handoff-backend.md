@@ -3626,3 +3626,190 @@ Exact checks:
 No provider/network or paid call, full suite, build, deployment, database
 action, credential access, commit, or push occurred. The v6 provider wire,
 dynamic fragment enum, T15 budgets, calls, retries, and deadlines are unchanged.
+
+## T18 Revision 1 — Reviewed regression vs point-in-time live proof
+
+Status: `completed_handoff_revision_1`; implementation evidence for QA16
+re-review, not self-approval. This section supersedes the original T18 handoff,
+whose provider-shaped-intermediate interpretation was rejected and removed.
+
+### Confirmed behavior
+
+- Default `release` mode now requires three independent evidence classes:
+  `deterministic_regression=10/10`, `live_edmonton=1/1`, and
+  `live_cer=1/1`. The former ten-Edmonton-plus-one-CER paid campaign is
+  reachable only with both `RFP_XRAY_LIVE_MODE=benchmark` and
+  `RFP_XRAY_ALLOW_PAID_BENCHMARK=true`.
+- `scripts/deterministic-regression.mjs` owns exactly ten fixed Vitest
+  file/pattern pairs. Each pair runs in a separate Node child with fixed
+  arguments, `shell:false`, a credential-stripped environment, JSON reporter,
+  120-second timeout, and bounded output.
+- Every case freezes its exact executed/pass count and SHA-256 of all sorted
+  test full names. The verifier parses the machine-readable Vitest result and
+  requires every selected test to pass with zero failed, pending/skipped, todo,
+  or pending-suite counts. Exit zero with zero matches, a skipped suite,
+  malformed/incomplete JSON, renamed identities, or count drift fails closed.
+- The first case requires the saved Edmonton PDF and all four saved CER PDFs;
+  their byte lengths and SHA-256 values must equal the official source
+  manifest. Missing files are errors, never skipped tests.
+- Candidate HEAD plus the runner, every selected test, `vitest.config.ts`,
+  `package.json`, `pnpm-lock.yaml`, and official manifest are dirty-checked
+  and hash-bound. Exact Node/Vitest identities and the fixed test manifest are
+  included. HEAD, source/config/dependency hashes, and runtime identity are
+  rechecked after every child and before the atomic body-free receipt under
+  ignored `.data/`.
+- The receipt uses only
+  `deterministic_regression`, `reviewed_repository_tests`,
+  `test_manifest_sha256`, and `structured_test_summary_sha256` semantics.
+  It does not claim provider determinism, provider-shaped execution, or
+  retained provider intermediates.
+- Default live aggregation still requires the two accepted production runs'
+  validated Q&A/citations, signed ingress, cleanup, complete cost accounting,
+  wallet reconciliation, and budget compliance. Regression fields cannot
+  populate or satisfy those facts or the independent 12-click review.
+- Release mode records the two latency values only as observations and emits no
+  median, P95, consistency, or stability field. Optional benchmark statistics
+  remain `benchmark_*` fields.
+
+### Exact changed files
+
+- `scripts/live-verify.mjs`
+- `scripts/deterministic-regression.mjs` (new; obsolete file name removed)
+- `tests/unit/live-verify.test.ts`
+- `tests/unit/deterministic-regression.test.ts` (new; obsolete file name removed)
+- `tests/golden/deterministic-regression-official.test.ts` (new)
+- `docs/specs/MH-001-rfp-xray/plan.md`
+- `docs/specs/MH-001-rfp-xray/runtime-decision.md`
+- `docs/specs/MH-001-rfp-xray/demo-publication-runbook.md`
+- `docs/specs/MH-001-rfp-xray/publication-copy-drafts.md`
+- `docs/specs/MH-001-rfp-xray/handoff-chief.md`
+- `docs/specs/MH-001-rfp-xray/reframing_review.md`
+- `docs/agent_context/current_task_brief.md`
+- `docs/agent_context/known_risks.md`
+- `docs/agent_context/qa_regressions.md`
+- this handoff and the T18 status in `tasks.md`
+
+### Exact local evidence
+
+- With `RFP_XRAY_FIXTURE_DIR=D:\monidhackson\.data\official-fixtures`,
+  `pnpm exec vitest run tests/unit/deterministic-regression.test.ts tests/unit/live-verify.test.ts tests/golden/deterministic-regression-official.test.ts --no-file-parallelism`:
+  PASS, 3 files and 31 tests.
+- A local fixed-oracle invocation then launched every frozen case in its own
+  Node process with the production JSON reporter arguments and passed each
+  result through `validateStructuredTestResult`: PASS, 10/10 cases. The exact
+  executed counts were `2, 8, 8, 7, 7, 11, 2, 48, 54, 6`; every frozen full-name
+  identity digest matched. This did not write a release receipt because the
+  reviewed runner correctly refuses the current dirty/untracked candidate.
+- With the same local fixture directory, the eight unique fixed regression
+  source files were run once with `--no-file-parallelism`: PASS, 8 files and
+  138 tests. Repeated Edmonton/CER child selections remain represented twice
+  in the fixed ten-case manifest.
+- Counterexamples cover zero-match/all-skipped structured reports, todo/fail,
+  executed-count drift, renamed identities, a failed child, wrong candidate
+  HEAD, dirty configuration, runtime/dependency drift, missing official PDF,
+  wrong PDF hash, evidence-class confusion, missing live cleanup/cost, and
+  benchmark selection without explicit opt-in.
+- No network/provider/paid call, deployment, full suite, build, credential
+  access, commit, or push occurred.
+- Targeted ESLint over the two scripts and three direct Revision 1 tests:
+  PASS with zero warnings/errors.
+- `pnpm exec tsc --noEmit`: PASS.
+- `git diff --check`: PASS; only workspace LF-to-CRLF notices were emitted.
+- Scoped credential-value scan across the changed implementation, tests, and
+  current release documents: PASS with zero matches.
+
+### Remaining release boundary
+
+The real ten-case body-free manifest can be generated only after this candidate
+is reviewed, committed, and clean; the runner intentionally rejects the
+current untracked/dirty implementation inputs. T18 produces no live provider
+acceptance, cleanup receipt, wallet observation, production cost/latency, Q&A,
+or reviewer-click evidence. All remain publication blockers.
+
+## T18 Revision 2 — Recheck official PDFs at every snapshot
+
+Status: `completed_handoff_revision_2`; bounded implementation evidence for
+the remaining QA16 P1, not self-approval.
+
+- The reviewed runner still performs the initial complete official-fixture
+  verification. It now repeats that same verification during every snapshot:
+  once before the first child, once after each of the ten children, and once
+  immediately before the atomic evidence write.
+- Every repeated verification must preserve both `document_count` and
+  `fixture_set_sha256` from the initial result. Missing files, changed byte
+  lengths, or changed SHA-256 values fail closed before another child or the
+  evidence write.
+- The fixture directory's resolved path plus filesystem device/inode identity
+  is also pinned. Replacing the directory with an identically populated one
+  therefore fails closed even when its document hashes remain unchanged.
+- The exact verifier-call invariant is 13 checks: initial + pre-run + ten
+  post-child checks + pre-write. Repository/runtime snapshots, fixed test
+  manifest, public contracts, evidence terminology, live-only gates, and the
+  opt-in benchmark behavior are unchanged.
+
+Changed files for Revision 2 are limited to:
+
+- `scripts/deterministic-regression.mjs`
+- `tests/unit/deterministic-regression.test.ts`
+- this handoff and the T18 task status
+
+Exact local evidence:
+
+- With `RFP_XRAY_FIXTURE_DIR=D:\monidhackson\.data\official-fixtures`,
+  `pnpm exec vitest run tests/unit/deterministic-regression.test.ts tests/unit/live-verify.test.ts tests/golden/deterministic-regression-official.test.ts --no-file-parallelism`:
+  PASS, 3 files and 35 tests.
+- A local fixed-oracle invocation launched every frozen selection in a fresh
+  Node process using the production JSON-reporter arguments and validated its
+  exact count/name digest: PASS, 10/10 cases (`2, 8, 8, 7, 7, 11, 2, 48, 54,
+  6` executed tests).
+- New real temporary-fixture counterexamples prove failure after case one
+  deletes a PDF, after case one replaces a PDF, when a PDF changes immediately
+  before evidence write, and when the entire directory is replaced with the
+  same bytes. No PASS evidence is written in any case.
+- Targeted ESLint over the two Revision 2 implementation/test paths: PASS with
+  zero warnings/errors. `pnpm exec tsc --noEmit`: PASS. `git diff --check`:
+  PASS with only workspace LF-to-CRLF notices. Scoped credential-value scan:
+  PASS with zero matches.
+
+No network/provider/paid call, deployment, full suite, build, credential
+access, commit, or push occurred.
+
+## T18 Revision 3 — Preserve the external-fixture test convention
+
+Status: `completed_handoff_revision_3`; final bounded QA16 revision evidence,
+not self-approval.
+
+- `tests/golden/deterministic-regression-official.test.ts` now marks its entire
+  describe block skipped when `RFP_XRAY_FIXTURE_DIR` is absent instead of
+  throwing during module collection. This matches the repository's external
+  official-fixture convention and lets an ordinary fixture-free test run
+  collect successfully.
+- The release runner is unchanged: its child environment always supplies the
+  explicitly resolved fixture directory and its frozen official-pin case still
+  requires exactly two executed and passed tests. Missing directories/files,
+  SHA mismatches, zero execution, or a skipped JSON result remain fail-closed.
+- A direct regression launches that golden file without the environment
+  variable, observes exit code zero with two skipped tests, and proves the
+  runner's existing structured-result verifier rejects the same JSON against
+  `expectedExecuted=2`.
+
+Revision 3 changed only the golden fixture test, its direct verifier test, this
+handoff, and the T18 task status. No runner evidence semantics or product code
+changed.
+
+Exact local evidence:
+
+- Without `RFP_XRAY_FIXTURE_DIR`, the golden file: PASS as an ordinary run, one
+  skipped file and two skipped tests, exit code zero.
+- Without that environment variable,
+  `tests/unit/deterministic-regression.test.ts`: PASS, 11/11 tests, including
+  rejection of the skipped JSON as release evidence.
+- With `RFP_XRAY_FIXTURE_DIR=D:\monidhackson\.data\official-fixtures`, the
+  golden file: PASS, 2/2 tests.
+- Targeted ESLint over the two Revision 3 test paths: PASS with zero
+  warnings/errors. `pnpm exec tsc --noEmit`: PASS. `git diff --check`: PASS
+  with only workspace LF-to-CRLF notices. Scoped credential-value scan: PASS
+  with zero matches.
+
+No full suite, build, network/provider/paid call, deployment, credential
+access, commit, or push occurred.

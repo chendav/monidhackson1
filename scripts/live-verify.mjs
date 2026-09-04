@@ -19,6 +19,7 @@ import { mkdir, open, readFile, rename, stat } from "node:fs/promises";
 import { isIP } from "node:net";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { runDeterministicRegression } from "./deterministic-regression.mjs";
 
 const REPOSITORY_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const MANIFEST_PATH = path.join(
@@ -289,6 +290,19 @@ export function parseRuntimeOptions(environment = process.env, now = new Date())
     fail("PER_RUN_CAP_EXCEEDS_TOTAL_BUDGET", "configuration");
   }
 
+  const validationMode = environment.RFP_XRAY_LIVE_MODE ?? "release";
+  if (!["release", "benchmark"].includes(validationMode)) {
+    fail("LIVE_MODE_INVALID", "configuration");
+  }
+  const benchmarkExplicitlyAllowed = environment.RFP_XRAY_ALLOW_PAID_BENCHMARK === "true";
+  if (validationMode === "benchmark" && !benchmarkExplicitlyAllowed) {
+    fail("PAID_BENCHMARK_OPT_IN_REQUIRED", "configuration");
+  }
+  const expectedCandidateCommit = environment.RFP_XRAY_CANDIDATE_COMMIT ?? null;
+  if (expectedCandidateCommit !== null && !/^[a-f0-9]{40}$/.test(expectedCandidateCommit)) {
+    fail("CANDIDATE_COMMIT_INVALID", "configuration");
+  }
+
   return {
     baseUrl: parsedBase.origin,
     fixtureDirectory: resolvedFixtureDirectory,
@@ -298,6 +312,9 @@ export function parseRuntimeOptions(environment = process.env, now = new Date())
     monidApiKey: environment.MONID_API_KEY || null,
     totalBudgetMicroUsd,
     declaredPerRunCapMicroUsd,
+    validationMode,
+    benchmarkExplicitlyAllowed,
+    expectedCandidateCommit,
     pollIntervalMs: parsePositiveInteger(
       environment.RFP_XRAY_LIVE_POLL_INTERVAL_MS,
       3_000,
@@ -1289,7 +1306,7 @@ export async function runReadOnlyPreflight(baseUrl, manifest, budgetPolicy, sour
   };
 }
 
-export function buildRunCases(manifest) {
+export function buildRunCases(manifest, validationMode = "release") {
   const byId = new Map(manifest.documents.map((document) => [document.id, document]));
   const edmonton = byId.get("edmonton-100022184-a");
   const cerOrder = [
@@ -1300,16 +1317,20 @@ export function buildRunCases(manifest) {
   ];
   const cer = cerOrder.map((id) => byId.get(id));
   if (!edmonton || cer.some((document) => !document)) fail("MANIFEST_CASE_BUILD_FAILED", "configuration");
+  if (!["release", "benchmark"].includes(validationMode)) {
+    fail("LIVE_MODE_INVALID", "configuration");
+  }
   const asInput = (document) => ({ role: document.role, source: { type: "url", url: document.url } });
+  const edmontonCount = validationMode === "benchmark" ? 10 : 1;
   return [
-    ...Array.from({ length: 10 }, (_, index) => ({
+    ...Array.from({ length: edmontonCount }, (_, index) => ({
       caseId: `edmonton-${String(index + 1).padStart(2, "0")}`,
       packageId: "edmonton",
       expectedDocuments: [edmonton],
       body: { documents: [asInput(edmonton)] },
       qaPrompt: "What is the contract award selection method?",
       inputOrderScrambled: false,
-      ingressMode: index === 9 ? "signed_put" : "official_url"
+      ingressMode: index === edmontonCount - 1 ? "signed_put" : "official_url"
     })),
     {
       caseId: "cer-01",
@@ -1923,22 +1944,24 @@ function percentile(values, percentileValue) {
 }
 
 export function aggregateMetrics(metrics) {
+  const validationMode = metrics.validation_mode ?? "release";
   const completedByCase = new Map();
   for (const run of metrics.runs) {
     if (run.validation?.passed && run.cleanup?.confirmed &&
-      run.cost_accounting_complete === true && !run.failure) {
+      run.cost_accounting_complete === true && !run.failure &&
+      run.qa?.result_class === "answered" && run.qa.citations_verified === true &&
+      Number.isInteger(run.qa.citation_count) && run.qa.citation_count > 0 &&
+      run.qa.independent_source_matches === run.qa.citation_count) {
       completedByCase.set(run.case_id, run);
     }
   }
   const completed = [...completedByCase.values()];
   const edmonton = completed.filter((run) => run.package_id === "edmonton");
   const cer = completed.filter((run) => run.package_id === "cer");
-  const fingerprints = new Set(edmonton.map((run) => run.validation.critical_structure_sha256));
   const totalCost = metrics.runs.reduce((sum, run) => sum + (run.cost?.total_micro_usd ?? 0), 0);
-  const readyLatencies = edmonton.map((run) => run.ready_latency_ms).filter(Number.isInteger);
-  const qaLatencies = completed.map((run) => run.qa?.latency_ms).filter(Number.isInteger);
-  return {
-    required_run_count: 11,
+  const base = {
+    validation_mode: validationMode,
+    required_run_count: validationMode === "benchmark" ? 11 : 2,
     attempt_count: metrics.runs.length,
     unresolved_attempt_count: metrics.runs.filter((run) => run.cost_accounting_complete !== true).length,
     completed_run_count: completed.length,
@@ -1947,13 +1970,41 @@ export function aggregateMetrics(metrics) {
     signed_put_completed: completed.filter((run) =>
       run.ingress_mode === "signed_put" && run.cors_gate_passed && run.put_replay_rejected
     ).length,
-    edmonton_structure_consistent: edmonton.length === 10 && fingerprints.size === 1,
     cleanup_confirmed_count: completed.filter((run) => run.cleanup.confirmed).length,
-    total_cost_micro_usd: totalCost,
-    edmonton_ready_median_ms: percentile(readyLatencies, 0.5),
-    edmonton_ready_p95_ms: percentile(readyLatencies, 0.95),
-    qa_p95_ms: percentile(qaLatencies, 0.95),
-    performance_gate_passed: edmonton.length === 10 &&
+    total_cost_micro_usd: totalCost
+  };
+  if (validationMode === "release") {
+    return {
+      ...base,
+      evidence_classes: {
+        deterministic_regression: metrics.evidence_classes?.deterministic_regression ?? null,
+        live_edmonton: {
+          evidence_class: "live_edmonton",
+          required_runs: 1,
+          completed_runs: edmonton.length,
+          observed_ready_latency_ms: edmonton.length === 1 ? edmonton[0].ready_latency_ms : null,
+          observed_qa_latency_ms: edmonton.length === 1 ? edmonton[0].qa?.latency_ms ?? null : null
+        },
+        live_cer: {
+          evidence_class: "live_cer",
+          required_runs: 1,
+          completed_runs: cer.length,
+          observed_ready_latency_ms: cer.length === 1 ? cer[0].ready_latency_ms : null,
+          observed_qa_latency_ms: cer.length === 1 ? cer[0].qa?.latency_ms ?? null : null
+        }
+      }
+    };
+  }
+  const fingerprints = new Set(edmonton.map((run) => run.validation.critical_structure_sha256));
+  const readyLatencies = edmonton.map((run) => run.ready_latency_ms).filter(Number.isInteger);
+  const qaLatencies = completed.map((run) => run.qa?.latency_ms).filter(Number.isInteger);
+  return {
+    ...base,
+    benchmark_edmonton_structure_consistent: edmonton.length === 10 && fingerprints.size === 1,
+    benchmark_edmonton_ready_median_ms: percentile(readyLatencies, 0.5),
+    benchmark_edmonton_ready_p95_ms: percentile(readyLatencies, 0.95),
+    benchmark_qa_p95_ms: percentile(qaLatencies, 0.95),
+    benchmark_performance_gate_passed: edmonton.length === 10 &&
       percentile(readyLatencies, 0.5) <= 6 * 60_000 && percentile(readyLatencies, 0.95) < 10 * 60_000 &&
       completed.length === 11 && percentile(qaLatencies, 0.95) < 20_000
   };
@@ -2004,16 +2055,22 @@ async function readExistingMetrics(filePath) {
   }
 }
 
-function newMetrics(options, fixtureMetrics, preflight) {
+function newMetrics(options, fixtureMetrics, preflight, regressionEvidence) {
   return {
-    schema_version: "1.1",
-    evidence_kind: "paid_live_release_verification",
+    schema_version: "1.2",
+    evidence_kind: options.validationMode === "benchmark"
+      ? "paid_live_opt_in_benchmark"
+      : "release_validation_evidence_classes",
+    validation_mode: options.validationMode,
     campaign_id: options.campaignId,
     generated_at: new Date().toISOString(),
     verdict: "incomplete",
     failure: null,
     target_origin_sha256: sha256Text(options.baseUrl),
     fixtures: fixtureMetrics,
+    evidence_classes: {
+      deterministic_regression: regressionEvidence
+    },
     preflight,
     policy: {
       paid_live_explicitly_allowed: options.allowPaidLive,
@@ -2172,16 +2229,27 @@ function mergeExistingMetrics(current, existing) {
   if (!existing) return current;
   if (
     existing.schema_version !== current.schema_version || existing.campaign_id !== current.campaign_id ||
+    existing.validation_mode !== current.validation_mode ||
     existing.target_origin_sha256 !== current.target_origin_sha256 ||
     existing.fixtures?.manifest_sha256 !== current.fixtures.manifest_sha256 ||
+    existing.evidence_classes?.deterministic_regression?.candidate_commit !==
+      current.evidence_classes?.deterministic_regression?.candidate_commit ||
+    existing.evidence_classes?.deterministic_regression?.runner_source_sha256 !==
+      current.evidence_classes?.deterministic_regression?.runner_source_sha256 ||
+    existing.evidence_classes?.deterministic_regression?.test_manifest_sha256 !==
+      current.evidence_classes?.deterministic_regression?.test_manifest_sha256 ||
+    existing.evidence_classes?.deterministic_regression?.structured_test_summary_sha256 !==
+      current.evidence_classes?.deterministic_regression?.structured_test_summary_sha256 ||
     existing.policy?.total_budget_micro_usd !== current.policy.total_budget_micro_usd ||
     existing.policy?.declared_server_per_run_cap_micro_usd !== current.policy.declared_server_per_run_cap_micro_usd ||
     !Array.isArray(existing.runs)
   ) {
     fail("EXISTING_METRICS_CONTEXT_MISMATCH", "metrics_resume");
   }
+  const edmontonCount = current.validation_mode === "benchmark" ? 10 : 1;
+  const signedPutCaseId = current.validation_mode === "benchmark" ? "edmonton-10" : "edmonton-01";
   const allowedCaseIds = new Set([
-    ...Array.from({ length: 10 }, (_, index) => `edmonton-${String(index + 1).padStart(2, "0")}`),
+    ...Array.from({ length: edmontonCount }, (_, index) => `edmonton-${String(index + 1).padStart(2, "0")}`),
     "cer-01"
   ]);
   const seenAttempts = new Set();
@@ -2251,7 +2319,7 @@ function mergeExistingMetrics(current, existing) {
       isCer !== (run.package_id === "cer") || run.input_order_scrambled !== isCer ||
       !["official_url", "signed_put"].includes(run.ingress_mode) ||
       typeof run.cors_gate_passed !== "boolean" || typeof run.put_replay_rejected !== "boolean" ||
-      (run.ingress_mode === "signed_put" && run.case_id !== "edmonton-10") ||
+      (run.ingress_mode === "signed_put" && run.case_id !== signedPutCaseId) ||
       (run.ingress_mode === "official_url" && (run.cors_gate_passed || run.put_replay_rejected)) ||
       typeof run.admission_replayed !== "boolean" ||
       !(run.run_id_sha256 === null || (typeof run.run_id_sha256 === "string" && /^[a-f0-9]{64}$/.test(run.run_id_sha256))) ||
@@ -2370,15 +2438,40 @@ function mergeExistingMetrics(current, existing) {
   };
 }
 
-function releasePassed(metrics, options) {
+function acceptedRegressionEvidence(evidence, expected) {
+  return evidence?.evidence_class === "deterministic_regression" &&
+    evidence.authentication === "reviewed_repository_tests" &&
+    evidence.required_cases === 10 && evidence.passed_cases === 10 && evidence.failed_cases === 0 &&
+    evidence.verdict === "pass" && /^[a-f0-9]{64}$/.test(evidence.evidence_file_sha256 ?? "") &&
+    /^[a-f0-9]{64}$/.test(evidence.runner_source_sha256 ?? "") &&
+    /^[a-f0-9]{64}$/.test(evidence.test_manifest_sha256 ?? "") &&
+    /^[a-f0-9]{64}$/.test(evidence.structured_test_summary_sha256 ?? "") &&
+    expected?.candidate_commit === evidence.candidate_commit &&
+    expected?.fixture_manifest_semantic_sha256 === evidence.fixture_manifest_semantic_sha256 &&
+    expected?.runner_source_sha256 === evidence.runner_source_sha256 &&
+    expected?.test_manifest_sha256 === evidence.test_manifest_sha256 &&
+    expected?.structured_test_summary_sha256 === evidence.structured_test_summary_sha256 &&
+    expected?.evidence_file_sha256 === evidence.evidence_file_sha256;
+}
+
+export function releasePassed(metrics, options) {
   const aggregate = metrics.aggregate ?? aggregateMetrics(metrics);
-  return aggregate.attempt_count === 11 && aggregate.completed_run_count === 11 && aggregate.edmonton_completed === 10 &&
-    aggregate.cer_completed === 1 && aggregate.edmonton_structure_consistent &&
-    aggregate.signed_put_completed === 1 &&
-    aggregate.cleanup_confirmed_count === 11 && aggregate.unresolved_attempt_count === 0 &&
-    metrics.wallet?.reconciled === true &&
-    aggregate.total_cost_micro_usd <= options.totalBudgetMicroUsd &&
-    aggregate.performance_gate_passed;
+  if (metrics.validation_mode === "benchmark") {
+    return options.validationMode === "benchmark" && options.benchmarkExplicitlyAllowed === true &&
+      aggregate.attempt_count === 11 && aggregate.completed_run_count === 11 && aggregate.edmonton_completed === 10 &&
+      aggregate.cer_completed === 1 && aggregate.benchmark_edmonton_structure_consistent === true &&
+      aggregate.signed_put_completed === 1 && aggregate.cleanup_confirmed_count === 11 &&
+      aggregate.unresolved_attempt_count === 0 && metrics.wallet?.reconciled === true &&
+      aggregate.total_cost_micro_usd <= options.totalBudgetMicroUsd &&
+      aggregate.benchmark_performance_gate_passed === true;
+  }
+  return options.validationMode === "release" &&
+    acceptedRegressionEvidence(metrics.evidence_classes?.deterministic_regression, options.expectedRegressionEvidence) &&
+    metrics.evidence_classes.deterministic_regression.candidate_commit === options.expectedCandidateCommit &&
+    aggregate.attempt_count === 2 && aggregate.completed_run_count === 2 && aggregate.edmonton_completed === 1 &&
+    aggregate.cer_completed === 1 && aggregate.signed_put_completed === 1 &&
+    aggregate.cleanup_confirmed_count === 2 && aggregate.unresolved_attempt_count === 0 &&
+    metrics.wallet?.reconciled === true && aggregate.total_cost_micro_usd <= options.totalBudgetMicroUsd;
 }
 
 function logProgress(event, caseId = null) {
@@ -2401,7 +2494,23 @@ export async function main(environment = process.env) {
     currentStage = "fixture_verification";
     logProgress("verifying-local-fixtures");
     const fixtures = await verifyOfficialFixtures({ fixtureDirectory: options.fixtureDirectory });
-    metrics = newMetrics(options, fixtures.metrics, null);
+    if (options.validationMode === "release" && !options.expectedCandidateCommit) {
+      fail("CANDIDATE_COMMIT_REQUIRED", "regression_evidence");
+    }
+    let regressionEvidence = null;
+    if (options.validationMode === "release") {
+      try {
+        regressionEvidence = (await runDeterministicRegression({
+          expectedCandidateCommit: options.expectedCandidateCommit,
+          expectedFixtureManifestSha256: fixtures.metrics.manifest_sha256,
+          fixtureDirectory: options.fixtureDirectory
+        })).evidence;
+      } catch {
+        fail("DETERMINISTIC_REGRESSION_GATE_FAILED", "regression_evidence");
+      }
+    }
+    options.expectedRegressionEvidence = regressionEvidence;
+    metrics = newMetrics(options, fixtures.metrics, null, regressionEvidence);
     currentStage = "read_only_preflight";
     logProgress("running-read-only-preflight");
     const preflight = await runReadOnlyPreflight(
@@ -2441,7 +2550,7 @@ export async function main(environment = process.env) {
       await atomicWriteMetrics(evidencePath, metrics);
     }
 
-    const cases = buildRunCases(fixtures.manifest);
+    const cases = buildRunCases(fixtures.manifest, options.validationMode);
     for (const caseDefinition of cases) {
       if (runAbort.signal.aborted) fail("INTERRUPTED", "run_sequence");
       if (metrics.runs.some((run) => run.case_id === caseDefinition.caseId &&
@@ -2534,7 +2643,7 @@ export async function main(environment = process.env) {
       ) {
         fail("LIVE_RUN_GATE_FAILED", currentStage);
       }
-      if (caseDefinition.packageId === "edmonton") {
+      if (options.validationMode === "benchmark" && caseDefinition.packageId === "edmonton") {
         const fingerprints = new Set(metrics.runs
           .filter((run) => run.package_id === "edmonton" && run.validation?.passed)
           .map((run) => run.validation.critical_structure_sha256));

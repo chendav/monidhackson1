@@ -27,11 +27,16 @@ competition page, guide, and registration form before each external action.
 - Strict production smoke passes with live readiness required.
 - The credentialed Monid contract record and provider-retention disclosure are
   frozen.
-- Ten Edmonton runs and the four-document CER run pass the paid verifier.
+- The reviewed, hash-bound repository regression manifest passes
+  10/10, one signed-PUT Edmonton production run passes, and one deliberately
+  shuffled four-document CER production run passes. These are independent
+  evidence classes; regression tests cannot satisfy any live-only condition.
 - The CER result contains the three independently reverified citations for the
   2050/2055 conflict.
-- Source cleanup, wallet delta, provider actual cost, model cost, total latency,
-  and retry evidence are real and internally reconciled.
+- The two live runs provide real source cleanup, wallet delta, provider actual
+  cost, model cost, observed latency, Q&A, and retry evidence, all internally
+  reconciled. A single observation is never described as a median, P95,
+  stability rate, or reliability rate.
 - An independent Reviewer has clicked at least 12 high-risk citations and has
   returned `APPROVE` with P0=0 and P1=0.
 
@@ -68,7 +73,9 @@ least 1080p. Produce a separate captioned 9:16 export for Instagram and TikTok.
 | Competitor price | URL, capture date, screenshot | captured; refresh on final day |
 | Reviewed product build | Git commit and Vercel deployment URL | captured for `76e0f4e` / `dpl_5dMrPWKGMCKxy5hcQUfq57uLmZce`; refresh after Turnstile redeployment |
 | Monid contract | inspect schema hash, provider/endpoint, cost unit, retention disclosure | credentialed component spike and exact-deployment Monid/OpenAI receipt captured; refresh after redeployment or expiry |
-| Live campaign | sanitized verifier report and wallet reconciliation | pending |
+| Deterministic regression | reviewed repository tests, commit/source/config/dependency/official-PDF-bound at 10/10 | pending |
+| Edmonton live proof | one accepted signed-PUT production run with provider, Q&A, cleanup, cost, and wallet evidence | pending |
+| CER live proof | one accepted shuffled four-document production run with provider, Q&A, cleanup, cost, and wallet evidence | pending |
 | Deletion | application-controlled source deletion receipts and timing | signed-URL component probe captured at 8.140 s; end-to-end production receipt pending |
 | Reviewer | signed verdict and 12-citation click ledger | pending |
 | Video | final public video URL and local checksum | pending |
@@ -96,7 +103,11 @@ post is required for a valid submission.
 
 ## Rollback rule
 
-If the strict smoke, live campaign, cleanup timing, wallet reconciliation, or
+If the strict smoke, any required evidence class, cleanup timing, wallet reconciliation, or
 Reviewer gate regresses after deployment, roll back the public alias to the last
 known fail-closed build. Do not publish the video or submit while the release
 health endpoint is `not_ready`.
+
+The legacy ten-Edmonton-plus-one-CER paid verifier is available only as an
+explicit benchmark. It is not run by the default release command and its
+percentiles, if collected, must be labelled benchmark measurements.

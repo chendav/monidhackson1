@@ -134,3 +134,24 @@ for exactly one controlled proof.
 - Run a paid full-document production proof only after independent QA PASS.
 - T13 is the final redesign for submission method; a remaining failure becomes
   a cited `needs_review` result and does not open another redesign loop.
+
+## Continuation — T18 release-validation split
+
+- T17 is independently accepted and deployed from commit
+  `a15df0ea742fb7fd0964979a77762cb8d88a4ede` as exact deployment
+  `dpl_5pcTuDzqbgV3VorKZuS8Rr6QEWDx`; runtime/provider attestations and public
+  health passed.
+- Ten focused, saved CER official-fixture regression runs passed 10/10 without
+  Monid, OpenAI, network access, or paid work; this is repository-test evidence,
+  not provider-shaped execution.
+- Replace the obsolete eleven-paid-run release gate with separately auditable
+  evidence classes: reviewed repository deterministic regression 10/10, live Edmonton 1/1, and shuffled
+  live CER 1/1. Single live observations must not be labeled median, P95, or a
+  provider-stability rate.
+- T18 may change only the release verifier, its tests, and release documents.
+  It must preserve the old eleven-run campaign as an opt-in benchmark, preserve
+  every cleanup/citation/budget/attestation gate, and perform no provider calls.
+- QA16 rejected exit-code-only attestation and the earlier provider-shaped
+  artifact interpretation. Revision 1 therefore requires exact structured
+  Vitest identities/counts, saved official PDF hashes, and candidate/config/
+  dependency/runtime binding, without claiming retained provider intermediates.

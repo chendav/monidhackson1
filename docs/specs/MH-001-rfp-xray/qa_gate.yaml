@@ -44,10 +44,10 @@ regression_checks:
 review:
   required: true
   verdict: PASS
-  active_review_task: QA15
-  revision_round: 1
-  starts_after: T17 Revision 1 implementation handoff independently reviewed
-  implementation_handoff: handoff-backend.md T17 Revision 1 — Complete raw compatibility-glyph boundaries
+  active_review_task: QA16
+  revision_round: 3
+  starts_after: T18 Revision 3 implementation handoff independently reviewed
+  implementation_handoff: handoff-backend.md T18 Revision 3 — Preserve the external-fixture test convention
   active_failures: []
   p0: 0
   p1: 0

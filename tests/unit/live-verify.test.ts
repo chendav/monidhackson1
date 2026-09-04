@@ -28,6 +28,9 @@ const runnerPromise = import(new URL("../../scripts/live-verify.mjs", import.met
     monidApiKey: string | null;
     totalBudgetMicroUsd: number;
     declaredPerRunCapMicroUsd: number;
+    validationMode: "release" | "benchmark";
+    benchmarkExplicitlyAllowed: boolean;
+    expectedCandidateCommit: string | null;
   };
   assertPublicProductionOrigin: (
     baseUrl: string,
@@ -69,7 +72,7 @@ const runnerPromise = import(new URL("../../scripts/live-verify.mjs", import.met
     totalMicroUsd: number;
   };
   assertSanitizedMetrics: (value: unknown) => true;
-  buildRunCases: (manifest: { documents: Array<Record<string, unknown>> }) => Array<{
+  buildRunCases: (manifest: { documents: Array<Record<string, unknown>> }, mode?: "release" | "benchmark") => Array<{
     caseId: string;
     packageId: string;
     body: { documents: Array<{ role: string; source: { type: string; url: string } }> };
@@ -95,6 +98,7 @@ const runnerPromise = import(new URL("../../scripts/live-verify.mjs", import.met
     replayRejected: boolean;
   }>;
   aggregateMetrics: (metrics: { runs: TestRunMetric[] }) => TestAggregateMetric;
+  releasePassed: (metrics: Record<string, unknown>, options: Record<string, unknown>) => boolean;
   verifyOfficialFixtures: (input: {
     manifestPath?: string;
     fixtureDirectory: string;
@@ -162,6 +166,47 @@ function manifestDocuments() {
   }));
 }
 
+function acceptedRegressionSummary() {
+  return {
+    evidence_class: "deterministic_regression",
+    authentication: "reviewed_repository_tests",
+    evidence_file_sha256: "6".repeat(64),
+    runner_source_sha256: "7".repeat(64),
+    test_manifest_sha256: "8".repeat(64),
+    structured_test_summary_sha256: "9".repeat(64),
+    fixture_manifest_semantic_sha256: "1".repeat(64),
+    candidate_commit: "5".repeat(40),
+    required_cases: 10,
+    passed_cases: 10,
+    failed_cases: 0,
+    verdict: "pass"
+  };
+}
+
+function completedLiveRun(packageId: "edmonton" | "cer", overrides: Record<string, unknown> = {}) {
+  return {
+    case_id: packageId === "edmonton" ? "edmonton-01" : "cer-01",
+    package_id: packageId,
+    ingress_mode: packageId === "edmonton" ? "signed_put" : "official_url",
+    cors_gate_passed: packageId === "edmonton",
+    put_replay_rejected: packageId === "edmonton",
+    ready_latency_ms: packageId === "edmonton" ? 100_000 : 150_000,
+    cost_accounting_complete: true,
+    cost: { total_micro_usd: 100_000 },
+    validation: { passed: true, critical_structure_sha256: "7".repeat(64) },
+    qa: {
+      latency_ms: 1_000,
+      result_class: "answered",
+      citation_count: 1,
+      citations_verified: true,
+      independent_source_matches: 1
+    },
+    cleanup: { attempted: true, confirmed: true },
+    failure: null,
+    ...overrides
+  };
+}
+
 function analysisProjection(page = 43, status = "active", prose = "first wording") {
   const citation = {
     document_sha256: "a".repeat(64),
@@ -224,7 +269,9 @@ describe("paid-live verifier safety policy", () => {
       apiKey: null,
       monidApiKey: null,
       totalBudgetMicroUsd: 20_000_000,
-      declaredPerRunCapMicroUsd: 2_000_000
+      declaredPerRunCapMicroUsd: 2_000_000,
+      validationMode: "release",
+      benchmarkExplicitlyAllowed: false
     });
 
     const open = runner.parseRuntimeOptions(safeEnvironment({
@@ -235,6 +282,17 @@ describe("paid-live verifier safety policy", () => {
     expect(open.allowPaidLive).toBe(true);
     expect(open.apiKey).toBe("kept-only-in-memory");
     expect(open.monidApiKey).toBe("monid-only-in-memory");
+  });
+
+  it("requires an explicit second opt-in before the legacy paid benchmark can be selected", async () => {
+    const runner = await runnerPromise;
+    expect(() => runner.parseRuntimeOptions(safeEnvironment({
+      RFP_XRAY_LIVE_MODE: "benchmark"
+    }))).toThrow("PAID_BENCHMARK_OPT_IN_REQUIRED");
+    expect(runner.parseRuntimeOptions(safeEnvironment({
+      RFP_XRAY_LIVE_MODE: "benchmark",
+      RFP_XRAY_ALLOW_PAID_BENCHMARK: "true"
+    }))).toMatchObject({ validationMode: "benchmark", benchmarkExplicitlyAllowed: true });
   });
 
   it("rejects unsafe origins and budgets beyond the declared competition cap", async () => {
@@ -805,27 +863,115 @@ describe("paid-live verifier safety policy", () => {
   });
 });
 
-describe("paid-live verifier deterministic campaign", () => {
+describe("release evidence classes and opt-in paid benchmark", () => {
   const officialFixtureDirectory = process.env.RFP_XRAY_FIXTURE_DIR;
 
-  it("builds ten Edmonton runs followed by one deliberately shuffled CER package", async () => {
+  it("builds two default live proofs and retains the eleven-run campaign only as benchmark", async () => {
     const runner = await runnerPromise;
     const cases = runner.buildRunCases({ documents: manifestDocuments() });
-    expect(cases).toHaveLength(11);
-    expect(cases.slice(0, 10).map((item) => item.caseId)).toEqual([
+    expect(cases).toHaveLength(2);
+    expect(cases[0]).toMatchObject({
+      caseId: "edmonton-01",
+      packageId: "edmonton",
+      ingressMode: "signed_put"
+    });
+    expect(cases[1]).toMatchObject({ caseId: "cer-01", packageId: "cer", inputOrderScrambled: true });
+    expect(cases[1].body.documents.map((item) => item.role)).toEqual([
+      "amendment", "base", "amendment", "amendment"
+    ]);
+
+    const benchmark = runner.buildRunCases({ documents: manifestDocuments() }, "benchmark");
+    expect(benchmark).toHaveLength(11);
+    expect(benchmark.slice(0, 10).map((item) => item.caseId)).toEqual([
       "edmonton-01", "edmonton-02", "edmonton-03", "edmonton-04", "edmonton-05",
       "edmonton-06", "edmonton-07", "edmonton-08", "edmonton-09", "edmonton-10"
     ]);
-    expect(cases[10]).toMatchObject({ caseId: "cer-01", packageId: "cer", inputOrderScrambled: true });
-    expect(cases[10].body.documents.map((item) => item.role)).toEqual([
-      "amendment", "base", "amendment", "amendment"
-    ]);
-    expect(cases.filter((item) => item.ingressMode === "official_url").every((item) =>
+    expect(benchmark[10]).toMatchObject({ caseId: "cer-01", packageId: "cer", inputOrderScrambled: true });
+    expect(benchmark.filter((item) => item.ingressMode === "official_url").every((item) =>
       item.body.documents.every((document) =>
       document.source.type === "url" && document.source.url.startsWith("https://canadabuys.canada.ca/")
     ))).toBe(true);
-    expect(cases[9]).toMatchObject({ caseId: "edmonton-10", ingressMode: "signed_put" });
-    expect(cases.filter((item) => item.ingressMode === "signed_put")).toHaveLength(1);
+    expect(benchmark[9]).toMatchObject({ caseId: "edmonton-10", ingressMode: "signed_put" });
+    expect(benchmark.filter((item) => item.ingressMode === "signed_put")).toHaveLength(1);
+  });
+
+  it("keeps repository regression evidence separate from live cleanup, cost, signed ingress, and Q&A", async () => {
+    const runner = await runnerPromise;
+    const baseMetrics = {
+      validation_mode: "release",
+      evidence_classes: { deterministic_regression: acceptedRegressionSummary() },
+      wallet: { reconciled: true },
+      runs: [completedLiveRun("edmonton"), completedLiveRun("cer")]
+    };
+    const options = {
+      validationMode: "release",
+      expectedCandidateCommit: "5".repeat(40),
+      expectedRegressionEvidence: acceptedRegressionSummary(),
+      totalBudgetMicroUsd: 20_000_000
+    };
+    expect(runner.releasePassed(baseMetrics, options)).toBe(true);
+    expect(runner.releasePassed(baseMetrics, {
+      ...options,
+      expectedCandidateCommit: "a".repeat(40)
+    })).toBe(false);
+    expect(runner.releasePassed({
+      ...baseMetrics,
+      evidence_classes: {
+        deterministic_regression: {
+          ...acceptedRegressionSummary(),
+          structured_test_summary_sha256: "0".repeat(64)
+        }
+      }
+    }, options)).toBe(false);
+    expect(runner.releasePassed({
+      ...baseMetrics,
+      evidence_classes: {
+        deterministic_regression: {
+          ...acceptedRegressionSummary(),
+          authentication: "sha256_pinned_local_file"
+        }
+      }
+    }, options)).toBe(false);
+
+    const missingCleanup = structuredClone(baseMetrics);
+    (missingCleanup.runs[0].cleanup as { confirmed: boolean }).confirmed = false;
+    expect(runner.releasePassed(missingCleanup, options)).toBe(false);
+
+    const missingCost = structuredClone(baseMetrics);
+    missingCost.runs[1].cost_accounting_complete = false;
+    expect(runner.releasePassed(missingCost, options)).toBe(false);
+
+    const regressionMasqueradingAsLive = {
+      ...baseMetrics,
+      evidence_classes: {
+        deterministic_regression: acceptedRegressionSummary(),
+        live_edmonton: acceptedRegressionSummary(),
+        live_cer: acceptedRegressionSummary()
+      },
+      runs: []
+    };
+    expect(runner.releasePassed(regressionMasqueradingAsLive, options)).toBe(false);
+  });
+
+  it("records single live latencies only as observations, never percentiles or stability", async () => {
+    const runner = await runnerPromise;
+    const aggregate = runner.aggregateMetrics({
+      validation_mode: "release",
+      evidence_classes: { deterministic_regression: acceptedRegressionSummary() },
+      runs: [completedLiveRun("edmonton"), completedLiveRun("cer")]
+    } as unknown as { runs: TestRunMetric[] });
+    expect(aggregate).toMatchObject({
+      required_run_count: 2,
+      completed_run_count: 2,
+      edmonton_completed: 1,
+      cer_completed: 1
+    });
+    const serialized = JSON.stringify(aggregate);
+    expect(serialized).not.toMatch(/median|p95|stability|consistent/i);
+    expect(aggregate.evidence_classes).toMatchObject({
+      live_edmonton: { observed_ready_latency_ms: 100_000, observed_qa_latency_ms: 1_000 },
+      live_cer: { observed_ready_latency_ms: 150_000, observed_qa_latency_ms: 1_000 }
+    });
   });
 
   it("scopes the Edmonton M1-M4 gate to the mandatory-criteria table", async () => {

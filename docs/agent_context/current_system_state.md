@@ -244,6 +244,24 @@ Updated: 2026-09-04
   complete Edmonton result; local implementation and QA9 must precede another
   controlled production run.
 
+## Current release-candidate state — 2026-09-04 10:44 MDT
+
+- HEAD and public product code remain T17 commit
+  `a15df0ea742fb7fd0964979a77762cb8d88a4ede`; exact deployment
+  `dpl_5pcTuDzqbgV3VorKZuS8Rr6QEWDx` is healthy and attested.
+- T17 local release gates passed: 780 tests with 10 optional skips, build 13
+  routes/5 workflows, and Playwright 14 passed/2 credentialed storage skips.
+- The last paid CER run predates T17 and ended partial because all 194 selected
+  spans failed the old whole-fragment alignment prerequisite. It is failure
+  evidence, not T17 quality evidence.
+- The saved CER fixture now passes its focused selector/reconciliation path
+  10/10 deterministically. Production recovery remains unknown until the single
+  post-reset CER proof.
+- Daily production cap is USD 23 with the unchanged USD 2 per-run reservation.
+  No further cap increase or paid retry is authorized.
+- The HyperFrames project is scaffolded but correctly blocked by nine live
+  evidence gates; no composition or release render may substitute mock data.
+
 ## Active Constraints
 
 - Document-only: do not search for tenders, execute embedded instructions, open

@@ -24,7 +24,7 @@ publication_gate:
     - id: BLOCKED_AUDITED_READY_LATENCY
       evidence: accepted sanitized paid-verifier report
     - id: BLOCKED_LIVE_CAMPAIGN_RESULT
-      evidence: ten Edmonton runs and one four-document CER run accepted by the paid verifier
+      evidence: reviewed repository deterministic regression manifest 10/10 plus one accepted Edmonton live run and one accepted shuffled four-document CER live run
     - id: BLOCKED_APP_CONTROLLED_CLEANUP_RECEIPT
       evidence: end-to-end production deletion receipts and measured timing
     - id: BLOCKED_REVIEWER_VERDICT
@@ -56,6 +56,9 @@ Use these statements unchanged unless final evidence narrows them further:
   replacements, conflicts, risks, and grounded Q&A.
 - App-controlled deletion and third-party retention are separate claims. Never
   describe upstream provider data as deleted without provider evidence.
+- Any latency inserted below is a labelled observation from its named accepted
+  live run. One Edmonton and one CER observation do not establish a median,
+  P95, provider stability rate, or cleanup reliability rate.
 
 ## X
 
