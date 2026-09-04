@@ -88,8 +88,13 @@ interface ParsedSource extends IndexedSource {
 export const LIVE_NETWORK_BUDGET_MS = WORKFLOW_INTERNAL_DEADLINES_MS.live_network;
 export const PRE_MODEL_DEADLINE_MS = WORKFLOW_INTERNAL_DEADLINES_MS.pre_model;
 export const RESULT_COMMIT_DEADLINE_MS = WORKFLOW_INTERNAL_DEADLINES_MS.result_commit;
+export const MODEL_RESULT_COMMIT_RESERVE_MS = 15_000;
 export const MONID_PARSE_CONCURRENCY = SOURCE_CLEANUP_WATCHDOG_REGISTRATIONS_PER_BATCH;
 export const MONID_MIN_PAID_CALL_WINDOW_MS = 60_000;
+
+export function openAiExtractionDeadline(workflowStarted: number) {
+  return workflowStarted + RESULT_COMMIT_DEADLINE_MS - MODEL_RESULT_COMMIT_RESERVE_MS;
+}
 
 export function terminalStatusForAnalysis(
   analysis: Pick<AnalysisResult, "decision_readiness">
@@ -897,11 +902,16 @@ export async function processRun(runId: string, dependencies: PipelineDependenci
 
     await stage(store, runId, "extracting", claim);
     // The state transition is an awaited database write. Re-check afterward so
-    // its latency cannot silently extend the model's independent 120-second
-    // clock beyond the Workflow result-commit envelope.
+    // its latency cannot silently extend model work beyond the Workflow
+    // result-commit envelope.
     assertBeforeDeadline(workflowStarted + PRE_MODEL_DEADLINE_MS, "pre-model-after-stage");
     const model = dependencies.model ?? (live
-      ? new OpenAIResponsesAdapter(config)
+      ? new OpenAIResponsesAdapter(
+          config,
+          undefined,
+          () => performance.now(),
+          openAiExtractionDeadline(workflowStarted)
+        )
       : new LocalDeterministicModel());
     const usesDurableOpenAiLedger = live && model instanceof OpenAIResponsesAdapter;
     const startedOpenAiAttempts = new Set<string>();

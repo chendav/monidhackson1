@@ -338,6 +338,7 @@ describe("OpenAI Responses structured output adapter", () => {
     }).catch((error: unknown) => error);
     expect(failure).toMatchObject({
       name: "ModelBatchError",
+      retryable: false,
       completedResponseIds: ["response-paid-1"],
       completedInputTokens: 900,
       completedOutputTokens: 75,
@@ -421,7 +422,85 @@ describe("OpenAI Responses structured output adapter", () => {
     expect(parseCalls).toBe(0);
     expect(settlement).toMatchObject({ status: "failed", estimatedCostMicroUsd: 0 });
     expect(failure).toBeInstanceOf(ModelBatchError);
-    expect(failure).toMatchObject({ attemptedBatches: 0, completedResponseIds: [] });
+    expect(failure).toMatchObject({
+      attemptedBatches: 0,
+      completedResponseIds: [],
+      retryable: true
+    });
+  });
+
+  it("uses a supplied Workflow deadline while reserving time for every later batch", async () => {
+    let clockMs = 15_000;
+    let plannedBatches = 0;
+    let parseCalls = 0;
+    const absoluteDeadlineMs = 270_000;
+    const parseOptions: Record<string, unknown>[] = [];
+    const client = fakeClient({
+      count: async (_request, options) => {
+        plannedBatches += 1;
+        expect(options).toMatchObject({ timeout: absoluteDeadlineMs - clockMs, maxRetries: 0 });
+        return { input_tokens: 1_000, object: "response.input_tokens" };
+      },
+      parse: async (_request, options) => {
+        parseCalls += 1;
+        parseOptions.push(options ?? {});
+        clockMs = absoluteDeadlineMs - OPENAI_MIN_PAID_BATCH_WINDOW_MS + 1;
+        return {
+          id: "response-workflow-deadline",
+          output_parsed: emptyDraft(),
+          usage: { input_tokens: 900, output_tokens: 75 }
+        };
+      }
+    });
+    const adapter = new OpenAIResponsesAdapter(
+      testConfig(),
+      client,
+      () => clockMs,
+      absoluteDeadlineMs
+    );
+    const failure = await adapter.extract([{
+      ...sourceDocument,
+      parsed_markdown: "workflow deadline text ".repeat(11_000)
+    }], noopPaidCallbacks).catch((error: unknown) => error);
+
+    expect(parseCalls).toBe(1);
+    expect(parseOptions).toEqual([{
+      timeout: absoluteDeadlineMs - 15_000 -
+        ((plannedBatches - 1) * OPENAI_MIN_PAID_BATCH_WINDOW_MS),
+      maxRetries: 0
+    }]);
+    expect(failure).toMatchObject({
+      name: "ModelBatchError",
+      attemptedBatches: 1,
+      retryable: false
+    });
+  });
+
+  it("rejects an insufficient supplied deadline before any paid dispatch", async () => {
+    let paidDispatches = 0;
+    let parseCalls = 0;
+    const client = fakeClient({
+      count: async () => ({ input_tokens: 1_000, object: "response.input_tokens" }),
+      parse: async () => {
+        parseCalls += 1;
+        throw new Error("must not dispatch");
+      }
+    });
+    const adapter = new OpenAIResponsesAdapter(
+      testConfig(),
+      client,
+      () => 0,
+      OPENAI_MIN_PAID_BATCH_WINDOW_MS - 1
+    );
+
+    await expect(adapter.extract([sourceDocument], {
+      beforePaidBatchDispatch: async () => {
+        paidDispatches += 1;
+      },
+      settlePaidBatch: async () => {}
+    })).rejects.toMatchObject({ code: "MODEL_UNAVAILABLE", retryable: true });
+    expect(paidDispatches).toBe(0);
+    expect(parseCalls).toBe(0);
   });
 
   it("rejects a batch plan that cannot fit before making any paid parse request", async () => {

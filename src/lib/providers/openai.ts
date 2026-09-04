@@ -108,7 +108,9 @@ export class ModelBatchError extends AppError {
     estimatedAttemptedOutputTokens: number;
   }) {
     super("ANALYSIS_INCOMPLETE", "Structured extraction stopped before every batch completed.", {
-      retryable: true,
+      // A public retry starts a brand-new paid run; do not invite duplicate
+      // spend after any provider request has already been attempted.
+      retryable: options.attemptedBatches === 0,
       cause: options.cause
     });
     this.name = "ModelBatchError";
@@ -474,7 +476,8 @@ export class OpenAIResponsesAdapter implements AnalysisModel {
   constructor(
     private readonly config: AppConfig = getConfig(),
     client?: OpenAI,
-    private readonly now: () => number = () => performance.now()
+    private readonly now: () => number = () => performance.now(),
+    private readonly absoluteExtractionDeadlineMs?: number
   ) {
     if (!config.OPENAI_API_KEY && !client) {
       throw new AppError("MODEL_UNAVAILABLE", "OpenAI is not configured.", { httpStatus: 503 });
@@ -497,7 +500,8 @@ export class OpenAIResponsesAdapter implements AnalysisModel {
     paidCallbacks?: PaidExtractionCallbacks
   ): Promise<ExtractionCallResult> {
     const started = this.now();
-    const deadline = started + OPENAI_EXTRACTION_PHASE_TIMEOUT_MS;
+    const deadline = this.absoluteExtractionDeadlineMs ??
+      started + OPENAI_EXTRACTION_PHASE_TIMEOUT_MS;
     try {
       if (!paidCallbacks) {
         throw new AppError(

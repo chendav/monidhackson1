@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  MODEL_RESULT_COMMIT_RESERVE_MS,
+  openAiExtractionDeadline,
   PRE_MODEL_DEADLINE_MS,
   RESULT_COMMIT_DEADLINE_MS,
   terminalStatusForAnalysis
@@ -18,6 +20,8 @@ describe("analysis terminal status", () => {
 
   it("keeps model extraction inside the workflow result-commit envelope", () => {
     expect(PRE_MODEL_DEADLINE_MS + OPENAI_EXTRACTION_PHASE_TIMEOUT_MS)
-      .toBeLessThanOrEqual(RESULT_COMMIT_DEADLINE_MS - 15_000);
+      .toBeLessThanOrEqual(RESULT_COMMIT_DEADLINE_MS - MODEL_RESULT_COMMIT_RESERVE_MS);
+    expect(openAiExtractionDeadline(12_345))
+      .toBe(12_345 + RESULT_COMMIT_DEADLINE_MS - MODEL_RESULT_COMMIT_RESERVE_MS);
   });
 });
