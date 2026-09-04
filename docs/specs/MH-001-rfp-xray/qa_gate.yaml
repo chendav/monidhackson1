@@ -43,16 +43,16 @@ regression_checks:
 
 review:
   required: true
-  verdict: PASS
-  active_review_task: QA11
+  verdict: BLOCKED
+  active_review_task: QA12
   revision_round: 0
-  starts_after: T13 implementation handoff independently reviewed
-  implementation_handoff: handoff-backend.md T13 Implementation — Domain-bounded coverage and relation-relative conditions
-  active_failures: []
+  starts_after: T14 implementation handoff independently reviewed
+  implementation_handoff: pending
+  active_failures: [T14_NOT_IMPLEMENTED]
   p0: 0
   p1: 0
-  p2: 1
-  deployment_allowed: true
+  p2: 0
+  deployment_allowed: false
   previous_review:
     task: QA4
     verdict: REQUEST_CHANGES

@@ -30,6 +30,12 @@
   source citation matches passed. Submission method and closing date remain
   explicitly withheld as `needs_review`; the old extra Email gate failed and
   will not trigger another redesign.
+- The first CER main-plus-three-amendment attempt failed in 5631 ms before any
+  Monid paid dispatch or OpenAI call. Cleanup succeeded. Runtime error was
+  `MONID_PARSE_FAILED`; absence of provider attempt costs plus recent successful
+  attestation identifies the volatile whole-response inspect hash as the
+  bounded failure. T14 replaces it with a strict semantic projection; blind
+  hash refresh/retry is prohibited.
 
 Updated: 2026-09-04
 

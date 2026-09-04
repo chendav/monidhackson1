@@ -375,6 +375,36 @@ handoff: qa_report.md
 status: completed_pass
 ```
 
+## T14 Stable Monid semantic contract fingerprint
+
+```yaml
+id: T14
+owner_profile: backend
+objective: Replace the volatile whole-inspect-response hash with a strict canonical fingerprint of only the verified context.dev parse identity, request/response contract, result/cost paths, and price terms, while failing closed on any material contract drift.
+depends_on: [QA11]
+include_paths: [src/lib/providers/monid.ts, src/lib/health/provider-contracts.ts, scripts/attest-provider-contracts.mjs, tests/**, docs/specs/MH-001-rfp-xray/**]
+exclude_paths: [src/app/**, src/components/**, src/lib/analysis/**, drizzle/**]
+edits_allowed: true
+acceptance: [AC-3, AC-9, AC-10]
+handoff: handoff-backend.md
+status: design_in_progress
+```
+
+## QA12 T14 provider fingerprint review
+
+```yaml
+id: QA12
+owner_profile: reviewer
+objective: Independently prove telemetry-only Monid inspect drift is ignored while endpoint, schema, cost, currency, paths, limits, and provider identity drift fail before paid dispatch.
+depends_on: [T14]
+include_paths: [src/lib/providers/monid.ts, src/lib/health/provider-contracts.ts, scripts/attest-provider-contracts.mjs, tests/**]
+exclude_paths: []
+edits_allowed: false
+acceptance: [AC-3, AC-9, AC-10, AC-11]
+handoff: qa_report.md
+status: blocked_on_T14
+```
+
 ## T8 Publication/submission authority separation
 
 ```yaml

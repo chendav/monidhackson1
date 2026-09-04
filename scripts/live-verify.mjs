@@ -946,7 +946,7 @@ function deadlineTextMatches(text, day) {
     (normalized.includes("mdt") || normalized.includes("-06:00"));
 }
 
-function validateCerGolden(analysis, documents) {
+export function validateCerGolden(analysis, documents) {
   const byId = new Map(documents.map((document) => [document.id, document]));
   const base = byId.get("cer-84084-26-0009-a-base");
   const amendment001 = byId.get("cer-84084-26-0009-a-amendment-001");

@@ -4,6 +4,13 @@ thresholds:
   mandatory_at: 5
   block_local_heuristics_at: 8
 subsystems:
+  - id: monid_inspect_contract_fingerprint
+    evidence_count: 1
+    status: redesign_required
+    trigger: CER failed before paid dispatch after whole inspect response telemetry drifted minutes after a valid attestation
+    accepted_model: canonical hash of stable parse identity, schemas, paths, limits, and price terms only; material drift remains fail-closed
+    review: docs/specs/MH-001-rfp-xray/tasks.md#t14-stable-monid-semantic-contract-fingerprint
+    local_heuristics_blocked: true
   - id: delivery_domain_coverage_contract
     evidence_count: 1
     status: reframed
