@@ -343,3 +343,100 @@ with an explicit unverified-unit risk and do not expand the claim.
 
 No second CER attempt is authorized until T14 passes focused tests and
 independent QA12 with P0=0/P1=0, then the exact deployment is re-attested.
+
+## T15 Addendum — Output capacity is a package balance, not equal batch property
+
+The controlled CER run falsified equal-share allocation. All four Monid parses
+and cleanup succeeded, but the first of five OpenAI batches exhausted its fixed
+10,000-token share and returned `incomplete_max_output`; no later batch was
+attempted. GPT-5.4 Mini already defaults to reasoning effort `none`, and the
+Responses API counts visible plus reasoning tokens together, so a reasoning
+toggle or a second attempt is not a capacity model.
+
+The stable invariants are: at most 50,000 aggregate output tokens, at most the
+USD 0.495 OpenAI reserve, one attempt per planned batch, complete structured
+output or fail closed, and the existing per-request context/deadline limits.
+The equal `1/N` shares are accidental. The run proves that CER batch 1 needs
+more than 10,000 combined output tokens; it does not prove its exact need or
+that all five complete responses fit within 50,000.
+
+The minimum canonical state is a sequential package output balance. For each
+batch `i`, compute a protected floor `F[i]` before any paid dispatch from the
+UTF-8 byte length of a canonical minimum valid Draft envelope plus that batch's
+existing maximum private control-plane envelope. This ASCII-heavy byte count is
+a conservative token floor and is bound to the exact dynamic schema. Reject the
+plan before paid work if `sum(F) > 50,000`.
+
+The saved CER plan rules out replacing equality with a simple proportional
+weight. Its `(input bytes / source UTF-16 / candidates / control bytes)` rows
+are `115259/49990/23/6014`, `115153/49995/22/5942`,
+`115846/49978/24/5931`, `117020/40546/27/7423`, and
+`80358/25029/20/9131`. Failed batch 1 is not the maximum on input bytes,
+candidate count, or private control size, and is effectively tied with batches
+2 and 3 on source length. None of those individual implementation metrics is
+canonical output demand.
+
+Reserving only the four later control-plane byte bounds would give batch 1 an
+exact cap of `50,000 - (5,942 + 5,931 + 7,423 + 9,131) = 21,573`. This is a
+useful counterexample to 10,000 equal sharing, but it is not by itself a
+truthful future floor because the control-plane measurement explicitly omits
+the mandatory `analysis` JSON. The experiment must add the exact fixed minimum
+Draft/envelope overhead for each dynamic schema and still prove the first cap
+exceeds 10,000; otherwise the proposed floor is falsified.
+
+Let `A` be output already accounted: use provider-reported combined output
+tokens after a valid response, or the entire requested cap when usage is
+missing or invalid. Immediately before batch `i`, set:
+
+```text
+remaining = 50,000 - A
+cap[i] = remaining - sum(F[j] for every unattempted j > i)
+```
+
+Thus every later batch retains its structural floor, while all discretionary
+capacity is available to the next sequential batch. A successful response uses
+only its reported tokens, so unused capacity remains in the package balance and
+can serve either an early or late dense batch. An incomplete response still
+fails immediately without retry. This replaces the static cap vector, the
+special case for stranded early capacity, and a separate late-batch lending
+rule with one conservation invariant:
+
+```text
+accounted past + current requested cap + protected future floors <= 50,000
+```
+
+The smallest reversible experiment replays the saved, hash-bound CER plan
+without provider calls. It must derive five floors from the exact v5 schemas,
+prove their sum is at most 50,000, and produce a first cap greater than 10,000.
+A fake client then runs early-skew (`>10,000` first, small later), late-skew
+(small first, `>10,000` last), symmetric, exact-50,001 aggregate demand,
+missing/invalid usage, and first-batch `incomplete_max_output` cases. The model
+is falsified if either skewed case with aggregate demand at most 50,000
+truncates solely because capacity was stranded, any request violates a future
+floor or the conservation equation, invalid usage lends capacity, aggregate
+accounting exceeds 50,000, or provider call/retry count changes.
+
+Cost remains bounded independently: output pricing still reserves exactly
+50,000 tokens, and the existing input maximum contributes at most 320,000
+tokens. At current rates that is 225,000 plus 240,000 micro-USD, plus the
+existing actual-batch rounding allowance, below 495,000 for the five-batch CER
+plan. The current conservative check `batch input + 50,000 <= context` remains
+unchanged, which is also below the documented 128,000 model output maximum.
+Deadlines, batch order, schemas, extraction semantics, and zero-retry behavior
+do not change.
+
+Confirmed: equal sharing caused the observed first-batch ceiling; only one
+OpenAI batch was attempted; the estimated failed-attempt maximum was 69,645
+micro-USD; and CER's existing private control-plane bounds total 34,441 bytes.
+Inferred: a work-conserving protected-floor balance is more likely to complete
+CER because it makes the currently stranded discretionary capacity available
+without increasing any envelope. Unknown: the exact complete-output demand of
+batch 1 and the package total, because the incomplete private response was
+correctly not retained.
+
+Migration is confined to output-cap planning and its focused tests. Rollback is
+the prior static allocator; no stored data, public API, schema, provider model,
+or canonical analysis state changes. Chief disposition: **ACCEPT** the bounded
+saved-fixture experiment and, only if it passes independent QA13 with P0=0 and
+P1=0, authorize the ordinary implementation/release workflow. Do not authorize
+another paid CER run from this review alone.

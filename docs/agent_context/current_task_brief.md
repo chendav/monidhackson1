@@ -2,8 +2,13 @@
 
 - Task ID: MH-001
 - Title: RFP X-Ray contest MVP
-- Status: active; T14 passed independent QA12 with P0=0/P1=0/P2=0 and is
-  authorized for commit, semantic-hash configuration, deployment, and one CER retry
+- Status: active; T14 is deployed and attested. The controlled CER retry passed
+  all four Monid parses but stopped on the first OpenAI extraction batch with
+  `incomplete_max_output`. T15 implementation and saved-fixture replay are
+  complete, but independent QA13 returned `REQUEST_CHANGES` with one P1. T15
+  Revision 1 passed independent QA13 with P0=0/P1=0/P2=0. The one release-
+  candidate full check/build/browser gate passed. Paid work remains prohibited
+  until the exact build is committed, deployed, and freshly attested.
 - Chief owner: chief
 - Updated: 2026-09-04
 - Active packet: `docs/specs/MH-001-rfp-xray/`
@@ -92,8 +97,8 @@ cost. The product is document-only and does not search for tenders.
 
 ## Immediate Next Action
 
-Commit T14, calculate the current non-paid semantic fingerprint, configure and
-deploy the exact build, refresh attestations, then reuse the saved CER package
+Commit the accepted T15 candidate, deploy that exact commit, refresh the runtime
+and provider attestations, verify public health, then run the saved CER package
 once. Do not reparse Edmonton or reopen submission analysis.
 
 ## Verification Cadence

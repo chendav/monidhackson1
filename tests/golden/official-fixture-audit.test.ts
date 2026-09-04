@@ -37,7 +37,8 @@ import { getConfig } from "@/lib/config";
 import {
   mergeDrafts,
   prepareExtractionPlan,
-  privateExtractionFormatForBatch
+  privateExtractionFormatForBatch,
+  protectedOutputTokenCap
 } from "@/lib/providers/openai";
 import { verifiedFixtureSubmissionAdjudication } from "../helpers/submission-adjudication";
 
@@ -476,6 +477,17 @@ describe("optional official-PDF local audit (PDFs are never committed)", () => {
     expect(extractionPlan.controlPlaneOutputUpperBoundBytes).toEqual([6014, 5942, 5931, 7423, 9131]);
     expect(extractionPlan.controlPlaneOutputUpperBoundBytes.reduce((sum, bytes) => sum + bytes, 0))
       .toBe(34_441);
+    expect(extractionPlan.minimumOutputTokenFloors).toEqual([
+      6_312, 6_240, 6_229, 7_721, 9_429
+    ]);
+    expect(extractionPlan.minimumOutputTokenFloors.reduce((sum, floor) => sum + floor, 0))
+      .toBe(35_931);
+    expect(protectedOutputTokenCap({
+      totalTokens: 50_000,
+      accountedTokens: 0,
+      floors: extractionPlan.minimumOutputTokenFloors,
+      batchIndex: 0
+    })).toBe(20_381);
     expect(extractionPlan.controlPlaneOutputPreflightInputs.every((item) =>
       (JSON.parse(item) as { submission_adjudication: { v: number } }).submission_adjudication.v === 5 &&
       !("record_authority" in JSON.parse(item))

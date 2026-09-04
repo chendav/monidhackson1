@@ -567,3 +567,124 @@ commit, or file mutation occurred during independent review.
 The application retains its existing 25 MiB limit while documentation labels
 the provider's “25 MB” unit unverified. This truth boundary is not promoted to
 machine-verified provider evidence.
+
+## QA13 — Demand-aware OpenAI output capacity
+
+```yaml
+verdict: REQUEST_CHANGES
+revision_round: 0
+p0: 0
+p1: 1
+p2: 0
+deployment_allowed: false
+reviewed_base: a9b8832aefc3447448470cb69db6f5a97553a9e4
+```
+
+### P1_QA13_RESPONSE_INPUT_USAGE_CAN_ESCAPE_OPENAI_RESERVE
+
+The new output balance itself conserves 50,000 tokens, but a provider response
+whose syntactically valid `input_tokens` exceeds the exact preflight count is
+accepted as successful and may authorize later paid batches above the original
+495,000-micro-USD OpenAI reserve. `validatedResponseUsage` checks only that both
+counts are nonnegative safe integers (`src/lib/providers/openai.ts:416-431`).
+The preflight reserve is computed from the earlier token counts
+(`openai.ts:1169-1185`), while successful settlement prices the unbounded
+response count and recomputes only future output capacity
+(`openai.ts:1277-1295,1312-1325`). There is no comparison between response input
+usage and that batch's preflight count, nor a second OpenAI-reserve gate before
+the next dispatch. The pipeline passes these values to the generic run-cost
+ledger, whose ceiling is the broader USD 2 run reservation rather than the
+495,000-micro-USD OpenAI sub-reserve (`src/lib/pipeline.ts:952-970`).
+
+Two independent in-memory probes used the real adapter and no network. With a
+one-batch preflight count of 100, a complete schema-valid response reporting
+`input_tokens=1,000,000` and `output_tokens=10` returned success and emitted a
+750,045-micro-USD settlement from a 225,075-micro-USD pending maximum while the
+configured OpenAI reserve was 495,000. A stronger four-batch probe used exact
+preflight counts of 80,000 per batch and a first response count of 120,001.
+The initial total commitment was 465,002; after the first settlement it became
+495,003, and the adapter still dispatched all four batches. Subsequent
+pre-dispatch totals remained 495,002, 495,001, and 495,001. Thus the frozen
+implementation under-reserves future paid work when the count and response
+usage disagree, despite both values satisfying its current validation.
+
+Minimum acceptance is failure-scoped: bind accepted response input usage to
+the batch's exact preflight count (or otherwise prove and enforce the same
+495,000-micro-USD cumulative OpenAI ceiling), settle any already-returned
+provider anomaly truthfully, and dispatch no later paid batch after a mismatch.
+Add single- and multi-batch regressions showing a larger syntactically valid
+response input count cannot produce a successful result or a later paid call.
+Do not alter the 50,000 output balance, retry policy, prompts, schemas, context,
+or deadlines.
+
+### Passing independent evidence
+
+- `pnpm exec vitest run tests/unit/openai-adapter.test.ts --reporter=dot`:
+  48/48 passed.
+- CER-only saved official replay with `RFP_XRAY_FIXTURE_DIR` and test filter
+  `verifies every CER`: 1/1 passed, two Edmonton cases skipped. Floors remained
+  `[6312,6240,6229,7721,9429]` (35,931 total) and the first cap 20,381.
+- A separate randomized read-only probe exercised 4,500 valid allocator plans
+  across one through nine batches. Every case preserved
+  `accounted + current cap + future floors = 50,000`, kept the current cap at
+  least its floor, and rejected negative/zero/over-cap invalid plans.
+- Targeted ESLint and `pnpm exec tsc --noEmit` passed. `git diff --check` had
+  Windows line-ending notices only; the scoped diff secret scan found no
+  credential, bearer token, private key, provider URL, or API-key addition.
+- The exact-schema floor is derived by parsing the combined minimum Draft and
+  maximum dynamic v5 submission-control envelope, then conservatively counting
+  UTF-8 bytes. Missing/invalid output usage consumes the full requested cap,
+  above-cap output and incomplete output stop without retry, and capacity
+  failure occurs before token counting or paid dispatch in the passing focused
+  tests.
+
+No build, Playwright, provider call, paid call, deployment, migration, commit,
+push, or Edmonton reparse was performed. The definitive P1 blocks deployment;
+broader release gates were not repeated.
+
+## QA13 Revision 1 — Response input-usage reserve binding
+
+```yaml
+verdict: PASS
+revision_round: 1
+p0: 0
+p1: 0
+p2: 0
+deployment_allowed: true
+reviewed_base: a9b8832aefc3447448470cb69db6f5a97553a9e4
+```
+
+The failure-scoped delta closes
+`P1_QA13_RESPONSE_INPUT_USAGE_CAN_ESCAPE_OPENAI_RESERVE`. After retaining the
+returned response ID and valid usage, the adapter now rejects
+`usage.input_tokens > batchInputTokens` before decoding or publication
+(`src/lib/providers/openai.ts:1275-1302`). The ordinary failed-settlement path
+records observed cost, sets future commitment to zero, returns a non-retryable
+`ModelBatchError`, and exits the sequential loop before another paid dispatch.
+
+Independent in-memory reproductions used the real adapter without network:
+
+- Preflight 100, response 1,000,000/10: exactly one parse, failed settlement
+  750,045 micro-USD with zero remaining commitment, zero completed batches,
+  retained response ID and 1,000,000/10 usage, `retryable=false`.
+- Four preflights of 80,000, first response 120,001/10: exactly one parse and
+  only batch 0 started, failed settlement 90,046 micro-USD with zero remaining
+  commitment, no later call or retry, zero completed batches, retained response
+  ID and 120,001/10 usage.
+- Response input usage 99 and 100 against preflight 100 both completed and
+  settled successfully with their reported usage, confirming the strict upper
+  boundary.
+
+`pnpm exec vitest run tests/unit/openai-adapter.test.ts --reporter=dot` passed
+52/52. The revision is limited to the same-request input-usage comparison and
+four focused regressions. Static review confirmed the protected allocator,
+prompts, v5 schemas, GPT-5.4 Mini model, 50,000 output cap, 495,000-micro-USD
+reserve, zero-retry settings, request ordering, context checks, and deadlines
+remain unchanged. `src/lib/config.ts` and the CER golden test have no Revision-1
+delta. Scoped `git diff --check` and credential-pattern scan passed.
+
+Per the explicit Revision-1 cadence, no official fixture, full check, build,
+browser test, network/provider call, paid call, deployment, commit, or push was
+performed. QA13 Revision 1 permits the ordinary Chief release-candidate gate;
+it does not by itself prove production CER completion or overall release
+readiness.

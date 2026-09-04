@@ -1,0 +1,35 @@
+{
+  "schema_version": "rfp_xray_release_evidence_v1",
+  "observed_at": "2026-09-04T14:09:42.319Z",
+  "run_id_sha256": "bc9ddf74a2c9ce9dabd854f032e8e9aae35c5ae285cfe6123c3c81543599d3aa",
+  "deployment_id": "dpl_G8FfDFDhJeJpMuCGs4ve64FSDrA3",
+  "git_commit_sha": "a9b8832aefc3447448470cb69db6f5a97553a9e4",
+  "terminal": {
+    "status": "failed",
+    "error_code": "ANALYSIS_INCOMPLETE",
+    "retryable": false,
+    "cleanup_confirmed": true,
+    "elapsed_ms": 95890
+  },
+  "provider_boundary": {
+    "monid_successful_attempts": 4,
+    "monid_actual_micro_usd": 3600,
+    "openai_planned_batches": 5,
+    "openai_attempted_batches": 1,
+    "openai_completed_batches": 0,
+    "openai_failure_kind": "incomplete_max_output",
+    "openai_failed_attempt_estimated_micro_usd": 69645
+  },
+  "costs": {
+    "known_actual_micro_usd": 3600,
+    "conservative_total_micro_usd": 963243,
+    "run_cap_micro_usd": 2000000,
+    "openai_reserve_micro_usd": 495000
+  },
+  "official_sources": {
+    "model": "https://developers.openai.com/api/docs/models/gpt-5.4-mini",
+    "responses_create": "https://developers.openai.com/api/reference/cli/resources/responses/methods/create"
+  },
+  "diagnosis_boundary": "The exact accepted T14 deployment passed all four Monid parses and source cleanup. The first of five OpenAI extraction batches exhausted its 10000-token equal share and no later batch was attempted. Official OpenAI documentation establishes that GPT-5.4 Mini already defaults reasoning effort to none and that max_output_tokens includes visible output and reasoning tokens. T15 therefore tests the equal-share capacity assumption without increasing the aggregate token or cost envelope.",
+  "evidence_boundary": "No tender body, raw run ID, provider response, signed URL, credential, or source page offset is stored here. This failure does not establish CER amendment correctness."
+}

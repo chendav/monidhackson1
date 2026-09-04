@@ -44,10 +44,10 @@ regression_checks:
 review:
   required: true
   verdict: PASS
-  active_review_task: QA12
-  revision_round: 0
-  starts_after: T14 implementation handoff independently reviewed
-  implementation_handoff: handoff-backend.md T14 Implementation — Stable Monid semantic contract fingerprint
+  active_review_task: QA13
+  revision_round: 1
+  starts_after: T15 implementation handoff independently reviewed
+  implementation_handoff: handoff-backend.md T15 Implementation — Protected work-conserving output balance
   active_failures: []
   p0: 0
   p1: 0
@@ -90,5 +90,5 @@ current_release_evidence:
 
 release:
   status: NOT_READY
-  next_gate: Run the saved CER main-plus-three-amendment package once against the exact accepted deployment.
+  next_gate: Commit and deploy the accepted T15 candidate, refresh exact-deployment attestations, verify health, then run the saved CER package once.
   remaining_after_edmonton: CER campaign, 12-citation review, final video, contest submission, and five publications.

@@ -405,6 +405,41 @@ handoff: qa_report.md
 status: completed_pass
 ```
 
+## T15 Demand-aware OpenAI batch output capacity
+
+```yaml
+id: T15
+owner_profile: backend
+objective: Replace the falsified equal-share output-token assumption with the smallest deterministic demand-aware allocation that lets unequal extraction batches use the fixed 50,000-token aggregate without increasing the USD 0.495 OpenAI reserve, retry count, or context limits.
+depends_on: [QA12]
+include_paths: [src/lib/providers/openai.ts, src/lib/config.ts, tests/unit/openai-adapter.test.ts, tests/golden/**, docs/specs/MH-001-rfp-xray/**]
+exclude_paths: [src/app/**, src/components/**, drizzle/**, scripts/live-verify.mjs]
+edits_allowed: true
+acceptance: [AC-2, AC-5, AC-6, AC-9, AC-10]
+handoff: handoff-backend.md
+status: completed_accepted
+revision_round: 1
+revision_scope: P1_QA13_RESPONSE_INPUT_USAGE_CAN_ESCAPE_OPENAI_RESERVE
+constraints: [saved_fixtures_only_before_QA13, no_paid_calls, no_Edmonton_reparse, aggregate_output_tokens_lte_50000, openai_reserve_lte_495000_micro_usd, one_attempt_per_batch]
+```
+
+## QA13 T15 output-capacity review
+
+```yaml
+id: QA13
+owner_profile: reviewer
+objective: Independently falsify the demand-aware allocation using skewed, symmetric, minimum-cap, cost, context, incomplete-response, and saved CER plan cases, and confirm no extraction semantics or provider-call count changed.
+depends_on: [T15]
+include_paths: [src/lib/providers/openai.ts, src/lib/config.ts, tests/unit/openai-adapter.test.ts, tests/golden/**]
+exclude_paths: []
+edits_allowed: false
+acceptance: [AC-2, AC-5, AC-6, AC-9, AC-10, AC-11]
+handoff: qa_report.md
+status: completed_pass
+revision_round: 1
+failed_acceptance: [AC-9, AC-11]
+```
+
 ## T8 Publication/submission authority separation
 
 ```yaml

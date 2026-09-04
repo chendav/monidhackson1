@@ -1,5 +1,48 @@
 # Current System State
 
+## 2026-09-04 T15 production boundary
+
+- T14 commit `a9b8832aefc3447448470cb69db6f5a97553a9e4` is live as exact
+  deployment `dpl_G8FfDFDhJeJpMuCGs4ve64FSDrA3`; runtime and semantic Monid
+  provider attestations passed and public health was fully ready.
+- The controlled CER main-plus-three-amendment run passed four Monid parses at
+  USD 0.0009 each and confirmed app-controlled cleanup, then failed on the
+  first of five OpenAI extraction batches with `incomplete_max_output`.
+  Only one OpenAI batch was attempted; its conservative estimated cost was
+  USD 0.069645. The run ended in 95,890 ms with a conservative all-provider
+  total of USD 0.963243.
+- OpenAI's official GPT-5.4 Mini documentation says reasoning effort `none` is
+  already the default. The Responses API defines `max_output_tokens` as the
+  combined visible-output and reasoning-token ceiling. The current adapter
+  divides the 50,000-token aggregate equally, so five CER batches receive
+  10,000 each without using their unequal response shapes or source loads.
+- T15 is limited to output-capacity planning. It must reuse saved local fixtures,
+  retain the aggregate output/cost ceilings and one-attempt policy, and pass
+  independent QA13 before another complete CER production run.
+- T15 implementation now derives exact-schema minimum output floors and uses a
+  protected sequential package balance. Focused adapter tests passed 48/48 and
+  the one allowed saved CER audit passed 1/1: floors are
+  `[6312,6240,6229,7721,9429]` (35,931 total) and the first cap is 20,381.
+  Targeted lint and typecheck passed. These are implementer facts; QA13 is active.
+- QA13 returned `REQUEST_CHANGES`, P0=0/P1=1/P2=0. A syntactically valid
+  provider usage object can report input tokens above the exact preflight count;
+  the adapter currently settles the larger estimate and can continue later paid
+  batches. Revision 1 must bind response input usage to the preflight ceiling,
+  settle the already incurred anomalous call truthfully, and stop before any
+  later dispatch. No allocation, prompt, schema, model, or budget expansion is allowed.
+- T15 Revision 1 adds only that same-request input-usage ceiling. Focused tests
+  pass 52/52: the one- and four-batch Reviewer reproductions now settle the
+  attempted call as failed and stop, while usage equal to or below preflight
+  still succeeds. These are implementer facts; QA13 re-review is active.
+- QA13 Revision 1 returned `PASS`, P0=0/P1=0/P2=0 and permits deployment after
+  the normal release-candidate gate. Independent probes closed both over-preflight
+  cases and preserved equal/below boundaries, allocator, schema, model, caps,
+  one-attempt order, context, and deadline behavior.
+- The single release-candidate gate passed: `pnpm check` completed with 770 tests
+  passed and 10 skipped, `pnpm build` completed all 13 routes and five workflows,
+  and Playwright passed 14 tests with two credentialed live-storage tests skipped.
+  Commit, exact deployment, fresh attestations, and health remain before one CER run.
+
 ## 2026-09-04 T12 production boundary
 
 - `main` and `origin/main` are commit

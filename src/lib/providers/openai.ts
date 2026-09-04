@@ -226,6 +226,24 @@ const PrivateDraftAnalysisSchema = DraftAnalysisSchema.extend({
 });
 
 type PrivateDraftAnalysis = z.infer<typeof PrivateDraftAnalysisSchema>;
+const MINIMUM_PRIVATE_DRAFT_ANALYSIS = PrivateDraftAnalysisSchema.parse({
+  summary: {
+    title: "",
+    solicitation_number: null,
+    issuer: null,
+    closing_date: null,
+    overview: "",
+    scope: [],
+    submission_method: null,
+    current_selection_method: null
+  },
+  claims: [],
+  requirements: [],
+  evaluation: { rules: [] },
+  risks: [],
+  clarification_questions: [],
+  blocking_unknowns: []
+});
 type PrivateSubmissionBatchWire = {
   v: 5;
   b: string;
@@ -375,14 +393,6 @@ export function estimateOpenAiMultiBatchCostMicroUsd(inputTokens: number[], outp
     inputTokens.reduce((total, count) => total + count, 0),
     outputTokens
   ) + inputTokens.length - 1;
-}
-
-export function deterministicOutputTokenCaps(totalTokens: number, batchCount: number) {
-  if (!Number.isSafeInteger(totalTokens) || totalTokens < 0 ||
-    !Number.isSafeInteger(batchCount) || batchCount < 1) return [];
-  const floor = Math.floor(totalTokens / batchCount);
-  const remainder = totalTokens % batchCount;
-  return Array.from({ length: batchCount }, (_, index) => floor + (index < remainder ? 1 : 0));
 }
 
 function classifyOpenAiFailure(error: unknown): ModelBatchFailureKind {
@@ -600,6 +610,8 @@ export interface PreparedExtractionPlan {
   controlPlaneOutputPreflightInputs: string[];
   /** Sidecar-only UTF-8 byte bound; never a full provider-response bound. */
   controlPlaneOutputUpperBoundBytes: number[];
+  /** Conservative token floors from an exact minimum Draft plus maximum control envelope. */
+  minimumOutputTokenFloors: number[];
   bindings: SubmissionBatchBinding[];
   ledger: SubmissionCandidateLedger;
   packingComplete: boolean;
@@ -635,6 +647,90 @@ function controlPlaneOutputPreflightEnvelope(
       ]))
     }
   });
+}
+
+function minimumCompleteOutputEnvelope(
+  controlPlaneEnvelope: string,
+  binding: SubmissionBatchBinding,
+  candidates: SubmissionCandidate[]
+) {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(controlPlaneEnvelope);
+  } catch (cause) {
+    throw new AppError("ANALYSIS_INCOMPLETE", "The private output preflight envelope is invalid.", {
+      httpStatus: 422,
+      retryable: false,
+      cause
+    });
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed) ||
+    Object.keys(parsed).length !== 1 || !("submission_adjudication" in parsed)) {
+    throw new AppError("ANALYSIS_INCOMPLETE", "The private output preflight envelope is invalid.", {
+      httpStatus: 422,
+      retryable: false
+    });
+  }
+  const envelope = {
+    analysis: MINIMUM_PRIVATE_DRAFT_ANALYSIS,
+    submission_adjudication: (parsed as { submission_adjudication: unknown })
+      .submission_adjudication
+  };
+  privateExtractionSchemaForBatch(binding, candidates).parse(envelope);
+  return JSON.stringify(envelope);
+}
+
+export function deriveMinimumOutputTokenFloors(
+  controlPlaneEnvelopes: string[],
+  bindings: SubmissionBatchBinding[],
+  candidatesByBatch: SubmissionCandidate[][]
+) {
+  if (controlPlaneEnvelopes.length !== bindings.length ||
+    bindings.length !== candidatesByBatch.length) {
+    throw new AppError("ANALYSIS_INCOMPLETE", "The private output floor plan is inconsistent.", {
+      httpStatus: 422,
+      retryable: false
+    });
+  }
+  return controlPlaneEnvelopes.map((envelope, index) =>
+    // Counting every UTF-8 byte as one token is conservative for the bounded
+    // JSON response while remaining independent of provider tokenization.
+    new TextEncoder().encode(minimumCompleteOutputEnvelope(
+      envelope,
+      bindings[index]!,
+      candidatesByBatch[index]!
+    )).byteLength
+  );
+}
+
+export function protectedOutputTokenCap(options: {
+  totalTokens: number;
+  accountedTokens: number;
+  floors: number[];
+  batchIndex: number;
+}) {
+  const { totalTokens, accountedTokens, floors, batchIndex } = options;
+  if (!Number.isSafeInteger(totalTokens) || totalTokens < 0 ||
+    !Number.isSafeInteger(accountedTokens) || accountedTokens < 0 ||
+    !Number.isSafeInteger(batchIndex) || batchIndex < 0 || batchIndex >= floors.length ||
+    floors.some((floor) => !Number.isSafeInteger(floor) || floor < 1)) {
+    throw new AppError("BUDGET_EXCEEDED", "The OpenAI output-token balance is invalid.", {
+      httpStatus: 422,
+      retryable: false
+    });
+  }
+  const totalFloors = floors.reduce((total, floor) => total + floor, 0);
+  const futureFloors = floors.slice(batchIndex + 1).reduce((total, floor) => total + floor, 0);
+  const cap = totalTokens - accountedTokens - futureFloors;
+  if (!Number.isSafeInteger(totalFloors) || totalFloors > totalTokens ||
+    !Number.isSafeInteger(cap) || cap < floors[batchIndex]!) {
+    throw new AppError(
+      "BUDGET_EXCEEDED",
+      "The aggregate output-token budget cannot preserve every extraction batch floor.",
+      { httpStatus: 422, retryable: false }
+    );
+  }
+  return cap;
 }
 
 function sourceFragmentIds(batch: ReturnType<typeof evidenceDocuments>) {
@@ -806,36 +902,28 @@ export function prepareExtractionPlan(
     for (const candidates of assignedCandidates) candidates.splice(0, candidates.length);
   }
 
-  let payloads = finalBatches.map((batch, index) => payloadFor(
+  const payloads = finalBatches.map((batch, index) => payloadFor(
     index, ledger.ledger_digest, batch, assignedCandidates[index]
   ));
-  let controlPlaneOutputPreflightInputs = payloads.map(({ binding }, index) =>
+  const controlPlaneOutputPreflightInputs = payloads.map(({ binding }, index) =>
     controlPlaneOutputPreflightEnvelope(binding, assignedCandidates[index])
   );
-  let controlPlaneOutputUpperBoundBytes = controlPlaneOutputPreflightInputs.map((input) =>
+  const controlPlaneOutputUpperBoundBytes = controlPlaneOutputPreflightInputs.map((input) =>
     new TextEncoder().encode(input).byteLength
   );
-  const baselineControlPlaneBatchCapacity = Math.floor(
-    config.OPENAI_MAX_OUTPUT_TOKENS / finalBatches.length
+  // This remains a control-plane-only byte proof. The work-conserving token
+  // floor below adds the exact minimum valid Draft envelope for this schema.
+  const minimumOutputTokenFloors = deriveMinimumOutputTokenFloors(
+    controlPlaneOutputPreflightInputs,
+    payloads.map(({ binding }) => binding),
+    assignedCandidates
   );
-  // This is a control-plane-only byte proof for the dynamic submission object.
-  // Inline record relevance is part of the complete Draft response and remains
-  // bounded by the API output-token caps, not relabelled as sidecar headroom.
-  const controlPlaneOutputFits = controlPlaneOutputUpperBoundBytes.every((bytes) =>
-    bytes <= baselineControlPlaneBatchCapacity
-  ) && controlPlaneOutputUpperBoundBytes.reduce((total, bytes) => total + bytes, 0) <=
-    config.OPENAI_MAX_OUTPUT_TOKENS;
-  if (packingComplete && !controlPlaneOutputFits) {
-    packingComplete = false;
-    for (const candidates of assignedCandidates) candidates.splice(0, candidates.length);
-    payloads = finalBatches.map((batch, index) => payloadFor(
-      index, ledger.ledger_digest, batch, assignedCandidates[index]
-    ));
-    controlPlaneOutputPreflightInputs = payloads.map(({ binding }, index) =>
-      controlPlaneOutputPreflightEnvelope(binding, assignedCandidates[index])
-    );
-    controlPlaneOutputUpperBoundBytes = controlPlaneOutputPreflightInputs.map((input) =>
-      new TextEncoder().encode(input).byteLength
+  if (minimumOutputTokenFloors.reduce((total, floor) => total + floor, 0) >
+    config.OPENAI_MAX_OUTPUT_TOKENS) {
+    throw new AppError(
+      "BUDGET_EXCEEDED",
+      "The aggregate output-token budget cannot preserve every extraction batch floor.",
+      { httpStatus: 422, retryable: false }
     );
   }
   const prepared = payloads.map(({ payload }, index) => boundedModelInput(
@@ -855,6 +943,7 @@ export function prepareExtractionPlan(
     inputs: prepared.map((item) => item.serialized),
     controlPlaneOutputPreflightInputs,
     controlPlaneOutputUpperBoundBytes,
+    minimumOutputTokenFloors,
     bindings: payloads.map((item) => item.binding),
     ledger,
     packingComplete
@@ -1031,12 +1120,9 @@ export class OpenAIResponsesAdapter implements AnalysisModel {
       const formats = extractionPlan.bindings.map((binding, index) =>
         privateExtractionFormatForBatch(binding, candidatesByBatch[index]!)
       );
-      const batchOutputTokenCaps = deterministicOutputTokenCaps(
-        this.config.OPENAI_MAX_OUTPUT_TOKENS,
-        inputs.length
-      );
-      if (batchOutputTokenCaps.length !== inputs.length || batchOutputTokenCaps.some((cap) => cap < 1) ||
-        batchOutputTokenCaps.reduce((total, cap) => total + cap, 0) >
+      const minimumOutputTokenFloors = extractionPlan.minimumOutputTokenFloors;
+      if (minimumOutputTokenFloors.length !== inputs.length ||
+        minimumOutputTokenFloors.reduce((total, floor) => total + floor, 0) >
           this.config.OPENAI_MAX_OUTPUT_TOKENS) {
         throw new AppError(
           "BUDGET_EXCEEDED",
@@ -1121,9 +1207,14 @@ export class OpenAIResponsesAdapter implements AnalysisModel {
             retryable: false
           });
         }
-        const batchMaxOutputTokens = batchOutputTokenCaps[index]!;
-        const laterBatchMaximumOutputTokens = batchOutputTokenCaps.slice(index + 1)
-          .reduce((total, cap) => total + cap, 0);
+        const batchMaxOutputTokens = protectedOutputTokenCap({
+          totalTokens: this.config.OPENAI_MAX_OUTPUT_TOKENS,
+          accountedTokens: accountedOutputTokens,
+          floors: minimumOutputTokenFloors,
+          batchIndex: index
+        });
+        const laterBatchMaximumOutputTokens = minimumOutputTokenFloors.slice(index + 1)
+          .reduce((total, floor) => total + floor, 0);
         if (!Number.isSafeInteger(batchMaxOutputTokens) || batchMaxOutputTokens < 1) {
           throw new AppError("BUDGET_EXCEEDED", "The OpenAI output-token budget was exhausted.", {
             httpStatus: 503,
@@ -1186,13 +1277,23 @@ export class OpenAIResponsesAdapter implements AnalysisModel {
           const validatedUsage = validatedResponseUsage(response.usage);
           responseInputTokens = validatedUsage?.inputTokens ?? null;
           responseOutputTokens = validatedUsage?.outputTokens ?? null;
-          accountedOutputTokens += validatedUsage?.outputTokens ?? batchMaxOutputTokens;
+          const outputUsageIsValid = validatedUsage !== null &&
+            validatedUsage.outputTokens <= batchMaxOutputTokens;
+          accountedOutputTokens += outputUsageIsValid
+            ? validatedUsage.outputTokens
+            : batchMaxOutputTokens;
           inputTokens = validatedUsage === null
             ? null
             : addUsageTokens(inputTokens, validatedUsage.inputTokens);
           outputTokens = validatedUsage === null
             ? null
             : addUsageTokens(outputTokens, validatedUsage.outputTokens);
+          if (validatedUsage && validatedUsage.inputTokens > batchInputTokens) {
+            throw new AppError(
+              "ANALYSIS_INCOMPLETE",
+              "OpenAI reported input usage above the exact same-request preflight count."
+            );
+          }
           if (validatedUsage && validatedUsage.outputTokens > batchMaxOutputTokens) {
             throw new AppError(
               "ANALYSIS_INCOMPLETE",
@@ -1218,7 +1319,9 @@ export class OpenAIResponsesAdapter implements AnalysisModel {
             ...plan,
             remainingMaximumEstimatedCostMicroUsd: estimateOpenAiMultiBatchCostMicroUsd(
               tokenCounts.slice(index + 1),
-              laterBatchMaximumOutputTokens
+              index + 1 < inputs.length
+                ? this.config.OPENAI_MAX_OUTPUT_TOKENS - accountedOutputTokens
+                : 0
             ),
             status: "succeeded",
             estimatedCostMicroUsd: observedCostOrMaximum(

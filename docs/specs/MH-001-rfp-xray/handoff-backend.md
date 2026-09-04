@@ -3144,3 +3144,178 @@ API change, or Reviewer-verdict edit occurred.
 
 None. The explicit projection and ignore allowlist are provider-specific and
 must first survive independent QA12 and a controlled production attestation.
+
+## T15 Implementation — Protected work-conserving OpenAI output balance
+
+This is the bounded T15 implementation handoff for QA13. It is implementation
+evidence, not self-certification. No network/provider call, paid call, Edmonton
+reparse, deployment, configuration change, database operation or migration,
+prompt/schema/model/extraction-semantic change, commit, or push occurred.
+
+### Exact implementation
+
+1. `prepareExtractionPlan` now derives one protected output-token floor for
+   every already ordered extraction batch. The floor serializes the exact
+   minimum value accepted by `PrivateDraftAnalysisSchema` together with that
+   batch's existing maximum dynamic submission-control envelope, validates the
+   combined value against the exact batch-literal private schema, and counts
+   every UTF-8 byte as one conservatively reserved token. No fixed Draft-byte
+   constant or average output size is used.
+2. A plan whose floor sum exceeds `OPENAI_MAX_OUTPUT_TOKENS` fails with
+   `BUDGET_EXCEEDED` before input-token preflight or paid dispatch. The old
+   equal-share sidecar check and its silent candidate-clearing fallback were
+   removed; capacity failure cannot masquerade as complete adjudication.
+3. Immediately before sequential batch `i`, `protectedOutputTokenCap` computes
+   `50,000 - accounted_output - sum(future_floors)`. This preserves the exact
+   invariant `accounted past + current cap + protected future floors = 50,000`
+   while allowing the current batch to use every discretionary package token.
+   Batch order and the one-attempt loop are unchanged.
+4. A complete response with valid reported usage accounts its actual combined
+   output tokens. Missing or invalid usage accounts the entire requested cap,
+   so it cannot lend unverified capacity. Usage above the requested cap still
+   fails immediately and no later batch is called.
+5. The durable pre-dispatch commitment prices the current cap plus only the
+   protected future floors. After valid settlement, the future commitment is
+   recomputed from all future input-token counts plus the entire remaining
+   package output balance; unused current capacity therefore becomes available
+   without increasing the original aggregate reservation. Failed settlement
+   still sets future commitment to zero because execution stops.
+6. The 50,000 aggregate output ceiling, 320,000 aggregate input ceiling,
+   per-request context test, USD 495,000-micro reserve gate, actual-batch
+   rounding, `maxRetries:0`, paid callback boundary, minimum per-batch deadline,
+   provider-private wire v5, prompts, Structured Output schemas, and public
+   contracts are unchanged. At the frozen maxima, the existing five-request
+   cost proof remains 465,004 micro-USD, leaving 29,996 micro-USD of reserve.
+
+### Saved CER falsification
+
+- The hash-bound local CER main-plus-three-amendment fixture still produces
+  five ordered batches and the unchanged maximum control-plane byte bounds
+  `[6014, 5942, 5931, 7423, 9131]`.
+- Adding the schema-derived minimum Draft envelope produces protected floors
+  `[6312, 6240, 6229, 7721, 9429]`, totaling 35,931 tokens under the fixed
+  50,000 aggregate.
+- With no prior usage, the first protected cap is exactly 20,381 tokens. This
+  is greater than the falsified 10,000 equal share while reserving all four
+  later floors. These figures are conservative local capacity calculations,
+  not observed provider output demand or a claim that a complete CER response
+  necessarily fits 50,000 tokens.
+
+### Falsification matrix
+
+- Early skew: a first response using 15,000 tokens completes without stranding
+  capacity; later floors remain protected.
+- Late skew: three small responses preserve enough balance for a final response
+  above 10,000 tokens.
+- Symmetric demand: four 12,500-token responses consume exactly 50,000.
+- Exact 50,001 aggregate demand fails on the fourth response, records three
+  completed batches and one failed attempt, and performs no retry.
+- Missing and invalid usage both consume the full first requested cap; every
+  following request begins at its protected floor rather than borrowing from
+  unverifiable usage.
+- The existing incomplete-max-output case still stops at the first incomplete
+  response with no later dispatch. Provider interruption, above-cap usage,
+  deadline exhaustion before/after durable accounting, context, input-token,
+  cost-reserve, absent-accounting-callback, and 7/9-batch rounding regressions
+  remain covered in the same focused suite.
+
+### Changed files
+
+- `src/lib/providers/openai.ts`
+- `tests/unit/openai-adapter.test.ts`
+- `tests/golden/official-fixture-audit.test.ts`
+- `docs/specs/MH-001-rfp-xray/tasks.md`
+- This T15 section in `docs/specs/MH-001-rfp-xray/handoff-backend.md`
+
+### Exact checks
+
+- `pnpm exec vitest run tests/unit/openai-adapter.test.ts --reporter=dot`:
+  PASS, 1 file and 48 tests.
+- `$env:RFP_XRAY_FIXTURE_DIR='D:\monidhackson\.data\official-fixtures'; pnpm exec vitest run tests/golden/official-fixture-audit.test.ts -t "verifies every CER" --reporter=dot`:
+  PASS, the one CER audit passed and the two Edmonton tests were skipped. The
+  four local CER PDFs remained ignored and no source text/provider body was
+  written.
+- Targeted ESLint over the three changed source/test files: PASS.
+- `pnpm exec tsc --noEmit`: PASS.
+- Full `pnpm check`, build, and browser gates were deliberately not rerun in
+  this bounded implementation cadence. QA13 must independently review the
+  focused and saved-fixture evidence before Chief starts any release-candidate
+  gate.
+
+### Confirmed, inferred, unknown, and next gate
+
+- Confirmed: the allocator conserves the 50,000-token package balance, protects
+  every future schema floor, and lets both early and late dense batches use
+  capacity that equal sharing stranded.
+- Confirmed: missing/invalid usage cannot create capacity, incomplete output
+  remains fail-closed, and no retry/call/cost/context/deadline boundary changed.
+- Inferred: the first CER batch now has enough capacity to pass the previously
+  observed 10,000-token ceiling, because its deterministic cap is 20,381.
+- Unknown: the first batch's exact complete demand and the full package demand
+  remain unknown because the failed private response was correctly not stored
+  and no paid call was authorized. A 20,381 cap is not a completion guarantee.
+- QA13 is the next independent gate. No deployment or paid CER retry is
+  authorized from this implementation handoff.
+
+### Proposed long-term memory
+
+None. The output-balance rule remains project-specific until independent QA13
+and one controlled production run validate it.
+
+## T15 Revision 1 — Response input-usage reserve binding
+
+This bounded revision addresses only QA13 finding
+`P1_QA13_RESPONSE_INPUT_USAGE_CAN_ESCAPE_OPENAI_RESERVE`. It is implementation
+evidence for independent review, not self-approval. No network/provider call,
+paid call, deployment, configuration change, prompt/schema/model change,
+database operation, commit, or push occurred.
+
+### Exact correction
+
+- After a paid response returns, syntactically valid `usage.input_tokens` is now
+  compared with the exact `input_tokens` returned by the count endpoint for that
+  same serialized request. Equality and lower usage remain valid.
+- Usage above that same-request preflight ceiling raises
+  `ANALYSIS_INCOMPLETE` before decoding or publication. The already-returned
+  response ID and valid usage are retained for cost evidence; the pending batch
+  is settled `failed` using the observed input/output cost; remaining maximum
+  commitment is zero because execution stops; no later batch is dispatched and
+  no retry is attempted.
+- The T15 protected output allocator, aggregate input/output gates, cost reserve,
+  output-usage behavior, prompts, private/public schemas, model, retry count,
+  batch order, context checks, and deadlines are unchanged.
+
+### Reviewer reproductions and boundaries
+
+- Single batch: preflight `100`, response input `1,000,000`, output `10` now
+  makes exactly one generation call, settles `failed` at the observed
+  `750,045` micro-USD, and returns a non-retryable `ModelBatchError` with zero
+  completed batches.
+- Four-batch plan: four preflight counts of `80,000`, then first response input
+  `120,001` and output `10`, now dispatches only batch zero, settles it `failed`
+  at `90,046` micro-USD, and never dispatches the remaining three batches.
+- Response input usage `99` and `100` against a same-request ceiling of `100`
+  both complete and settle successfully, proving the check is a strict overage
+  boundary rather than a reduction of the accepted ceiling.
+
+### Changed files
+
+- `src/lib/providers/openai.ts`
+- `tests/unit/openai-adapter.test.ts`
+- `docs/specs/MH-001-rfp-xray/tasks.md`
+- This revision section in `docs/specs/MH-001-rfp-xray/handoff-backend.md`
+
+### Exact checks
+
+- `pnpm exec vitest run tests/unit/openai-adapter.test.ts --reporter=dot`:
+  PASS, 1 file and 52 tests.
+- Targeted ESLint over the changed implementation/test files: PASS.
+- `pnpm exec tsc --noEmit`: PASS.
+- `git diff --check`: PASS.
+- High-confidence credential scan over the four revision paths: zero matches.
+
+### Remaining gate
+
+QA13 must independently rerun the exact reproductions and adjudicate this
+revision. No full suite, official fixture, build, browser test, deployment, or
+paid production retry was authorized for this delta.
