@@ -1223,6 +1223,203 @@ describe("T7 record-bound semantic authority", () => {
 });
 
 describe("T9 source-ledger package authority", () => {
+  it("crosschecks n records against concrete whole-bid channel ontology", () => {
+    const deadline = "Bids must be received before 2:00 p.m.";
+    const question = "Questions must be sent by email.";
+    const bidEmail = "Bids must be submitted by email.";
+    const requirementFor = (id: string, text: string) => draft({ requirements: [{
+      id,
+      topic: "submission",
+      category: "submission" as const,
+      text,
+      evidence_needed: null,
+      consequence: null,
+      document_sha256: sha,
+      amendment_number: null,
+      effect: "add" as const,
+      citations: [citation(text)]
+    }] });
+    const deadlineAnalysis = requirementFor("deadline", deadline);
+    const deadlineState = artifact([deadline]);
+    const deadlineCandidate = deadlineState.ledger.candidates.find((candidate) =>
+      candidate.pdf_page_1based === 1 && candidate.core_start_utf16 === 0
+    )!;
+    const deadlineCoverage = deadlineState.submission.records.find((record) =>
+      record.candidate_id === deadlineCandidate.candidate_id
+    )!;
+    deadlineCoverage.relations.push({
+      occurrence_key: sha256Hex("deadline-unspecified-channel"),
+      document_sha256: sha,
+      role: "base",
+      amendment_number: null,
+      pdf_page_1based: 1,
+      printed_page_label: "1",
+      page_text_sha256: sha256Hex(deadline),
+      section: null,
+      relation_start_utf16: 0,
+      relation_end_utf16: deadline.length,
+      subject_scope: "whole_bid",
+      modality: "required",
+      channel: "unspecified",
+      has_condition_or_scope: false,
+      condition_or_scope_sha256: null,
+      confidence: 0.99,
+      evidence_quote: deadline,
+      evidence_quote_sha256: sha256Hex(deadline)
+    });
+    const deadlineAuthority = verifyRecordAuthorities({
+      batches: [{
+        binding: deadlineState.binding,
+        draft: deadlineAnalysis,
+        authority: boundAuthority(
+          deadlineAnalysis,
+          [["q", 0, "n"]],
+          deadlineState.source,
+          deadlineState.binding
+        ),
+        sourceMap: deadlineState.sourceMap
+      }],
+      ledger: deadlineState.ledger,
+      submission: deadlineState.submission,
+      documents: [deadlineState.source],
+      mergedDraft: deadlineAnalysis
+    });
+    expect(deadlineAuthority).toMatchObject({ complete: true, package_veto: false });
+    expect(deadlineAuthority.records[0]).toMatchObject({
+      relevance: "n",
+      source_binding: "exact_bound",
+      semantic_crosscheck: "consistent",
+      publication: "verified"
+    });
+
+    const cases = [
+      {
+        label: "question-only n with concrete email channel",
+        text: question,
+        relevance: "n",
+        relations: (source: string) => relation(source, question, "email", "other"),
+        veto: false,
+        binding: "exact_bound",
+        publication: "verified"
+      },
+      {
+        label: "whole-bid email n",
+        text: bidEmail,
+        relevance: "n",
+        relations: (source: string) => relation(source, bidEmail),
+        veto: true,
+        binding: "relation_conflict",
+        publication: "discarded"
+      },
+      {
+        label: "whole-bid email s",
+        text: bidEmail,
+        relevance: "s",
+        relations: (source: string) => relation(source, bidEmail),
+        veto: false,
+        binding: "exact_bound",
+        publication: "verified"
+      }
+    ] as const;
+    for (const item of cases) {
+      const authority = verifyBundle({
+        pages: [item.text],
+        analysis: requirementFor(item.label, item.text),
+        annotations: [["q", 0, item.relevance]],
+        relationForPage: (_page, text) => item.relations(text)
+      }).authority;
+      expect(authority.package_veto, item.label).toBe(item.veto);
+      expect(authority.records[0], item.label).toMatchObject({
+        relevance: item.relevance,
+        source_binding: item.binding,
+        semantic_crosscheck: item.veto ? "disagrees" : "consistent",
+        publication: item.publication
+      });
+    }
+  });
+
+  it("publishes submission-category obligations that are not whole-bid channels", () => {
+    const obligations = [
+      "The bid must be provided in PDF format.",
+      "The bidder must provide two copies.",
+      "The bid must include a signed declaration.",
+      "Bids must be received before 2:00 p.m."
+    ];
+    const analysis = draft({
+      requirements: obligations.map((text, index) => ({
+        id: `submission-obligation-${index + 1}`,
+        topic: "submission",
+        category: "submission" as const,
+        text,
+        evidence_needed: null,
+        consequence: null,
+        document_sha256: sha,
+        amendment_number: null,
+        effect: "add" as const,
+        citations: [citation(text)]
+      }))
+    });
+    const { authority, state } = verifyBundle({
+      pages: [obligations.join("\n")],
+      analysis,
+      annotations: obligations.map((_text, index) => ["q", index, "n"])
+    });
+    expect(authority).toMatchObject({ complete: true, package_veto: false });
+    expect(authority.records).toHaveLength(obligations.length);
+    expect(authority.records).toEqual(expect.arrayContaining(obligations.map(() =>
+      expect.objectContaining({
+        relevance: "n",
+        source_binding: "exact_bound",
+        semantic_crosscheck: "consistent",
+        publication: "verified"
+      })
+    )));
+    const result = materializeAnalysis({
+      draft: analysis,
+      documents: [state.source],
+      manifests: [manifest(1)],
+      costs: [],
+      submissionAdjudication: state.submission,
+      recordAuthority: authority,
+      expiresAt: new Date("2026-09-04T00:00:00.000Z")
+    }).result;
+    expect(result.requirements.map((requirement) => requirement.text).toSorted())
+      .toEqual(obligations.toSorted());
+
+    const formatOnly = draft({ requirements: [analysis.requirements[0]!] });
+    const mislabeled = verifyBundle({
+      pages: [obligations[0]!],
+      analysis: formatOnly,
+      annotations: [["q", 0, "s"]]
+    }).authority;
+    expect(mislabeled).toMatchObject({ package_veto: true });
+    expect(mislabeled.records[0]).toMatchObject({
+      source_binding: "relation_gap",
+      semantic_crosscheck: "disagrees",
+      publication: "discarded"
+    });
+
+    const channel = "Bids must be submitted by email.";
+    const channelAnalysis = draft({ requirements: [{
+      ...analysis.requirements[0]!,
+      id: "submission-channel",
+      text: channel,
+      citations: [citation(channel)]
+    }] });
+    const mislabeledNonSubmission = verifyBundle({
+      pages: [channel],
+      analysis: channelAnalysis,
+      annotations: [["q", 0, "n"]],
+      relationForPage: (_page, text) => relation(text, channel)
+    }).authority;
+    expect(mislabeledNonSubmission).toMatchObject({ package_veto: true });
+    expect(mislabeledNonSubmission.records[0]).toMatchObject({
+      source_binding: "relation_conflict",
+      semantic_crosscheck: "disagrees",
+      publication: "discarded"
+    });
+  });
+
   it("classifies the thirteen publication and exact-source safety cases without a channel lexicon", () => {
     const email = "Bids must be submitted by email.";
     const invented = "The response travels through SecureDrop.";
@@ -1840,6 +2037,75 @@ describe("T16 deterministic Monid-to-PDF.js source binding", () => {
 });
 
 describe("T17 selector-scoped physical alignment", () => {
+  it("ignores only grammar-bounded Markdown headings and strong emphasis", () => {
+    const source = document([
+      "Submission instructions\nBids must be submitted electronically.\nBid format"
+    ]);
+    const fragmentText = "# Submission instructions\nBids must be submitted **electronically**.\n__Bid format__";
+    const sourceMap = buildDocumentSourceMap([{
+      source_fragment_id: "markdown-presentation", document_sha256: sha, chunk_id: null,
+      text: fragmentText
+    }], [source]);
+    const cases = [
+      ["# Submission instructions", "Submission instructions"],
+      ["Bids must be submitted **electronically**.", "Bids must be submitted electronically."],
+      ["__Bid format__", "Bid format"]
+    ] as const;
+    for (const [selection, expected] of cases) {
+      const start = fragmentText.indexOf(selection);
+      expect(resolveSemanticSpan(sourceMap, {
+        source_fragment_id: "markdown-presentation",
+        start_utf16: start,
+        length_utf16: selection.length
+      }, [source])?.evidence_quote).toBe(expected);
+    }
+  });
+
+  it("preserves literal marker characters and exact numeric values", () => {
+    const literalSource = document(["Use C# and file_name. The target is 2050."]);
+    const literalFragment = "Use C# and file_name. The target is **2055**.";
+    const sourceMap = buildDocumentSourceMap([{
+      source_fragment_id: "markdown-numeric-safety", document_sha256: sha, chunk_id: null,
+      text: literalFragment
+    }], [literalSource]);
+    const literal = "Use C# and file_name.";
+    expect(resolveSemanticSpan(sourceMap, {
+      source_fragment_id: "markdown-numeric-safety",
+      start_utf16: 0,
+      length_utf16: literal.length
+    }, [literalSource])?.evidence_quote).toBe(literal);
+    const numeric = "**2055**";
+    expect(resolveSemanticSpan(sourceMap, {
+      source_fragment_id: "markdown-numeric-safety",
+      start_utf16: literalFragment.indexOf(numeric),
+      length_utf16: numeric.length
+    }, [literalSource])).toBeNull();
+  });
+
+  it.each([
+    ["file_name_", "filename"],
+    ["code__value__", "codevalue"],
+    ["code**value**", "codevalue"],
+    ["A*B*", "AB"],
+    ["- 5 percent", "5 percent"],
+    ["$________", "$"],
+    ["A ________", "A"],
+    ["****value****", "value"],
+    ["___value___", "value"],
+    ["__value____", "value"]
+  ])("fails closed instead of deleting ambiguous Markdown punctuation: %s", (markdown, pdf) => {
+    const source = document([pdf]);
+    const sourceMap = buildDocumentSourceMap([{
+      source_fragment_id: `literal-${markdown}`, document_sha256: sha, chunk_id: null,
+      text: markdown
+    }], [source]);
+    expect(resolveSemanticSpan(sourceMap, {
+      source_fragment_id: `literal-${markdown}`,
+      start_utf16: 0,
+      length_utf16: markdown.length
+    }, [source])).toBeNull();
+  });
+
   it("binds a unique selected clause despite unrelated surrounding fragment drift", () => {
     const clause = "Invoices are payable within 30 days.";
     const source = document([`Official heading\n${clause}\nOfficial footer`]);

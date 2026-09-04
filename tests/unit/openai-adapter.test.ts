@@ -251,6 +251,8 @@ describe("OpenAI Responses structured output adapter", () => {
     expect(String(parseBody?.instructions)).toMatch(/appears only in halo context/i);
     expect(String(parseBody?.instructions)).toMatch(/closest bounded generic channel such as electronic/i);
     expect(String(parseBody?.instructions)).toMatch(/start_in_relation_utf16/i);
+    expect(String(parseBody?.instructions)).toMatch(/structural category is taxonomy/i);
+    expect(String(parseBody?.instructions)).toMatch(/format, file type, copies, packaging, labelling, signatures, or deadlines/i);
   });
 
   it("returns a verified private adjudication from the existing paid extraction call", async () => {

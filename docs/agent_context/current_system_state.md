@@ -1,5 +1,28 @@
 # Current System State
 
+## 2026-09-04 T20 authoritative release state
+
+- Production deployment `dpl_8b19zqRuYxcEAkJPoW33UyxZtsLC` at base commit
+  `55baeb8bdcf1e019493538a04efc32c1a197a09d` produced one retained CER
+  `partial` result. Provider calls and cleanup succeeded; record authority
+  published 43/195 records and package vetoed 41 relation gaps, two coverage
+  gaps, and three conflicts. Fifty-five citation selectors could not be
+  independently located.
+- The current T20 worktree fixes only the evidenced authority boundaries:
+  category no longer implies whole-bid channel relevance; non-channel receipt
+  relations with `channel=unspecified` do not conflict with `n`; and source
+  alignment recognizes only bounded ATX headings and exact two-character
+  strong-emphasis runs while retaining strict SHA/page/selector verification.
+- Blank price runs, single/list markers, identifiers, long/nested delimiters,
+  numeric changes, negation changes, wrong documents, and ambiguous matches
+  remain fail-closed.
+- QA18 independently passed with P0=0/P1=0/P2=0. Root gates passed 809 tests
+  with 12 designed skips, lint, and build. No provider call occurred during
+  diagnosis or repair.
+- The release automation is PAUSED. After commit/push and a fresh immutable
+  deployment, refresh runtime/provider attestations and health/smoke before one
+  controlled CER run. Never retry it automatically.
+
 ## 2026-09-04 T19 authoritative release state
 
 - `HEAD` and `origin/main` are

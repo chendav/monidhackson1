@@ -11,7 +11,7 @@ import type { CitationDocument } from "@/lib/evidence/citations";
 
 export const RECORD_AUTHORITY_ENVELOPE_VERSION = 2 as const;
 export const RECORD_AUTHORITY_VERSION = 3 as const;
-export const RECORD_SOURCE_ALIGNMENT_VERSION = "monid-pdfjs-selector-utf16-v2" as const;
+export const RECORD_SOURCE_ALIGNMENT_VERSION = "monid-pdfjs-selector-utf16-v3" as const;
 // T10 carries relevance inline on every private model record. This bound is the
 // sum of the strict private Draft collection maxima and is a server-only guard;
 // it is no longer a positional provider sidecar or a 40-record delivery limit.
@@ -563,6 +563,69 @@ function markdownLayoutIndexes(value: string) {
       if (line.body[index] === "|") ignored.add(line.start + index);
     }
   };
+  const isEscaped = (body: string, index: number) => {
+    let slashes = 0;
+    for (let cursor = index - 1; cursor >= 0 && body[cursor] === "\\"; cursor -= 1) slashes += 1;
+    return slashes % 2 === 1;
+  };
+  const markDelimiterPairs = (
+    line: { body: string; start: number },
+    delimiter: "**" | "__"
+  ) => {
+    // Backtick contents are literal Markdown code. Conservatively retain every
+    // marker on such lines instead of interpreting a literal as presentation.
+    if (line.body.includes("`")) return;
+    const marker = delimiter[0]!;
+    const exactDelimiterRun = (index: number) =>
+      line.body[index - 1] !== marker &&
+      line.body[index + delimiter.length] !== marker;
+    for (let opener = 0; opener <= line.body.length - delimiter.length;) {
+      opener = line.body.indexOf(delimiter, opener);
+      if (opener < 0) break;
+      const before = line.body[opener - 1];
+      const after = line.body[opener + delimiter.length];
+      if (!exactDelimiterRun(opener) || isEscaped(line.body, opener) || !after || /\s/u.test(after) ||
+        /[\p{L}\p{N}]/u.test(before ?? "")) {
+        opener += delimiter.length;
+        continue;
+      }
+      let closer = opener + delimiter.length;
+      let found = -1;
+      while (closer <= line.body.length - delimiter.length) {
+        closer = line.body.indexOf(delimiter, closer);
+        if (closer < 0) break;
+        const innerLast = line.body[closer - 1];
+        const afterCloser = line.body[closer + delimiter.length];
+        if (exactDelimiterRun(closer) && !isEscaped(line.body, closer) &&
+          innerLast && !/\s/u.test(innerLast) &&
+          !/[\p{L}\p{N}]/u.test(afterCloser ?? "")) {
+          found = closer;
+          break;
+        }
+        closer += delimiter.length;
+      }
+      if (found < 0) {
+        opener += delimiter.length;
+        continue;
+      }
+      for (let index = 0; index < delimiter.length; index += 1) {
+        ignored.add(line.start + opener + index);
+        ignored.add(line.start + found + index);
+      }
+      opener = found + delimiter.length;
+    }
+  };
+  for (const line of lines) {
+    const heading = /^( {0,3})(#{1,6})(?=\s|$)/u.exec(line.body);
+    if (heading) {
+      const markerStart = heading[1]!.length;
+      for (let index = 0; index < heading[2]!.length; index += 1) {
+        ignored.add(line.start + markerStart + index);
+      }
+    }
+    markDelimiterPairs(line, "**");
+    markDelimiterPairs(line, "__");
+  }
   for (let delimiterIndex = 1; delimiterIndex < lines.length; delimiterIndex += 1) {
     const header = lines[delimiterIndex - 1]!;
     const delimiter = lines[delimiterIndex]!;
@@ -1041,9 +1104,12 @@ export function verifyRecordAuthorities(input: {
             relation.subject_scope === "ambiguous" || relation.modality === "unknown" ||
             relation.channel === "unspecified"
           ));
-          const wholeBidOverlap = occurrenceStates.some((state) => state.overlaps.some((relation) =>
-            relation.subject_scope === "whole_bid"
-          ));
+          const nonSubmissionChannelConflict = occurrenceStates.some((state) =>
+            state.overlaps.some((relation) =>
+              relation.channel !== "unspecified" &&
+              (relation.subject_scope === "whole_bid" || relation.subject_scope === "ambiguous")
+            )
+          );
           if (relevance === "s") {
             const compatible = occurrenceStates.every((state) => state.overlaps.some((relation) =>
               relation.subject_scope === "whole_bid" && relation.modality !== "unknown" &&
@@ -1061,7 +1127,7 @@ export function verifyRecordAuthorities(input: {
               reason = "submission_relation_conflict";
               break;
             }
-          } else if (relevance === "n" && (wholeBidOverlap || ambiguous)) {
+          } else if (relevance === "n" && nonSubmissionChannelConflict) {
             sourceBinding = "relation_conflict";
             semanticCrosscheck = "disagrees";
             reason = "non_submission_relation_overlap";

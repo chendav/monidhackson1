@@ -1308,3 +1308,30 @@ Independent verification:
 
 QA16 Revision 3 permits the ordinary release-candidate commit/deploy/attestation
 sequence. It does not supply live Edmonton/CER or 12-citation evidence.
+
+## QA18 — T20 bounded authority repair
+
+```yaml
+verdict: PASS
+revision_round: 1
+p0: 0
+p1: 0
+p2: 0
+deployment_allowed: true
+paid_cer_runs_allowed_after_release_gates: 1
+automatic_retry_allowed: false
+```
+
+The accepted candidate makes submission relevance channel-scoped rather than
+category-scoped, limits an `n` disagreement to a concrete channel whose subject
+is whole-bid or ambiguous, and leaves the stricter `s` branch unchanged. Its
+source alignment removes only bounded ATX heading syntax and exact
+two-character strong-emphasis pairs. Blank-price underscores, identifiers,
+single/list markers, long or nested runs, numeric changes, negation changes,
+wrong documents, and ambiguous page matches remain fail-closed.
+
+Independent focused review passed 158 tests with three designed fixture skips.
+Root verification passed 809 tests with 12 designed skips, lint, and production
+build. P0/P1/P2 are zero. The official Amendment 001 solicitation-number
+conflict remains unnormalized and can require clarification without itself
+forcing terminal partial when substantive minimum coverage exists.

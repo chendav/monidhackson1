@@ -1,5 +1,31 @@
 # Current Task Brief
 
+## Authoritative release continuation — T20
+
+This section supersedes T19 and older current-state text below.
+
+- Candidate base commit: `55baeb8bdcf1e019493538a04efc32c1a197a09d`.
+- One controlled shuffled CER run on deployment
+  `dpl_8b19zqRuYxcEAkJPoW33UyxZtsLC` ended `partial` after 206,895 ms and
+  USD 1.193860 conservative cost. All four Monid parses, five OpenAI batches,
+  and source cleanup succeeded. No retry occurred.
+- The retained audit isolated two product defects: submission-category facts
+  were incorrectly treated as whole-bid delivery channels, and exact Monid
+  selectors could not safely ignore bounded Markdown presentation markers.
+- T20 narrows relevance to atomic whole-bid channel facts, aligns the `n`
+  cross-check to concrete channels, and adds fail-closed ATX/strong-emphasis
+  alignment. It does not add fuzzy matching or normalize source numbers.
+- The saved official Amendment 001 genuinely contains conflicting solicitation
+  values (`84084-26-009/A` on p1 and `84084-26-0006/A` on p2-p6). The conflict
+  remains source truth; it may withhold the package submission channel but does
+  not force terminal `partial` when substantive minimum coverage is present.
+- QA18 returned `PASS`, P0=0/P1=0/P2=0. The final local gate passed 809 tests
+  with 12 designed skips, lint, and production build. Deployment and exactly
+  one paid CER proof are authorized after immutable deployment attestations,
+  health/smoke, and budget admission. Automatic retry remains forbidden.
+- Development daily cap is temporarily USD 26.25 under explicit user
+  authorization; the per-run reservation remains USD 2.
+
 ## Authoritative release continuation — T19
 
 This section supersedes older current-phase statements below wherever they

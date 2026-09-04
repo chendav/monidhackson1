@@ -2,6 +2,25 @@
 
 Updated: 2026-09-04
 
+## T20 authority-repair risks
+
+- The T20 local repair is independently accepted but has not yet proved that
+  production selector recovery is sufficient; retained T19 diagnostics do not
+  reveal the exact cause of every one of the 55 unlocated citation selectors.
+  Mitigation: immutable deployment plus exactly one controlled CER proof; no
+  automatic retry.
+- Markdown normalization is intentionally narrow. Only bounded ATX headings
+  and exact two-character strong emphasis are presentation syntax. Blank price
+  underscores, identifiers, list/sign markers, long/nested runs, numbers,
+  negation, and operators remain literal and fail closed.
+- Amendment 001 contains real, divergent solicitation identifiers. Never
+  repair or normalize the digits. Preserve the metadata inconsistency and
+  withhold package-level submission authority when required, while allowing
+  independently verified requirements and evaluation rules to publish.
+- The temporary USD 26.25 development daily cap is user-authorized but not a
+  license for retries. The USD 2 per-run reservation and one-shot sequence are
+  unchanged.
+
 ## T19 release-continuation risks
 
 - The live CER and final Edmonton results remain unproved for the exact

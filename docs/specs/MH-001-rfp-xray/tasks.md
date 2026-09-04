@@ -616,3 +616,34 @@ acceptance: [AC-2, AC-4, AC-5, AC-9, AC-10, AC-11]
 handoff: qa_report.md
 status: completed_approve
 ```
+
+## T20 Bounded record-authority ontology repair
+
+```yaml
+id: T20
+owner_profile: backend
+objective: Repair the two retained-production authority failures without fuzzy matching, source-number normalization, or additional provider calls.
+depends_on: [QA17]
+include_paths: [src/lib/providers/openai.ts, src/lib/analysis/record-authority.ts, tests/unit/openai-adapter.test.ts, tests/unit/record-authority.test.ts]
+exclude_paths: [src/app/**, src/components/**, drizzle/**, videos/**]
+edits_allowed: true
+acceptance: [AC-2, AC-4, AC-5, AC-6, AC-9, AC-10]
+status: completed_handoff
+```
+
+## QA18 T20 independent authority review
+
+```yaml
+id: QA18
+owner_profile: reviewer
+objective: Falsify channel-scoped relevance and bounded Markdown presentation alignment, including blank-pricing and identifier counterexamples.
+depends_on: [T20]
+include_paths: [src/lib/providers/openai.ts, src/lib/analysis/record-authority.ts, tests/unit/openai-adapter.test.ts, tests/unit/record-authority.test.ts]
+exclude_paths: []
+edits_allowed: false
+acceptance: [AC-2, AC-4, AC-5, AC-6, AC-9, AC-10, AC-11]
+status: completed_pass
+revision_round: 1
+verdict: PASS
+findings: { P0: 0, P1: 0, P2: 0 }
+```

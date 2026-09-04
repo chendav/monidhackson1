@@ -44,10 +44,10 @@ regression_checks:
 review:
   required: true
   verdict: PASS
-  active_review_task: QA17
-  revision_round: 2
-  starts_after: T19 operations handoff
-  implementation_handoff: handoff-operations.md
+  active_review_task: QA18
+  revision_round: 1
+  starts_after: T20 bounded ontology redesign
+  implementation_handoff: handoff-backend.md
   active_failures: []
   p0: 0
   p1: 0
@@ -72,8 +72,8 @@ governance_may_change_automatically: false
 
 current_release_evidence:
   observed_at: 2026-09-04
-  deployed_commit: f84e92b2bb6be1de15aa9bb351aa9c742e73f508
-  deployment_id: dpl_D7vxrruGA11tLACAahAGCyvVGm7s
+  deployed_commit: 55baeb8bdcf1e019493538a04efc32c1a197a09d
+  deployment_id: dpl_8b19zqRuYxcEAkJPoW33UyxZtsLC
   public_url: https://rfp-xray.vercel.app
   health:
     http_status: 200
@@ -81,13 +81,13 @@ current_release_evidence:
     mode: live
     dependencies: ready
   deterministic_regression: 10/10 passed against saved official fixtures
-  repository_gate: 60 test files and 794 tests passed with 12 designed skips
+  repository_gate: T20 candidate passed 809 tests with 12 designed skips, lint, and build
   production_smoke: 4/4 passed
   last_controlled_cer_run:
-    result: partial_historical_not_current_candidate_proof
+    result: partial_authority_failure_cleanup_confirmed_no_retry
   evidence_boundary: Deterministic and component evidence does not prove final-candidate CER or Edmonton live outcomes, cleanup, Q&A, or citation review.
 
 release:
   status: NOT_READY
-  next_gate: Commit and deploy the QA17-approved candidate, refresh exact-deployment attestations, then run one CER proof after the daily production budget window resets.
+  next_gate: Commit and deploy the QA18-approved T20 candidate, refresh exact-deployment attestations and health/smoke, then run exactly one CER proof under the user-authorized USD 26.25 development cap.
   remaining_after_cer: 12-citation review, one Edmonton signed-PUT proof, final independent review, final video, contest submission, and five publications.
