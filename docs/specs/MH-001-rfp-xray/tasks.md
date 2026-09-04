@@ -325,7 +325,9 @@ exclude_paths: [src/app/**, src/components/**, drizzle/**]
 edits_allowed: true
 acceptance: [AC-2, AC-4, AC-5, AC-9, AC-10]
 handoff: handoff-backend.md
-status: in_progress
+status: completed_accepted
+revision_round: 1
+revision_scope: P1_QA10_HALO_CONTEXT_BECOMES_RECORD_AUTHORITY
 ```
 
 ## QA10 T12 canonical-core review
@@ -340,7 +342,7 @@ exclude_paths: []
 edits_allowed: false
 acceptance: [AC-2, AC-4, AC-5, AC-9, AC-10, AC-11]
 handoff: qa_report.md
-status: blocked_on_T12
+status: completed_pass
 ```
 
 ## T8 Publication/submission authority separation

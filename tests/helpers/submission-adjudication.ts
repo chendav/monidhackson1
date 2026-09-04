@@ -93,7 +93,15 @@ export function verifiedFixtureSubmissionAdjudication(
       !relation.evidenceText)) {
       throw new Error(`Whole-bid fixture relation requires exact clause text: ${candidate.candidate_id}`);
     }
-    const explicitDecisions = (explicit ?? []).map((relation) => fixtureDecision(candidate, relation));
+    // Fixture callbacks may see the same exact clause in an adjacent halo. The
+    // production v4 contract requires only the canonical midpoint owner to
+    // emit it, so the helper mirrors that mechanical ownership rule.
+    const explicitDecisions = (explicit ?? []).map((relation) => fixtureDecision(candidate, relation))
+      .filter((relation) => {
+        const midpoint = relation.relation_start_utf16 +
+          Math.floor((relation.relation_end_utf16 - relation.relation_start_utf16 - 1) / 2);
+        return midpoint >= candidate.core_start_utf16 && midpoint < candidate.core_end_utf16;
+      });
     const uncovered = candidate.occurrences.filter((occurrence) =>
       !explicitDecisions.some((relation) => relation.channel === occurrence.channel_hint &&
         relation.relation_start_utf16 <= occurrence.mention_start_utf16 &&
@@ -116,6 +124,7 @@ export function verifiedFixtureSubmissionAdjudication(
       candidate_id: candidate.candidate_id,
       document_sha256: candidate.document_sha256,
       pdf_page_1based: candidate.pdf_page_1based,
+      coverage: "complete" as const,
       relations: [...explicitDecisions, ...fallback]
     };
   });

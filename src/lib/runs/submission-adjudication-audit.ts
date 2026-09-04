@@ -6,14 +6,17 @@ import {
   type VerifiedSubmissionAdjudication
 } from "@/lib/analysis/submission-channel";
 
-export const SUBMISSION_ADJUDICATION_AUDIT_VERSION = 1 as const;
+export const SUBMISSION_ADJUDICATION_AUDIT_VERSION = 2 as const;
 const CounterSchema = z.number().int().nonnegative().max(10_000);
-const fixedReasonCounters = z.object(Object.fromEntries(
-  SUBMISSION_UNRESOLVED_REASON_KEYS.map((reason) => [reason, CounterSchema])
-) as Record<SubmissionUnresolvedReason, typeof CounterSchema>).strict();
+const VERSION_1_REASON_KEYS = SUBMISSION_UNRESOLVED_REASON_KEYS.filter(
+  (reason) => reason !== "ownership_mismatch"
+);
+const fixedReasonCounters = <T extends readonly SubmissionUnresolvedReason[]>(keys: T) => z.object(
+  Object.fromEntries(keys.map((reason) => [reason, CounterSchema])) as
+    Record<T[number], typeof CounterSchema>
+).strict();
 
-export const SubmissionAdjudicationAuditSchema = z.object({
-  version: z.literal(SUBMISSION_ADJUDICATION_AUDIT_VERSION),
+const commonAuditFields = {
   ledger_digest: z.string().regex(/^[a-f0-9]{64}$/),
   expected_candidate_count: CounterSchema,
   verified_candidate_count: CounterSchema,
@@ -28,9 +31,22 @@ export const SubmissionAdjudicationAuditSchema = z.object({
   resolution_status: z.enum([
     "unique", "none", "possible_only", "multiple", "contradicted", "unresolved"
   ]),
-  unresolved_reason_counts: fixedReasonCounters,
   recorded_at: z.string().datetime({ offset: true })
-}).strict().superRefine((audit, context) => {
+};
+
+function auditConsistency<T extends {
+  expected_candidate_count: number;
+  verified_candidate_count: number;
+  expected_page_count: number;
+  covered_page_count: number;
+  expected_source_fragment_count: number;
+  verified_source_fragment_count: number;
+  expected_batch_count: number;
+  verified_batch_count: number;
+  unresolved_batch_count: number;
+  complete: boolean;
+  unresolved_reason_counts: Record<string, number>;
+}>(audit: T, context: z.RefinementCtx) {
   if (audit.verified_candidate_count > audit.expected_candidate_count ||
     audit.covered_page_count > audit.expected_page_count ||
     audit.verified_source_fragment_count > audit.expected_source_fragment_count ||
@@ -47,7 +63,24 @@ export const SubmissionAdjudicationAuditSchema = z.object({
     audit.verified_batch_count === audit.expected_batch_count)) {
     context.addIssue({ code: "custom", message: "submission_adjudication_audit_completeness_mismatch" });
   }
-});
+}
+
+const Version1SubmissionAdjudicationAuditSchema = z.object({
+  version: z.literal(1),
+  ...commonAuditFields,
+  unresolved_reason_counts: fixedReasonCounters(VERSION_1_REASON_KEYS)
+}).strict().superRefine(auditConsistency);
+
+const CurrentSubmissionAdjudicationAuditSchema = z.object({
+  version: z.literal(SUBMISSION_ADJUDICATION_AUDIT_VERSION),
+  ...commonAuditFields,
+  unresolved_reason_counts: fixedReasonCounters(SUBMISSION_UNRESOLVED_REASON_KEYS)
+}).strict().superRefine(auditConsistency);
+
+export const SubmissionAdjudicationAuditSchema = z.union([
+  Version1SubmissionAdjudicationAuditSchema,
+  CurrentSubmissionAdjudicationAuditSchema
+]);
 
 export type SubmissionAdjudicationAudit = z.infer<typeof SubmissionAdjudicationAuditSchema>;
 

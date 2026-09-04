@@ -385,3 +385,124 @@ Actual provider acceptance and post-T11 production counts remain intentionally
 unknown until the separately controlled deployment and paid falsification run.
 QA9 permits that controlled next gate; it does not itself establish final
 release readiness.
+
+## QA10 — T12 Canonical ownership-core submission ledger
+
+```yaml
+verdict: REQUEST_CHANGES
+revision_round: 0
+p0: 0
+p1: 1
+p2: 0
+deployment_allowed: false
+reviewed_base: 680014b2ce4c8af641bb5a8d2f24d031dc12e8c5
+```
+
+### P1_QA10_HALO_CONTEXT_BECOMES_RECORD_AUTHORITY
+
+T12 correctly makes relation ownership midpoint-based, but downstream record
+citation authority still treats every context window that contains a quote as
+an authority unit. `exactOccurrences` collects all enclosing candidates by
+context bounds (`src/lib/analysis/record-authority.ts:456-494`), and the
+cross-check declares an occurrence covered when any of those candidates is
+verified (`record-authority.ts:604-615,629-668`). It does not select the unique
+candidate whose owned core contains the occurrence midpoint.
+
+The independent counterexample placed `Bids must be lodged through SecureDrop.`
+at `[2685,2724)` across the 2700 core boundary. Its midpoint owner was core
+`[2700,5224)`, which returned `coverage=uncertain`; adjacent core `[0,2700)`
+was complete, had the quote only in its right halo, and returned no relation.
+The source-ledger artifact correctly became incomplete with
+`semantic_uncertainty`, but record authority classified a model-authored
+`financial` Requirement marked `n` as `exact_bound / consistent / verified`,
+with `package_veto=false`. Materialization kept the SecureDrop Requirement
+active while `summary.submission_method=null`, and persisted-evidence Q&A
+answered it. The Q&A path intentionally admits active non-submission-category
+requirements under null submission authority
+(`src/lib/analysis/closed-world.ts:56-65`), so the incorrect source-binding
+decision is user-visible.
+
+This violates the accepted T12 invariant that halo is context, not authority,
+and weakens unfamiliar-channel fail-closed behavior. Deployment is blocked.
+The minimum acceptance is for every exact citation occurrence to use only its
+deterministic midpoint owner candidate for coverage and relation cross-checks.
+If that owner is uncertain or unresolved, the record must not publish or answer
+Q&A even when an adjacent halo-containing candidate is complete. Existing
+non-owner relation `ownership_mismatch`, unique-owner relation publication,
+same-owner duplicate/conflict failure, and official fixture behavior must
+remain intact.
+
+### Passing independent evidence
+
+- The Chief-proposed 500-unit halo boundary concern was falsified. With
+  midpoint `start + floor((length-1)/2)`, a 500-unit span owned at
+  `coreEnd-1` ends at the exclusive offset `coreEnd+250`, exactly inside the
+  250-unit halo. An exhaustive read-only probe checked all 2,875,750 legal
+  spans of lengths 1..500 on a 6,001-unit page; every span had exactly one
+  owner and fit its owner's context.
+- Focused T12 suites: 6 files, 165 tests passed.
+- Official Edmonton/CER fixture audit: 3/3 passed. Edmonton remained 85 cores
+  in 3 batches with v4 bounds `5426/6005/7318`; CER remained 116 cores in 5
+  batches with `4834/4766/4800/5928/7006`.
+- `pnpm check`: ESLint and TypeScript passed; 58 test files passed/4 skipped,
+  750 tests passed/10 skipped.
+- Invalid submission-audit CLI input exited 64 and printed only
+  `submission_adjudication_audit_invalid_run_id`; strict historical v1/current
+  v2 audit tests passed.
+- `git diff --check` passed with Windows line-ending notices only. Scoped secret
+  scan found zero key/token/private-key/credentialed-database/AWS-key matches,
+  and no public API, UI, database, migration, pipeline, budget, or deadline path
+  changed.
+
+Build and Playwright were not repeated after the definitive P1 reproduction;
+their implementer-reported passes cannot override this release-blocking semantic
+counterexample.
+
+## QA10 Revision 1 — Halo-context record-authority fence
+
+```yaml
+verdict: PASS
+revision_round: 1
+p0: 0
+p1: 0
+p2: 0
+deployment_allowed: true
+reviewed_base: 680014b2ce4c8af641bb5a8d2f24d031dc12e8c5
+```
+
+The failure-scoped delta closes
+`P1_QA10_HALO_CONTEXT_BECOMES_RECORD_AUTHORITY`. Exact citation occurrence
+binding now requires both full context containment and the unique candidate
+whose half-open core contains `start + floor((quote.length - 1) / 2)`
+(`src/lib/analysis/record-authority.ts:475-484`). Adjacent halo-only candidates
+cannot satisfy source coverage or contribute relation cross-check authority.
+
+The original independent `[2685,2724)` SecureDrop counterexample was rerun
+outside the added fixture. With the midpoint owner marked uncertain and the
+adjacent halo marked complete, source adjudication remains incomplete, the
+model `n` Requirement becomes `coverage_gap / unknown / discarded`, public
+materialization omits it, and persisted-evidence Q&A returns `not_found`.
+The private receipt retains its audit origin key, but the existing materializer
+returns no publication lineage for discarded authority. The positive owner-core
+relation, both page-edge citations, non-owner `ownership_mismatch`, same-owner
+duplicate/conflict, mixed-relevance package veto, and unchanged budget/retry
+paths also pass.
+
+Independent commands and results:
+
+- Focused Revision-1 regression gate: 4 files, 129 tests passed.
+- Official Edmonton/CER fixture audit: 3/3 passed; Edmonton remains 85 cores/3
+  batches and CER 116 cores/5 batches with the accepted v4 bounds unchanged.
+- `pnpm check`: ESLint and TypeScript passed; 58 test files passed/4 skipped,
+  753 tests passed/10 skipped.
+- `pnpm build`: production build passed with 9 Workflow steps, 5 workflows and
+  13 generated page entries.
+- `$env:CI='1'; pnpm test:e2e`: 14 passed; 2 credentialed Railway live-storage
+  tests skipped.
+- `git diff --check`: passed with Windows line-ending notices only; no product
+  path outside the two-line record-authority fix and scoped tests changed in the
+  revision.
+
+Actual provider acceptance and post-T12 production results remain unproven and
+belong to the separately controlled deployment/run gate. QA10 Revision 1
+authorizes that gate; it does not itself make the overall release ready.

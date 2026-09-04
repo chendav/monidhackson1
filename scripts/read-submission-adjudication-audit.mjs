@@ -12,10 +12,10 @@ const reasons = [
   "condition_mismatch", "low_confidence", "semantic_uncertainty", "overlap_disagreement",
   "prompt_injection", "draft_disagreement"
 ];
-const reasonShape = Object.fromEntries(reasons.map((reason) => [reason, Counter]));
+const currentReasons = [...reasons, "ownership_mismatch"];
+const reasonShape = (keys) => Object.fromEntries(keys.map((reason) => [reason, Counter]));
 
-export const SubmissionAdjudicationAuditCliSchema = z.object({
-  version: z.literal(1),
+const commonFields = {
   ledger_digest: z.string().regex(/^[a-f0-9]{64}$/),
   expected_candidate_count: Counter,
   verified_candidate_count: Counter,
@@ -30,9 +30,10 @@ export const SubmissionAdjudicationAuditCliSchema = z.object({
   resolution_status: z.enum([
     "unique", "none", "possible_only", "multiple", "contradicted", "unresolved"
   ]),
-  unresolved_reason_counts: z.object(reasonShape).strict(),
   recorded_at: z.string().datetime({ offset: true })
-}).strict().superRefine((audit, context) => {
+};
+
+const withConsistency = (schema) => schema.superRefine((audit, context) => {
   const invalid = audit.verified_candidate_count > audit.expected_candidate_count ||
     audit.covered_page_count > audit.expected_page_count ||
     audit.verified_source_fragment_count > audit.expected_source_fragment_count ||
@@ -51,10 +52,28 @@ export const SubmissionAdjudicationAuditCliSchema = z.object({
   }
 });
 
+const Version1SubmissionAdjudicationAuditCliSchema = withConsistency(z.object({
+  version: z.literal(1),
+  ...commonFields,
+  unresolved_reason_counts: z.object(reasonShape(reasons)).strict()
+}).strict());
+
+const CurrentSubmissionAdjudicationAuditCliSchema = withConsistency(z.object({
+  version: z.literal(2),
+  ...commonFields,
+  unresolved_reason_counts: z.object(reasonShape(currentReasons)).strict()
+}).strict());
+
+export const SubmissionAdjudicationAuditCliSchema = z.union([
+  Version1SubmissionAdjudicationAuditCliSchema,
+  CurrentSubmissionAdjudicationAuditCliSchema
+]);
+
 const RunIdSchema = z.string().uuid();
 
 export function formatSubmissionAdjudicationAudit(runId, rawAudit) {
-  return { run_id: RunIdSchema.parse(runId), ...SubmissionAdjudicationAuditCliSchema.parse(rawAudit) };
+  RunIdSchema.parse(runId);
+  return SubmissionAdjudicationAuditCliSchema.parse(rawAudit);
 }
 
 export async function readSubmissionAdjudicationAudit(runId, databaseUrl, sqlFactory = neon) {

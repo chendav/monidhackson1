@@ -475,9 +475,11 @@ function exactOccurrences(
       if (localStart < 0) break;
       const start = localStart;
       const end = start + quote.length;
+      const midpoint = start + Math.floor((quote.length - 1) / 2);
       const candidateIds = ledger.candidates.filter((candidate) =>
         candidate.document_sha256 === documentSha256 &&
         candidate.pdf_page_1based === page.pdfPage1Based &&
+        midpoint >= candidate.core_start_utf16 && midpoint < candidate.core_end_utf16 &&
         start >= candidate.source_start_utf16 && end <= candidate.source_end_utf16
       ).map((candidate) => candidate.candidate_id);
       const key = `${documentSha256}:${page.pdfPage1Based}:${start}:${end}`;

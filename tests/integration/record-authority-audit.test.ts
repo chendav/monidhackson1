@@ -96,6 +96,7 @@ describe("record authority pipeline audit", () => {
             candidate_id: candidate.candidate_id,
             document_sha256: candidate.document_sha256,
             pdf_page_1based: candidate.pdf_page_1based,
+            coverage: "complete",
             relations: []
           }))
         });
@@ -164,7 +165,7 @@ describe("record authority pipeline audit", () => {
     expect((await store.get(record.id))?.recordAuthorityAudit)
       .toEqual(completed.recordAuthorityAudit);
     expect(completed.submissionAdjudicationAudit).toMatchObject({
-      version: 1,
+      version: 2,
       complete: true,
       expected_batch_count: 1,
       verified_batch_count: 1,

@@ -2674,3 +2674,208 @@ uncertainty, overlap agreement, and prompt-taint gates.
 
 None. Wire v3 and audit v4 remain project-specific contracts pending independent
 QA9 and a later controlled production run.
+
+## T12 Implementation — Canonical ownership-core submission ledger
+
+This is the bounded T12 implementation handoff for QA10. It is implementation
+evidence, not self-certification. No network/provider call, credential access,
+paid call, deployment, database operation or migration, commit, push, release
+evidence edit, public API change, channel lexicon, closing-date inference, or
+Reviewer-verdict edit occurred.
+
+### Implemented contracts
+
+1. The private submission ledger is now `submission-ledger-v2`. Every PDF.js
+   page is partitioned into consecutive, mutually exclusive half-open cores of
+   at most 2,700 UTF-16 code units. Each core receives at most 250 units of
+   left and right context, keeping an interior context at the existing 3,200
+   limit. Empty pages retain one deterministic zero-length core. Candidate and
+   ledger identities bind document/page hashes plus both core and context
+   bounds.
+2. A relation has exactly one canonical owner: the core containing
+   `start + floor((length - 1) / 2)`. The 250-unit halo fully contains every
+   relation of at most 500 units owned at either side of a core boundary.
+   Lexical occurrences are likewise assigned to exactly one owner and remain
+   discovery hints only. Page coverage is counted only when cores are gapless
+   from offset zero through the complete raw PDF.js page.
+3. The provider-private wire is version 4. Its dynamic candidate-key object now
+   strictly requires `{ coverage: complete|uncertain, relations: [...] }`.
+   Relation and condition offsets are context-relative on the wire; the server
+   converts them with checked addition and then applies the existing exact
+   source-slice, 500-unit, condition-containment, confidence, prompt-taint, and
+   semantic checks. Wire v3, missing coverage, missing/extra keys, wrong
+   literals, and overflow are rejected without retry.
+4. `coverage=uncertain` fails the candidate closed as
+   `semantic_uncertainty`. A relation emitted from a context whose core does not
+   own its midpoint fails with the new fixed `ownership_mismatch` reason.
+   Duplicate decisions for the same exact span within the one owner remain
+   fail-closed as `overlap_disagreement`. The former requirement that every
+   adjacent context duplicate the same relation was removed.
+5. Submission-adjudication audit writes strict version 2 with the bounded
+   `ownership_mismatch` counter while retaining strict historical version-1
+   reads. The existing nullable JSONB needs no SQL migration. The authorized
+   operator reader accepts only the historical/current union and no longer
+   echoes the lookup UUID; stdout remains a non-body allowlist without text,
+   URL, page, offset, candidate, or provider-output fields.
+6. Record-authority mixed relevance remains fail-closed. T12 did not change
+   `record-authority.ts`, `materialize.ts`, budgets, deadlines, call count,
+   settlement, retries, persistence schemas, or public contracts.
+
+### Offline falsification evidence
+
+- Synthetic boundary tests prove cores `[0,2700)`, `[2700,5400)`, and the
+  final remainder are gapless; every offset has one owner; contexts stay at or
+  below 3,200; and 500-unit relations immediately on either side of offset
+  2,700 are fully visible and have exactly one owner.
+- A relation present in two adjacent contexts publishes when only its owner
+  emits it, with no overlap-disagreement veto. The same relation emitted by the
+  non-owner produces `ownership_mismatch`; two conflicting classifications of
+  the same exact owner span produce `overlap_disagreement`.
+- The v4 adapter test uses a nonzero context start and proves both relation and
+  contained condition offsets become the correct absolute PDF.js offsets and
+  hashes. Separate tests cover explicit core uncertainty, an empty page/admin
+  core, clear Email, explicit unfamiliar SecureDrop, ambiguous SecureDrop,
+  prompt taint, malformed delivery, checked overflow, and one paid settlement
+  with no retry.
+- Official local fixtures remain empirically within the unchanged controls.
+  Edmonton now has 85 canonical cores in 3 batches; v4 control-plane bounds are
+  5,426 / 6,005 / 7,318 bytes (18,749 aggregate, 31,251 aggregate reserve), and
+  dynamic schemas are 35,495 / 32,516 / 39,475 bytes. CER now has 116 cores in
+  5 batches; control-plane bounds are 4,834 / 4,766 / 4,800 / 5,928 / 7,006
+  bytes (27,334 aggregate, 22,666 reserve), and dynamic schemas are 30,526 /
+  29,537 / 31,527 / 34,506 / 27,546 bytes. These are local formatter/control
+  measurements, not provider-token or worst-case public response claims.
+- The representative local record-authority receipt is 4,123 / 262,144 bytes
+  for Edmonton after ownership IDs changed and remains 6,681 / 262,144 bytes
+  for CER. The official audit still validates all golden citations and package
+  facts; fixture PDFs remained outside Git.
+
+### Changed files
+
+- `src/lib/analysis/submission-channel.ts`
+- `src/lib/providers/openai.ts`
+- `src/lib/runs/submission-adjudication-audit.ts`
+- `scripts/read-submission-adjudication-audit.mjs`
+- `tests/helpers/submission-adjudication.ts`
+- `tests/unit/openai-adapter.test.ts`
+- `tests/unit/submission-adjudication.test.ts`
+- `tests/unit/submission-adjudication-audit.test.ts`
+- `tests/unit/record-authority.test.ts`
+- `tests/unit/summary-recovery.test.ts`
+- `tests/integration/record-authority-audit.test.ts`
+- `tests/golden/official-fixture-audit.test.ts`
+- `docs/specs/MH-001-rfp-xray/tasks.md`
+- This T12 section in `docs/specs/MH-001-rfp-xray/handoff-backend.md`
+
+### Exact checks
+
+- `pnpm exec vitest run tests/unit/submission-adjudication.test.ts tests/unit/openai-adapter.test.ts tests/unit/submission-adjudication-audit.test.ts tests/unit/record-authority.test.ts tests/unit/summary-recovery.test.ts tests/integration/record-authority-audit.test.ts --reporter=dot`:
+  PASS, 6 files and 165 tests.
+- `$env:RFP_XRAY_FIXTURE_DIR='D:\monidhackson\.data\official-fixtures'; pnpm exec vitest run tests/golden/official-fixture-audit.test.ts --reporter=dot`:
+  PASS, 1 file and 3 tests; all five PDFs remained outside Git.
+- `pnpm check`: PASS; ESLint and TypeScript passed, 58 test files passed/4
+  skipped, and 750 tests passed/10 skipped.
+- `pnpm build`: PASS; Next production compilation, TypeScript, 9 Workflow
+  steps, 5 workflows, and all 13 static-generation entries completed.
+- `pnpm test:e2e`: PASS, 14 browser tests passed and 2 credentialed live-storage
+  tests skipped.
+- `git diff --check`: PASS; only Git's Windows LF-to-CRLF notices were emitted.
+- Scoped changed-content credential-pattern scan: PASS, zero suspicious secret
+  values.
+
+### Confirmed, inferred, unknown, and next gate
+
+- Confirmed: all local falsifiers and regression gates above pass; no extra
+  model request, retry, provider path, budget path, or deadline behavior was
+  introduced.
+- Confirmed: the ledger remains all-page and source-bound. Adjacent halo is now
+  interpretation context rather than a second semantic vote or authority unit.
+- Inferred: canonical ownership removes the production overlap-disagreement
+  failure class without weakening unknown-channel, ambiguity, mixed-record,
+  exact-offset, or prompt-taint gates.
+- Unknown: provider acceptance of wire v4 and actual post-T12 Edmonton audit
+  counts remain unproven because no network or paid run was authorized.
+- QA10 is the next independent gate. Only its `PASS` with P0=0 and P1=0 can
+  authorize Chief-controlled deployment or production falsification.
+
+### Proposed long-term memory
+
+None. The ownership-core and v4 wire remain project-specific contracts pending
+independent QA10 and a later controlled production run.
+
+## T12 QA10 Revision 1 — Halo-context record-authority fence
+
+This bounded revision addresses only
+`P1_QA10_HALO_CONTEXT_BECOMES_RECORD_AUTHORITY`. It is implementation evidence,
+not self-certification. No network/provider call, credential access, paid call,
+deployment, database operation or migration, public contract change, channel
+lexicon, commit, push, release-evidence edit, or Reviewer-verdict edit occurred.
+
+### Exact delta
+
+- `src/lib/analysis/record-authority.ts` now binds each exact citation quote
+  occurrence only to the unique candidate whose half-open owned core contains
+  `start + floor((length - 1) / 2)`. Full containment in that owner's bounded
+  context remains required. Adjacent candidates that merely enclose the quote
+  in halo context are no longer included in citation coverage or relation
+  cross-check authority.
+- No submission-ledger, provider-wire, materialization, Q&A, audit-schema,
+  persistence, cost, deadline, retry, or public API code changed. A non-owner
+  relation still fails `ownership_mismatch`; owner uncertainty remains
+  fail-closed; record-relevance disagreement remains a package veto.
+- `tests/unit/record-authority.test.ts` adds the exact Reviewer reproduction:
+  `Bids must be lodged through SecureDrop.` at `[2685,2724)`, straddling the
+  2700 boundary. The `[2700,...)` owner is uncertain while the `[0,2700)` halo
+  is complete with no relation. The financial `n` Requirement becomes
+  `coverage_gap / unknown / discarded`, record receipt integrity remains
+  complete with `package_veto=false`, submission resolution stays null, the
+  Requirement is absent, and persisted-evidence Q&A returns `not_found`.
+- Positive controls prove the same exact unfamiliar-channel record publishes
+  only when the midpoint owner is complete with a compatible exact relation,
+  and exact non-submission citations at both page edges bind and publish through
+  their respective owners.
+
+### Changed files in this revision
+
+- `src/lib/analysis/record-authority.ts`
+- `tests/unit/record-authority.test.ts`
+- `docs/specs/MH-001-rfp-xray/tasks.md`
+- This revision section in
+  `docs/specs/MH-001-rfp-xray/handoff-backend.md`
+
+### Exact checks
+
+- `pnpm exec vitest run tests/unit/record-authority.test.ts tests/unit/submission-adjudication.test.ts tests/unit/summary-recovery.test.ts tests/unit/closed-world.test.ts --reporter=dot`:
+  PASS, 4 files and 129 tests.
+- `$env:RFP_XRAY_FIXTURE_DIR='D:\monidhackson\.data\official-fixtures'; pnpm exec vitest run tests/golden/official-fixture-audit.test.ts --reporter=verbose`:
+  PASS, 1 file and 3 tests; Edmonton and CER frozen local evidence and T12
+  capacity/format measurements remain unchanged.
+- `pnpm check`: PASS; ESLint and TypeScript passed, 58 test files passed/4
+  skipped, and 753 tests passed/10 skipped.
+- `pnpm build`: PASS; Next production compilation, TypeScript, 9 Workflow
+  steps, 5 workflows, and all 13 static-generation entries completed.
+- `pnpm test:e2e`: PASS, 14 browser tests passed and 2 credentialed live-storage
+  tests skipped.
+- `git diff --check`: PASS; only Git's Windows LF-to-CRLF notices were emitted.
+- Scoped changed-content credential-pattern scan: PASS, zero suspicious secret
+  values.
+
+### Confirmed, inferred, unknown, and next gate
+
+- Confirmed: a verified halo context can no longer substitute for the unique
+  owner core in any Claim, Requirement, Risk, or Evaluation citation binding;
+  the shared `exactOccurrences` path covers all four collections.
+- Confirmed: owner uncertainty suppresses lineage, publication, and Q&A for the
+  affected record without fabricating a record-level package veto. Independent
+  source-ledger incompleteness still keeps the submission summary null.
+- Confirmed: all prior T11/T12 local gates, unfamiliar-channel behavior, mixed
+  fail-closed behavior, provider call count, zero-retry rule, costs, and
+  deadlines remain green or unchanged.
+- Unknown: post-revision provider behavior and production Edmonton audit values
+  remain unproven because deployment and network/paid calls were forbidden.
+- QA10 must independently review Revision 1. Deployment remains blocked until
+  the Reviewer returns `PASS` with P0=0 and P1=0.
+
+### Proposed long-term memory
+
+None. This is a project-specific citation-ownership correction.

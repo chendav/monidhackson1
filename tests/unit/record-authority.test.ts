@@ -15,6 +15,7 @@ import {
   discoverSubmissionCandidateLedger,
   verifySubmissionAdjudication,
   type SubmissionBatchBinding,
+  type SubmissionCandidate,
   type SubmissionRelationDecision
 } from "@/lib/analysis/submission-channel";
 import { sha256Hex } from "@/lib/crypto";
@@ -85,11 +86,48 @@ function artifact(pages: string[], relationForPage: (page: number, text: string)
       candidate_id: candidate.candidate_id,
       document_sha256: candidate.document_sha256,
       pdf_page_1based: candidate.pdf_page_1based,
+      coverage: "complete" as const,
       relations: relationForPage(candidate.pdf_page_1based, candidate.source_window)
     }))
   };
   const submission = verifySubmissionAdjudication({
     ledger, bindings: [binding], responses: [response], packingComplete: true
+  });
+  return { source, ledger, binding, submission };
+}
+
+function artifactByCandidate(
+  pages: string[],
+  decide: (candidate: SubmissionCandidate) => {
+    coverage: "complete" | "uncertain";
+    relations: SubmissionRelationDecision[];
+  }
+) {
+  const source = document(pages);
+  const ledger = discoverSubmissionCandidateLedger([source]);
+  const binding: SubmissionBatchBinding = {
+    batch_id: sha256Hex("record-authority-owned-core-batch"),
+    ledger_digest: ledger.ledger_digest,
+    ordered_candidate_ids: ledger.candidates.map((candidate) => candidate.candidate_id),
+    ordered_source_fragment_ids: ["fragment"],
+    prompt_injection_tainted: false
+  };
+  const submission = verifySubmissionAdjudication({
+    ledger,
+    bindings: [binding],
+    responses: [{
+      batch_id: binding.batch_id,
+      ledger_digest: binding.ledger_digest,
+      ordered_candidate_ids: [...binding.ordered_candidate_ids],
+      ordered_source_fragment_ids: [...binding.ordered_source_fragment_ids],
+      coverage_units: ledger.candidates.map((candidate) => ({
+        candidate_id: candidate.candidate_id,
+        document_sha256: candidate.document_sha256,
+        pdf_page_1based: candidate.pdf_page_1based,
+        ...decide(candidate)
+      }))
+    }],
+    packingComplete: true
   });
   return { source, ledger, binding, submission };
 }
@@ -1282,7 +1320,168 @@ describe("T9 source-ledger package authority", () => {
     expect(result.summary.submission_method).toBeNull();
   });
 
-  it("covers every PDF.js page with complete overlapping 3200-UTF16 windows", () => {
+  it("does not let a complete halo bypass an uncertain midpoint owner", () => {
+    const secureDrop = "Bids must be lodged through SecureDrop.";
+    const start = 2_685;
+    const page = `${"x".repeat(start)}${secureDrop}${"y".repeat(2_500)}`;
+    const state = artifactByCandidate([page], (candidate) => ({
+      coverage: candidate.core_start_utf16 === 2_700 ? "uncertain" : "complete",
+      relations: []
+    }));
+    const enclosing = state.ledger.candidates.filter((candidate) =>
+      start >= candidate.source_start_utf16 && start + secureDrop.length <= candidate.source_end_utf16
+    );
+    expect(enclosing).toHaveLength(2);
+    expect(enclosing.find((candidate) => candidate.core_start_utf16 === 0)).toBeDefined();
+    expect(enclosing.find((candidate) => candidate.core_start_utf16 === 2_700)).toBeDefined();
+    expect(state.submission).toMatchObject({
+      complete: false,
+      unresolved_reasons: ["semantic_uncertainty"]
+    });
+
+    const analysis = draft({
+      requirements: [{
+        id: "halo-securedrop", topic: "payment", category: "financial",
+        text: secureDrop, evidence_needed: null, consequence: null,
+        document_sha256: sha, amendment_number: null, effect: "add",
+        citations: [citation(secureDrop)]
+      }]
+    });
+    const authority = verifyRecordAuthorities({
+      batches: [{
+        binding: state.binding,
+        draft: analysis,
+        authority: RecordAuthorityEnvelopeSchema.parse({ v: 1, r: [["q", 0, "n"]] })
+      }],
+      ledger: state.ledger,
+      submission: state.submission,
+      documents: [state.source],
+      mergedDraft: analysis
+    });
+    expect(authority).toMatchObject({ complete: true, package_veto: false });
+    expect(authority.records[0]).toMatchObject({
+      source_binding: "coverage_gap",
+      semantic_crosscheck: "unknown",
+      publication: "discarded",
+      relevance: "n"
+    });
+    expect(materializedModelOriginKeysForRecord(
+      new Map(authority.records.map((record) => [`${record.kind}:${record.merged_record_id}`, record])),
+      { c: new Set(), q: new Set(), r: new Set(), e: new Set() },
+      "q",
+      "halo-securedrop"
+    )).toEqual([]);
+    const result = materializeAnalysis({
+      draft: analysis,
+      documents: [state.source],
+      manifests: [manifest(1)],
+      costs: [],
+      submissionAdjudication: state.submission,
+      recordAuthority: authority,
+      expiresAt: new Date("2026-09-04T00:00:00.000Z")
+    }).result;
+    expect(result.summary.submission_method).toBeNull();
+    expect(result.requirements.some((requirement) => requirement.id === "halo-securedrop"))
+      .toBe(false);
+    expect(answerFromPersistedEvidence("Must bids use SecureDrop?", result).answerability)
+      .toBe("not_found");
+  });
+
+  it("publishes an exact unfamiliar-channel record only through its complete owner core", () => {
+    const secureDrop = "Bids must be lodged through SecureDrop.";
+    const start = 2_685;
+    const page = `${"x".repeat(start)}${secureDrop}${"y".repeat(2_500)}`;
+    const state = artifactByCandidate([page], (candidate) => ({
+      coverage: "complete",
+      relations: candidate.core_start_utf16 === 2_700 ? [{
+        relation_start_utf16: start,
+        relation_end_utf16: start + secureDrop.length,
+        subject_scope: "whole_bid",
+        modality: "required",
+        channel: "portal",
+        condition_start_utf16: null,
+        condition_end_utf16: null,
+        confidence: 0.99
+      }] : []
+    }));
+    expect(state.submission).toMatchObject({ complete: true });
+    const analysis = draft({
+      summary: { ...draft().summary, submission_method: "Portal" },
+      requirements: [{
+        id: "owner-securedrop", topic: "submission", category: "submission",
+        text: secureDrop, evidence_needed: null, consequence: null,
+        document_sha256: sha, amendment_number: null, effect: "add",
+        citations: [citation(secureDrop)]
+      }]
+    });
+    const authority = verifyRecordAuthorities({
+      batches: [{
+        binding: state.binding,
+        draft: analysis,
+        authority: RecordAuthorityEnvelopeSchema.parse({ v: 1, r: [["q", 0, "s"]] })
+      }],
+      ledger: state.ledger,
+      submission: state.submission,
+      documents: [state.source],
+      mergedDraft: analysis
+    });
+    expect(authority).toMatchObject({ complete: true, package_veto: false });
+    expect(authority.records[0]).toMatchObject({
+      source_binding: "exact_bound",
+      semantic_crosscheck: "consistent",
+      publication: "verified",
+      relevance: "s"
+    });
+    const result = materializeAnalysis({
+      draft: analysis,
+      documents: [state.source],
+      manifests: [manifest(1)],
+      costs: [],
+      submissionAdjudication: state.submission,
+      recordAuthority: authority,
+      expiresAt: new Date("2026-09-04T00:00:00.000Z")
+    }).result;
+    expect(result.summary.submission_method).toBe("Portal");
+    expect(result.requirements.some((requirement) => requirement.id === "owner-securedrop"))
+      .toBe(true);
+  });
+
+  it("binds exact non-submission citations at both page edges to their owner cores", () => {
+    const atStart = "Payment begins on acceptance.";
+    const atEnd = "Payment closes after final audit.";
+    const page = `${atStart}${"x".repeat(5_500)}${atEnd}`;
+    const state = artifactByCandidate([page], () => ({ coverage: "complete", relations: [] }));
+    const analysis = draft({
+      requirements: [atStart, atEnd].map((text, index) => ({
+        id: `edge-${index}`, topic: "payment", category: "financial" as const,
+        text, evidence_needed: null, consequence: null, document_sha256: sha,
+        amendment_number: null, effect: "add" as const, citations: [citation(text)]
+      }))
+    });
+    const authority = verifyRecordAuthorities({
+      batches: [{
+        binding: state.binding,
+        draft: analysis,
+        authority: RecordAuthorityEnvelopeSchema.parse({
+          v: 1,
+          r: [["q", 0, "n"], ["q", 1, "n"]]
+        })
+      }],
+      ledger: state.ledger,
+      submission: state.submission,
+      documents: [state.source],
+      mergedDraft: analysis
+    });
+    expect(authority.records).toHaveLength(2);
+    expect(authority.records.every((record) => record.source_binding === "exact_bound" &&
+      record.semantic_crosscheck === "consistent" && record.publication === "verified"))
+      .toBe(true);
+    expect(authority.records.every((record) =>
+      record.contributing_origin_record_keys.length === 1
+    )).toBe(true);
+  });
+
+  it("covers every PDF.js page with gapless cores and bounded overlapping context", () => {
     const pages = ["a".repeat(7_001), "", "b".repeat(3_201)];
     const ledger = discoverSubmissionCandidateLedger([document(pages)]);
     expect(ledger.expected_page_count).toBe(3);
@@ -1290,9 +1489,13 @@ describe("T9 source-ledger package authority", () => {
     for (const [pageIndex, pageText] of pages.entries()) {
       const windows = ledger.candidates.filter((candidate) =>
         candidate.pdf_page_1based === pageIndex + 1
-      ).toSorted((left, right) => left.source_start_utf16 - right.source_start_utf16);
+      ).toSorted((left, right) => left.core_start_utf16 - right.core_start_utf16);
       expect(windows[0]?.source_start_utf16).toBe(0);
       expect(windows.at(-1)?.source_end_utf16).toBe(pageText.length);
+      expect(windows[0]?.core_start_utf16).toBe(0);
+      expect(windows.at(-1)?.core_end_utf16).toBe(pageText.length);
+      expect(windows.every((window, index) => index === 0 ||
+        window.core_start_utf16 === windows[index - 1]!.core_end_utf16)).toBe(true);
       expect(windows.every((window, index) => index === 0 ||
         window.source_start_utf16 <= windows[index - 1]!.source_end_utf16)).toBe(true);
     }

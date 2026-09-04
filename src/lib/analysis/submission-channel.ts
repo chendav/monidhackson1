@@ -2,9 +2,11 @@ import { z } from "zod";
 import { sha256Hex, stableJson } from "@/lib/crypto";
 import type { CitationDocument } from "@/lib/evidence/citations";
 
-export const SUBMISSION_LEDGER_VERSION = "submission-ledger-v1" as const;
+export const SUBMISSION_LEDGER_VERSION = "submission-ledger-v2" as const;
 export const SUBMISSION_WINDOW_UTF16 = 3_200;
-export const SUBMISSION_WINDOW_OVERLAP_UTF16 = 400;
+export const SUBMISSION_CORE_UTF16 = 2_700;
+export const SUBMISSION_CONTEXT_HALO_UTF16 = 250;
+export const SUBMISSION_WINDOW_OVERLAP_UTF16 = SUBMISSION_CONTEXT_HALO_UTF16 * 2;
 export const MAX_SUBMISSION_COVERAGE_UNITS = 160;
 export const MAX_SUBMISSION_RELATIONS_PER_UNIT = 10;
 export const MAX_SUBMISSION_QUOTE_UTF16 = 500;
@@ -44,6 +46,8 @@ export interface SubmissionCandidate {
   section: string | null;
   source_start_utf16: number;
   source_end_utf16: number;
+  core_start_utf16: number;
+  core_end_utf16: number;
   source_window: string;
   channel_hint: SubmissionChannelHint;
   relation_capacity: number;
@@ -89,6 +93,7 @@ export const SubmissionCoverageDecisionSchema = z.object({
   candidate_id: z.string().min(1).max(100),
   document_sha256: z.string().regex(/^[a-f0-9]{64}$/),
   pdf_page_1based: z.number().int().positive(),
+  coverage: z.enum(["complete", "uncertain"]),
   relations: z.array(SubmissionRelationDecisionSchema).max(MAX_SUBMISSION_RELATIONS_PER_UNIT)
 });
 
@@ -117,7 +122,8 @@ export const SUBMISSION_UNRESOLVED_REASON_KEYS = [
   "duplicate_batch", "unknown_batch", "ledger_digest_mismatch", "batch_manifest_mismatch",
   "missing_candidate", "duplicate_candidate", "unknown_candidate", "sha_mismatch",
   "page_mismatch", "channel_mismatch", "offset_mismatch", "quote_too_long",
-  "condition_mismatch", "low_confidence", "semantic_uncertainty", "overlap_disagreement",
+  "condition_mismatch", "ownership_mismatch", "low_confidence", "semantic_uncertainty",
+  "overlap_disagreement",
   "prompt_injection", "draft_disagreement"
 ] as const;
 
@@ -265,18 +271,33 @@ function stableDocumentOrder(
   return left.index.documentSha256.localeCompare(right.index.documentSha256);
 }
 
-function pageWindows(length: number) {
-  if (length === 0) return [{ start: 0, end: 0 }];
-  const stride = SUBMISSION_WINDOW_UTF16 - SUBMISSION_WINDOW_OVERLAP_UTF16;
-  const finalStart = Math.max(0, length - SUBMISSION_WINDOW_UTF16);
-  const starts = [0];
-  while (starts.at(-1)! < finalStart) {
-    starts.push(Math.min(finalStart, starts.at(-1)! + stride));
+function pageOwnershipCores(length: number) {
+  if (length === 0) {
+    return [{ coreStart: 0, coreEnd: 0, contextStart: 0, contextEnd: 0 }];
   }
-  return starts.map((start) => ({
-    start,
-    end: Math.min(length, start + SUBMISSION_WINDOW_UTF16)
-  }));
+  const cores: Array<{
+    coreStart: number;
+    coreEnd: number;
+    contextStart: number;
+    contextEnd: number;
+  }> = [];
+  for (let coreStart = 0; coreStart < length; coreStart += SUBMISSION_CORE_UTF16) {
+    const coreEnd = Math.min(length, coreStart + SUBMISSION_CORE_UTF16);
+    cores.push({
+      coreStart,
+      coreEnd,
+      contextStart: Math.max(0, coreStart - SUBMISSION_CONTEXT_HALO_UTF16),
+      contextEnd: Math.min(length, coreEnd + SUBMISSION_CONTEXT_HALO_UTF16)
+    });
+  }
+  return cores;
+}
+
+function spanMidpoint(start: number, end: number) {
+  const length = end - start;
+  if (!Number.isSafeInteger(length) || length < 1) return null;
+  const midpoint = start + Math.floor((length - 1) / 2);
+  return Number.isSafeInteger(midpoint) ? midpoint : null;
 }
 
 function sectionAt(pageText: string, offset: number) {
@@ -300,6 +321,8 @@ function candidateIdentity(candidate: Omit<SubmissionCandidate, "candidate_id">)
     page_text_sha256: candidate.page_text_sha256,
     source_start_utf16: candidate.source_start_utf16,
     source_end_utf16: candidate.source_end_utf16,
+    core_start_utf16: candidate.core_start_utf16,
+    core_end_utf16: candidate.core_end_utf16,
     channel_hint: candidate.channel_hint,
     relation_capacity: candidate.relation_capacity,
     focus_occurrence_id: candidate.focus_occurrence?.occurrence_id ?? null,
@@ -324,6 +347,8 @@ function redactedLedgerIdentity(candidate: SubmissionCandidate) {
     section: candidate.section,
     source_start_utf16: candidate.source_start_utf16,
     source_end_utf16: candidate.source_end_utf16,
+    core_start_utf16: candidate.core_start_utf16,
+    core_end_utf16: candidate.core_end_utf16,
     channel_hint: candidate.channel_hint,
     relation_capacity: candidate.relation_capacity,
     focus_occurrence_id: candidate.focus_occurrence?.occurrence_id ?? null,
@@ -371,24 +396,35 @@ export function discoverSubmissionCandidateLedger(
           mention_end_utf16: occurrence.mention_end_utf16
         })).slice(0, 32)
       }));
-      const windows = pageWindows(page.text.length);
-      if (occurrences.some((occurrence) => !windows.some((window) =>
-        occurrence.mention_start_utf16 >= window.start &&
-        occurrence.mention_end_utf16 <= window.end
+      const cores = pageOwnershipCores(page.text.length);
+      if (occurrences.some((occurrence) => !cores.some((core) => {
+        const midpoint = spanMidpoint(
+          occurrence.mention_start_utf16,
+          occurrence.mention_end_utf16
+        );
+        return midpoint !== null && midpoint >= core.coreStart && midpoint < core.coreEnd &&
+          occurrence.mention_start_utf16 >= core.contextStart &&
+          occurrence.mention_end_utf16 <= core.contextEnd;
+      }
       ))) {
         occurrenceCoverageComplete = false;
       }
       if (!countedPages.has(page.pdfPage1Based) && page.pdfPage1Based >= 1 &&
-        page.pdfPage1Based <= document.index.pagesTotal && windows.length > 0 &&
-        windows[0]?.start === 0 && windows.at(-1)?.end === page.text.length) {
+        page.pdfPage1Based <= document.index.pagesTotal && cores.length > 0 &&
+        cores[0]?.coreStart === 0 && cores.at(-1)?.coreEnd === page.text.length &&
+        cores.every((core, index) => index === 0 ||
+          cores[index - 1]!.coreEnd === core.coreStart)) {
         coveredPageCount += 1;
         countedPages.add(page.pdfPage1Based);
       }
-      for (const window of windows) {
-        const visibleOccurrences = occurrences.filter((occurrence) =>
-          occurrence.mention_start_utf16 >= window.start &&
-          occurrence.mention_end_utf16 <= window.end
-        );
+      for (const core of cores) {
+        const ownedOccurrences = occurrences.filter((occurrence) => {
+          const midpoint = spanMidpoint(
+            occurrence.mention_start_utf16,
+            occurrence.mention_end_utf16
+          );
+          return midpoint !== null && midpoint >= core.coreStart && midpoint < core.coreEnd;
+        });
         const provisional: Omit<SubmissionCandidate, "candidate_id"> = {
           document_sha256: document.index.documentSha256,
           role: document.role,
@@ -396,19 +432,20 @@ export function discoverSubmissionCandidateLedger(
           pdf_page_1based: page.pdfPage1Based,
           printed_page_label: page.printedPageLabel,
           page_text_sha256: pageTextSha256,
-          section: sectionAt(page.text, window.start),
-          source_start_utf16: window.start,
-          source_end_utf16: window.end,
-          source_window: page.text.slice(window.start, window.end),
-          channel_hint: visibleOccurrences.length === 1
-            ? visibleOccurrences[0]!.channel_hint
+          section: sectionAt(page.text, core.coreStart),
+          source_start_utf16: core.contextStart,
+          source_end_utf16: core.contextEnd,
+          core_start_utf16: core.coreStart,
+          core_end_utf16: core.coreEnd,
+          source_window: page.text.slice(core.contextStart, core.contextEnd),
+          channel_hint: ownedOccurrences.length === 1
+            ? ownedOccurrences[0]!.channel_hint
             : "unspecified",
-          relation_capacity: Math.min(
-            MAX_SUBMISSION_RELATIONS_PER_UNIT,
-            Math.max(1, visibleOccurrences.length)
+          relation_capacity: page.text.length === 0 ? 0 : Math.min(
+            MAX_SUBMISSION_RELATIONS_PER_UNIT, Math.max(1, ownedOccurrences.length)
           ),
           focus_occurrence: null,
-          occurrences: visibleOccurrences
+          occurrences: ownedOccurrences
         };
         candidates.push({
           ...provisional,
@@ -427,7 +464,7 @@ export function discoverSubmissionCandidateLedger(
       if (amendment !== 0) return amendment;
       return left.document_sha256.localeCompare(right.document_sha256) ||
         left.pdf_page_1based - right.pdf_page_1based ||
-        left.source_start_utf16 - right.source_start_utf16 ||
+        left.core_start_utf16 - right.core_start_utf16 ||
         (left.focus_occurrence?.mention_start_utf16 ?? -1) -
           (right.focus_occurrence?.mention_start_utf16 ?? -1) ||
         left.candidate_id.localeCompare(right.candidate_id);
@@ -508,16 +545,6 @@ export function unresolvedSubmissionAdjudication(
   return unresolvedArtifact(ledger, reason, expectedSourceFragments);
 }
 
-function relationSignature(relation: RedactedSubmissionRelation) {
-  return stableJson({
-    subject_scope: relation.subject_scope,
-    modality: relation.modality,
-    channel: relation.channel,
-    has_condition_or_scope: relation.has_condition_or_scope,
-    condition_or_scope_sha256: relation.condition_or_scope_sha256
-  });
-}
-
 function pageSlice(candidate: SubmissionCandidate, start: number, end: number) {
   if (start < candidate.source_start_utf16 || end > candidate.source_end_utf16 || end <= start) {
     return null;
@@ -535,6 +562,11 @@ function validateRelation(
   const quote = pageSlice(candidate, decision.relation_start_utf16, decision.relation_end_utf16);
   if (quote === null || quote.length === 0) return { relation: null, reason: "offset_mismatch" };
   if (quote.length > MAX_SUBMISSION_QUOTE_UTF16) return { relation: null, reason: "quote_too_long" };
+  const midpoint = spanMidpoint(decision.relation_start_utf16, decision.relation_end_utf16);
+  if (midpoint === null || midpoint < candidate.core_start_utf16 ||
+    midpoint >= candidate.core_end_utf16) {
+    return { relation: null, reason: "ownership_mismatch" };
+  }
   if (decision.confidence < MIN_SUBMISSION_CONFIDENCE) return { relation: null, reason: "low_confidence" };
   const bothConditionOffsetsNull = decision.condition_start_utf16 === null &&
     decision.condition_end_utf16 === null;
@@ -709,6 +741,7 @@ export function verifySubmissionAdjudication(input: {
       const coverage = decisions[0];
       if (!reason && coverage.document_sha256 !== candidate.document_sha256) reason = "sha_mismatch";
       if (!reason && coverage.pdf_page_1based !== candidate.pdf_page_1based) reason = "page_mismatch";
+      if (!reason && coverage.coverage === "uncertain") reason = "semantic_uncertainty";
       const relations: RedactedSubmissionRelation[] = [];
       if (!reason) {
         if (coverage.relations.length > candidate.relation_capacity) reason = "capacity";
@@ -721,6 +754,17 @@ export function verifySubmissionAdjudication(input: {
             break;
           }
           relations.push(validated.relation!);
+        }
+      }
+      if (!reason) {
+        const spans = new Set<string>();
+        for (const relation of relations) {
+          const span = `${relation.relation_start_utf16}:${relation.relation_end_utf16}`;
+          if (spans.has(span)) {
+            reason = "overlap_disagreement";
+            break;
+          }
+          spans.add(span);
         }
       }
       records.set(candidate.candidate_id, {
@@ -748,47 +792,6 @@ export function verifySubmissionAdjudication(input: {
       relations: []
     });
     globalReasons.push("missing_candidate");
-  }
-
-  // Every exact relation that falls wholly inside more than one overlapping
-  // all-page window must be emitted exactly once and identically by each such
-  // window. This check does not depend on a channel dictionary, so unfamiliar
-  // names receive the same consistency proof as lexically discovered hints.
-  const checkedRelationSpans = new Set<string>();
-  for (const relation of [...records.values()].flatMap((record) => record.relations)) {
-    const spanKey = stableJson({
-      document_sha256: relation.document_sha256,
-      pdf_page_1based: relation.pdf_page_1based,
-      relation_start_utf16: relation.relation_start_utf16,
-      relation_end_utf16: relation.relation_end_utf16
-    });
-    if (checkedRelationSpans.has(spanKey)) continue;
-    checkedRelationSpans.add(spanKey);
-    const enclosingCandidates = input.ledger.candidates.filter((candidate) =>
-      candidate.document_sha256 === relation.document_sha256 &&
-      candidate.pdf_page_1based === relation.pdf_page_1based &&
-      candidate.source_start_utf16 <= relation.relation_start_utf16 &&
-      candidate.source_end_utf16 >= relation.relation_end_utf16
-    );
-    const matches = enclosingCandidates.map((candidate) =>
-      records.get(candidate.candidate_id)?.relations.filter((candidateRelation) =>
-        candidateRelation.relation_start_utf16 === relation.relation_start_utf16 &&
-        candidateRelation.relation_end_utf16 === relation.relation_end_utf16
-      ) ?? []
-    );
-    const signatureSets = matches.map((values) => stableJson(
-      [...new Set(values.map(relationSignature))].toSorted()
-    ));
-    if (matches.every((values) => values.length > 0) &&
-      new Set(signatureSets).size === 1) continue;
-    globalReasons.push("overlap_disagreement");
-    for (const candidate of enclosingCandidates) {
-      const record = records.get(candidate.candidate_id);
-      if (!record) continue;
-      record.disposition = "unresolved";
-      record.reason = "overlap_disagreement";
-      record.relations = [];
-    }
   }
 
   const orderedRecords = input.ledger.candidates.map((candidate) => records.get(candidate.candidate_id)!);

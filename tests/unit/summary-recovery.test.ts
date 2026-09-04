@@ -690,7 +690,7 @@ describe("source-closed submission-method recovery", () => {
     expect(result.claims.some((claim) => claim.claim_type === "derived")).toBe(false);
   });
 
-  it("disables package-wide recovery when one verified citation affirms several channels", () => {
+  it("fails closed when one exact source span is classified as several channels", () => {
     const ambiguous = "Bids must be submitted by email or through the procurement portal.";
     const email = "The bidder must send its bid to the e-mail address on the cover page.";
     const result = materialize(submissionDraft([
@@ -703,7 +703,7 @@ describe("source-closed submission-method recovery", () => {
     ]);
 
     expect(result.requirements.filter((requirement) => requirement.status === "active"))
-      .toHaveLength(2);
+      .toHaveLength(0);
     expect(result.summary.submission_method).toBeNull();
     expect(result.claims.some((claim) => claim.claim_type === "derived")).toBe(false);
   });

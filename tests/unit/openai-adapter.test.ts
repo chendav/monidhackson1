@@ -57,7 +57,7 @@ function envelope(
   const format = (request.text as { format: { schema: { properties: Record<string, unknown> } } }).format;
   const submission = format.schema.properties.submission_adjudication as {
     properties: {
-      v: { const: 3 };
+      v: { const: 4 };
       b: { const: string };
       l: { const: string };
       r: { required: string[] };
@@ -77,7 +77,10 @@ function envelope(
       l: submission.properties.l.const,
       r: Object.fromEntries(submission.properties.r.required.map((candidateId) => [
         candidateId,
-        relationsByCandidate[candidateId] ?? []
+        {
+          coverage: "complete" as const,
+          relations: relationsByCandidate[candidateId] ?? []
+        }
       ]))
     }
   };
@@ -283,6 +286,73 @@ describe("OpenAI Responses structured output adapter", () => {
       .toMatchObject({ status: "unique", channel: "email" });
   });
 
+  it("converts v4 context-relative offsets to absolute page offsets for the owning core", async () => {
+    const clause = "Bids must be submitted by email.";
+    const clauseStart = 2_800;
+    const condition = "by email";
+    const conditionStart = clauseStart + clause.indexOf(condition);
+    const text = `${"x".repeat(clauseStart)}${clause}${"y".repeat(500)}`;
+    const index = {
+      documentSha256: sourceDocument.document_sha256,
+      representationSha256: sha256Hex(text),
+      pagesTotal: 1,
+      pages: [{
+        pdfPage1Based: 1,
+        printedPageLabel: "1",
+        text,
+        normalizedText: text.toLowerCase(),
+        representationSha256: sha256Hex(text)
+      }],
+      chunks: sourceDocument.evidence_chunks,
+      embeddedJavaScriptDetected: false,
+      indexVersion: "pdfjs-1based-v1" as const
+    };
+    const ledger = discoverSubmissionCandidateLedger([{
+      name: "source.pdf", sourceUrl: null, index, role: "base", amendmentNumber: null
+    }]);
+    const owner = ledger.candidates.find((candidate) =>
+      clauseStart >= candidate.core_start_utf16 && clauseStart < candidate.core_end_utf16
+    )!;
+    expect(owner.source_start_utf16).toBeGreaterThan(0);
+    const client = fakeClient({
+      parse: async (request) => {
+        const output = envelope(request);
+        const unit = output.submission_adjudication.r[owner.candidate_id];
+        if (unit) {
+          unit.relations = [{
+            a: clauseStart - owner.source_start_utf16,
+            n: clause.length,
+            s: "whole_bid",
+            m: "required",
+            c: "email",
+            x: conditionStart - owner.source_start_utf16,
+            y: conditionStart - owner.source_start_utf16 + condition.length,
+            f: 0.99
+          }];
+        }
+        return {
+          id: "response-relative-offset",
+          output_parsed: output,
+          usage: { input_tokens: 100, output_tokens: 100 }
+        };
+      }
+    });
+    const result = await new OpenAIResponsesAdapter(testConfig(), client).extract([{
+      ...sourceDocument, parsed_markdown: text, submission_ledger: ledger
+    }], noopPaidCallbacks);
+    expect(result.submissionAdjudication).toMatchObject({ complete: true });
+    expect(resolveVerifiedSubmissionChannel(result.submissionAdjudication)).toMatchObject({
+      status: "unique",
+      channel: "email",
+      decisive: {
+        relation_start_utf16: clauseStart,
+        relation_end_utf16: clauseStart + clause.length,
+        has_condition_or_scope: true,
+        condition_or_scope_sha256: sha256Hex(condition)
+      }
+    });
+  });
+
   it("builds a strict batch-literal candidate-key schema and rejects missing or extra keys", () => {
     const text = "Bids must be submitted by email.";
     const ledger = discoverSubmissionCandidateLedger([{
@@ -317,29 +387,36 @@ describe("OpenAI Responses structured output adapter", () => {
     const valid = envelope({ text: { format } });
     expect(schema.safeParse(valid).success).toBe(true);
     const candidateId = binding.ordered_candidate_ids[0]!;
+    const uncertain = structuredClone(valid);
+    (uncertain.submission_adjudication.r[candidateId] as { coverage: string }).coverage = "uncertain";
+    expect(schema.safeParse(uncertain).success).toBe(true);
+    const missingCoverage = structuredClone(valid);
+    delete (missingCoverage.submission_adjudication.r[candidateId] as
+      unknown as Record<string, unknown>).coverage;
+    expect(schema.safeParse(missingCoverage).success).toBe(false);
     const boundedRelation = {
       a: 0, n: 500, s: "ambiguous" as const, m: "unknown" as const,
       c: "unspecified" as const, x: null, y: null, f: 0.9
     };
-    valid.submission_adjudication.r[candidateId] = [boundedRelation];
+    valid.submission_adjudication.r[candidateId].relations = [boundedRelation];
     expect(schema.safeParse(valid).success).toBe(true);
     const zeroLength = structuredClone(valid);
-    (zeroLength.submission_adjudication.r[candidateId]![0] as { n: number }).n = 0;
+    (zeroLength.submission_adjudication.r[candidateId]!.relations[0] as { n: number }).n = 0;
     expect(schema.safeParse(zeroLength).success).toBe(false);
     const tooLong = structuredClone(valid);
-    (tooLong.submission_adjudication.r[candidateId]![0] as { n: number }).n = 501;
+    (tooLong.submission_adjudication.r[candidateId]!.relations[0] as { n: number }).n = 501;
     expect(schema.safeParse(tooLong).success).toBe(false);
     const lowConfidence = structuredClone(valid);
-    (lowConfidence.submission_adjudication.r[candidateId]![0] as { f: number }).f = 0.899;
+    (lowConfidence.submission_adjudication.r[candidateId]!.relations[0] as { f: number }).f = 0.899;
     expect(schema.safeParse(lowConfidence).success).toBe(false);
     expect(schema.safeParse({ ...valid, submission_adjudication: {
-      ...valid.submission_adjudication, v: 2
+      ...valid.submission_adjudication, v: 3
     } }).success).toBe(false);
     const missing = structuredClone(valid);
     delete missing.submission_adjudication.r[binding.ordered_candidate_ids[0]!];
     expect(schema.safeParse(missing).success).toBe(false);
     const extra = structuredClone(valid);
-    extra.submission_adjudication.r.unknown = [];
+    extra.submission_adjudication.r.unknown = { coverage: "complete", relations: [] };
     expect(schema.safeParse(extra).success).toBe(false);
     expect(schema.safeParse({ ...valid, submission_adjudication: {
       ...valid.submission_adjudication, b: "0".repeat(64)
@@ -376,7 +453,7 @@ describe("OpenAI Responses structured output adapter", () => {
       parse: async (request) => {
         const output = envelope(request);
         const candidateId = Object.keys(output.submission_adjudication.r)[0]!;
-        output.submission_adjudication.r[candidateId] = [{
+        output.submission_adjudication.r[candidateId].relations = [{
           a: 0, n: text.length, s: "ambiguous", m: "unknown", c: "unspecified",
           x: null, y: null, f: 0.9
         }];
@@ -439,7 +516,7 @@ describe("OpenAI Responses structured output adapter", () => {
         overflowCalls += 1;
         const malformed = envelope(request);
         const firstCandidate = Object.keys(malformed.submission_adjudication.r)[0]!;
-        malformed.submission_adjudication.r[firstCandidate] = [{
+        malformed.submission_adjudication.r[firstCandidate].relations = [{
           a: Number.MAX_SAFE_INTEGER - 100, n: 500,
           s: "ambiguous", m: "unknown", c: "unspecified",
           x: null, y: null, f: 0.9

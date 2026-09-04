@@ -108,6 +108,7 @@ function responseFor(
       candidate_id: candidate.candidate_id,
       document_sha256: candidate.document_sha256,
       pdf_page_1based: candidate.pdf_page_1based,
+      coverage: "complete" as const,
       relations: decide(candidate)
     }))
   };
@@ -428,20 +429,108 @@ describe("agent-semantic submission adjudication", () => {
     expect(duplicateArtifact.unresolved_reasons).toContain("invalid_amendment_metadata");
   });
 
-  it("turns overlapping-window semantic disagreement into unresolved", () => {
-    const prefix = `${"x".repeat(2_950)}. `;
-    const text = `${prefix}Bids must be submitted by email.${" y".repeat(300)}`;
-    const ledger = discoverSubmissionCandidateLedger([document([text])]);
-    expect(ledger.candidates.filter((candidate) => candidate.occurrences.length > 0).length)
-      .toBeGreaterThanOrEqual(2);
+  it("partitions long pages into gapless exclusive cores with deterministic bounded halos", () => {
+    const ledger = discoverSubmissionCandidateLedger([document(["x".repeat(6_001)])]);
+    expect(ledger.candidates.map((candidate) => ({
+      core: [candidate.core_start_utf16, candidate.core_end_utf16],
+      context: [candidate.source_start_utf16, candidate.source_end_utf16]
+    }))).toEqual([
+      { core: [0, 2_700], context: [0, 2_950] },
+      { core: [2_700, 5_400], context: [2_450, 5_650] },
+      { core: [5_400, 6_001], context: [5_150, 6_001] }
+    ]);
+    for (let offset = 0; offset < 6_001; offset += 1) {
+      expect(ledger.candidates.filter((candidate) =>
+        offset >= candidate.core_start_utf16 && offset < candidate.core_end_utf16
+      )).toHaveLength(1);
+    }
+    expect(ledger.candidates.every((candidate) =>
+      candidate.source_end_utf16 - candidate.source_start_utf16 <= 3_200
+    )).toBe(true);
+  });
+
+  it.each([
+    [2_699, 2_450, 2_950, 0, 2],
+    [2_700, 2_451, 2_951, 1, 1]
+  ] as const)(
+    "gives a 500-code-unit boundary relation with midpoint %i exactly one owner",
+    (midpoint, start, end, ownerIndex, visibleContextCount) => {
+      const ledger = discoverSubmissionCandidateLedger([document(["x".repeat(5_500)])]);
+      const relation: SubmissionRelationDecision = {
+        relation_start_utf16: start,
+        relation_end_utf16: end,
+        subject_scope: "whole_bid",
+        modality: "required",
+        channel: "email",
+        condition_start_utf16: null,
+        condition_end_utf16: null,
+        confidence: 0.99
+      };
+      const visible = ledger.candidates.filter((candidate) =>
+        start >= candidate.source_start_utf16 && end <= candidate.source_end_utf16
+      );
+      expect(visible).toHaveLength(visibleContextCount);
+      expect(visible.filter((candidate) =>
+        midpoint >= candidate.core_start_utf16 && midpoint < candidate.core_end_utf16
+      )).toHaveLength(1);
+      const artifact = verify(ledger, undefined, (candidate) =>
+        candidate === ledger.candidates[ownerIndex] ? [relation] : []
+      );
+      expect(artifact.complete).toBe(true);
+      expect(artifact.unresolved_reasons).toEqual([]);
+      expect(resolveVerifiedSubmissionChannel(artifact)).toMatchObject({
+        status: "unique", channel: "email"
+      });
+    }
+  );
+
+  it("rejects a relation emitted by a context window that does not own its midpoint", () => {
+    const ledger = discoverSubmissionCandidateLedger([document(["x".repeat(5_500)])]);
+    const relation: SubmissionRelationDecision = {
+      relation_start_utf16: 2_450,
+      relation_end_utf16: 2_950,
+      subject_scope: "whole_bid",
+      modality: "required",
+      channel: "email",
+      condition_start_utf16: null,
+      condition_end_utf16: null,
+      confidence: 0.99
+    };
     const artifact = verify(ledger, undefined, (candidate) =>
-      candidate.occurrences.map((_occurrence, index) => focusedRelation(candidate, {
-        modality: candidate.source_start_utf16 === 0 ? "required" : "permitted"
-      }, index))
+      candidate.core_start_utf16 === 2_700 ? [relation] : []
     );
+    expect(artifact.unresolved_reasons).toContain("ownership_mismatch");
+    expect((createSubmissionAdjudicationAudit(artifact).unresolved_reason_counts as
+      Record<string, number>).ownership_mismatch).toBeGreaterThan(0);
+  });
+
+  it("fails closed when one owner emits conflicting decisions for the same exact span", () => {
+    const text = "Bids must be submitted by email. Contact email.";
+    const ledger = discoverSubmissionCandidateLedger([document([text])]);
+    const artifact = verify(ledger, undefined, (candidate) => {
+      const relation = focusedRelation(candidate);
+      return [relation, { ...relation, modality: "prohibited" }];
+    });
     expect(artifact.unresolved_reasons).toContain("overlap_disagreement");
-    expect(createSubmissionAdjudicationAudit(artifact)
-      .unresolved_reason_counts.overlap_disagreement).toBeGreaterThan(0);
+    expect(resolveVerifiedSubmissionChannel(artifact)).toMatchObject({ status: "unresolved" });
+  });
+
+  it("accepts a complete empty administrative core and rejects explicit core uncertainty", () => {
+    const emptyLedger = discoverSubmissionCandidateLedger([document([""])]);
+    expect(emptyLedger.candidates).toMatchObject([{
+      core_start_utf16: 0,
+      core_end_utf16: 0,
+      source_start_utf16: 0,
+      source_end_utf16: 0,
+      relation_capacity: 0
+    }]);
+    expect(verify(emptyLedger).complete).toBe(true);
+
+    const ledger = discoverSubmissionCandidateLedger([document(["Administrative update."])]);
+    const artifact = verify(ledger, (response) => {
+      response.coverage_units[0]!.coverage = "uncertain";
+    });
+    expect(artifact.unresolved_reasons).toContain("semantic_uncertainty");
     expect(resolveVerifiedSubmissionChannel(artifact)).toMatchObject({ status: "unresolved" });
   });
 

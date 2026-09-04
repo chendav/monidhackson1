@@ -12,7 +12,7 @@ const digest = "a".repeat(64);
 
 function artifact(overrides: Partial<VerifiedSubmissionAdjudication> = {}): VerifiedSubmissionAdjudication {
   return {
-    ledger_version: "submission-ledger-v1",
+    ledger_version: "submission-ledger-v2",
     ledger_digest: digest,
     expected_candidate_count: 1,
     verified_candidate_count: 1,
@@ -63,7 +63,7 @@ describe("submission adjudication private audit", () => {
       new Date("2026-09-04T12:00:00.000Z")
     );
     expect(audit).toMatchObject({
-      version: 1,
+      version: 2,
       expected_candidate_count: 1,
       verified_candidate_count: 1,
       expected_batch_count: 1,
@@ -80,7 +80,7 @@ describe("submission adjudication private audit", () => {
       expect(serialized).not.toContain(forbidden);
     }
     expect(SubmissionAdjudicationAuditSchema.parse(audit)).toEqual(audit);
-    expect(formatSubmissionAdjudicationAudit(runId, audit)).toEqual({ run_id: runId, ...audit });
+    expect(formatSubmissionAdjudicationAudit(runId, audit)).toEqual(audit);
   });
 
   it("records exact fixed unresolved reasons and batch completeness", () => {
@@ -106,6 +106,28 @@ describe("submission adjudication private audit", () => {
     })).toThrow();
   });
 
+  it("strictly reads historical v1 and current v2 without exposing the run ID", () => {
+    const current = createSubmissionAdjudicationAudit(artifact());
+    const historicalReasons = Object.fromEntries(Object.entries(current.unresolved_reason_counts)
+      .filter(([reason]) => reason !== "ownership_mismatch"));
+    const historical = {
+      ...current,
+      version: 1 as const,
+      unresolved_reason_counts: historicalReasons
+    };
+    expect(formatSubmissionAdjudicationAudit(runId, historical)).toEqual(historical);
+    expect(formatSubmissionAdjudicationAudit(runId, current)).toEqual(current);
+    expect(JSON.stringify(formatSubmissionAdjudicationAudit(runId, current)))
+      .not.toContain(runId);
+    expect(() => formatSubmissionAdjudicationAudit(runId, {
+      ...historical,
+      unresolved_reason_counts: {
+        ...historical.unresolved_reason_counts,
+        ownership_mismatch: 0
+      }
+    })).toThrow();
+  });
+
   it("binds the operator query and fails closed for absent rows", async () => {
     let bound: unknown;
     const factory = () => async (_strings: TemplateStringsArray, ...values: unknown[]) => {
@@ -120,5 +142,17 @@ describe("submission adjudication private audit", () => {
       throw new Error("submission_adjudication_audit_not_found");
     }, stderr: (line: string) => stderr.push(line) })).toBe(2);
     expect(stderr).toEqual(["submission_adjudication_audit_not_found"]);
+  });
+
+  it("prints only the strict audit allowlist on a successful operator read", async () => {
+    const audit = createSubmissionAdjudicationAudit(artifact());
+    const stdout: string[] = [];
+    expect(await runCli([runId], {
+      reader: async () => audit,
+      stdout: (line: string) => stdout.push(line)
+    })).toBe(0);
+    expect(stdout).toHaveLength(1);
+    expect(JSON.parse(stdout[0]!)).toEqual(audit);
+    expect(stdout[0]).not.toContain(runId);
   });
 });
