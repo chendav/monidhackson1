@@ -1016,14 +1016,11 @@ export async function processRun(runId: string, dependencies: PipelineDependenci
         : null;
       if (error instanceof ModelBatchError) {
         auditLog("openai_partial_batch_failure", {
-          completed_response_id_sha256: error.completedResponseIds.map(sha256Hex),
-          completed_batches: error.completedResponseIds.length,
+          failure_kind: error.failureKind,
+          failure_phase: "structured_extraction",
+          planned_batches: error.preflightInputTokens.length,
+          completed_batches: error.completedBatches,
           attempted_batches: error.attemptedBatches,
-          completed_input_unit_count: error.completedInputTokens,
-          completed_output_unit_count: error.completedOutputTokens,
-          preflight_input_unit_counts: error.preflightInputTokens,
-          estimated_attempted_input_unit_count: error.estimatedAttemptedInputTokens,
-          estimated_attempted_output_unit_count: error.estimatedAttemptedOutputTokens,
           estimated_attempted_micro_usd: attemptedBatchCost
         });
       }

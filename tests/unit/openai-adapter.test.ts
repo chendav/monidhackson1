@@ -1,4 +1,4 @@
-import OpenAI from "openai";
+import OpenAI, { APIConnectionTimeoutError, RateLimitError } from "openai";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { DraftAnalysis } from "@/lib/analysis/draft";
 import { getConfig } from "@/lib/config";
@@ -285,12 +285,226 @@ describe("OpenAI Responses structured output adapter", () => {
     expect(countRequests).toHaveLength(parseRequests.length);
     expect(events.slice(0, countRequests.length)).toEqual(Array(countRequests.length).fill("count"));
     expect(parseRequests.reduce((sum, request) => sum + Number(request.max_output_tokens), 0))
-      .toBeLessThanOrEqual(50_000);
+      .toBeGreaterThan(50_000);
+    const baselineOutputTokens = Math.floor(50_000 / parseRequests.length);
+    parseRequests.forEach((request, index) => {
+      const priorObservedOutputTokens = index * 100;
+      const laterFloor = (parseRequests.length - index - 1) * baselineOutputTokens;
+      expect(priorObservedOutputTokens + Number(request.max_output_tokens) + laterFloor)
+        .toBe(50_000);
+    });
     const serialized = parseRequests.map((request) => String(request.input)).join("\n");
     expect(new TextEncoder().encode(serialized).byteLength).toBeGreaterThan(500_000);
     expect(serialized.match(/page 300 /g)).toHaveLength(1);
     expect(serialized).not.toContain("page-index-only-marker");
     expect(serialized).not.toContain("must-not-be-duplicated");
+  });
+
+  it("carries unused output tokens forward while preserving the aggregate cap", async () => {
+    const parsedMarkdown = "paid batch text ".repeat(11_000);
+    expect(prepareExtractionInputs([{
+      ...sourceDocument,
+      parsed_markdown: parsedMarkdown
+    }], testConfig())).toHaveLength(4);
+    const observedOutputTokens = [4_009, 8_462, 15_000, 100];
+    const requestedCaps: number[] = [];
+    const dispatchCommitments: number[] = [];
+    const settlementCommitments: number[] = [];
+    let parseIndex = 0;
+    const client = fakeClient({
+      count: async () => ({ input_tokens: 1_000, object: "response.input_tokens" }),
+      parse: async (request) => {
+        requestedCaps.push(Number(request.max_output_tokens));
+        const output = observedOutputTokens[parseIndex] ?? 100;
+        parseIndex += 1;
+        return {
+          id: `response-carry-${parseIndex}`,
+          output_parsed: emptyDraft(),
+          usage: { input_tokens: 1_000, output_tokens: output }
+        };
+      }
+    });
+    const adapter = new OpenAIResponsesAdapter(testConfig(), client);
+    const result = await adapter.extract([{
+      ...sourceDocument,
+      parsed_markdown: parsedMarkdown
+    }], {
+      beforePaidBatchDispatch: async (plan) => {
+        dispatchCommitments.push(plan.remainingMaximumEstimatedCostMicroUsd);
+      },
+      settlePaidBatch: async (settlement) => {
+        settlementCommitments.push(settlement.remainingMaximumEstimatedCostMicroUsd);
+      }
+    });
+
+    expect(requestedCaps).toEqual([12_500, 20_991, 25_029, 22_529]);
+    expect(result.outputTokens).toBe(27_571);
+    let priorObserved = 0;
+    requestedCaps.forEach((cap, index) => {
+      const laterFloor = (requestedCaps.length - index - 1) * 12_500;
+      expect(priorObserved + cap + laterFloor).toBe(50_000);
+      priorObserved += observedOutputTokens[index];
+    });
+    expect(priorObserved).toBeLessThanOrEqual(50_000);
+    expect(settlementCommitments[0]).toBeGreaterThan(dispatchCommitments[0]);
+    expect(settlementCommitments.at(-1)).toBe(0);
+  });
+
+  it("classifies a max-output truncation and never dispatches the next batch", async () => {
+    const parsedMarkdown = "paid batch text ".repeat(11_000);
+    let parseIndex = 0;
+    const settlements: Array<{ status: string; estimatedCostMicroUsd: number }> = [];
+    const client = fakeClient({
+      count: async () => ({ input_tokens: 1_000, object: "response.input_tokens" }),
+      parse: async (request) => {
+        const current = parseIndex;
+        parseIndex += 1;
+        const output = current === 0 ? 4_009 : current === 1 ? 8_462 :
+          Number(request.max_output_tokens);
+        return {
+          id: `response-truncated-${parseIndex}`,
+          status: current === 2 ? "incomplete" : "completed",
+          incomplete_details: current === 2 ? { reason: "max_output_tokens" } : null,
+          output_parsed: current === 2 ? null : emptyDraft(),
+          usage: { input_tokens: 1_000, output_tokens: output }
+        };
+      }
+    });
+    const adapter = new OpenAIResponsesAdapter(testConfig(), client);
+    const failure = await adapter.extract([{
+      ...sourceDocument,
+      parsed_markdown: parsedMarkdown
+    }], {
+      beforePaidBatchDispatch: async () => {},
+      settlePaidBatch: async (settlement) => {
+        settlements.push(settlement);
+      }
+    }).catch((error: unknown) => error);
+
+    expect(parseIndex).toBe(3);
+    expect(settlements.map((item) => item.status)).toEqual(["succeeded", "succeeded", "failed"]);
+    expect(failure).toMatchObject({
+      name: "ModelBatchError",
+      failureKind: "incomplete_max_output",
+      attemptedBatches: 3,
+      completedBatches: 2,
+      completedOutputTokens: 37_500,
+      estimatedAttemptedOutputTokens: 37_500,
+      retryable: false
+    });
+  });
+
+  it("does not lend capacity from a response with invalid usage", async () => {
+    const requestedCaps: number[] = [];
+    const client = fakeClient({
+      count: async () => ({ input_tokens: 1_000, object: "response.input_tokens" }),
+      parse: async (request) => {
+        requestedCaps.push(Number(request.max_output_tokens));
+        return {
+          id: `response-unknown-usage-${requestedCaps.length}`,
+          output_parsed: emptyDraft(),
+          usage: { input_tokens: 1_000, output_tokens: Number.NaN }
+        };
+      }
+    });
+    const adapter = new OpenAIResponsesAdapter(testConfig(), client);
+    const result = await adapter.extract([{
+      ...sourceDocument,
+      parsed_markdown: "paid batch text ".repeat(11_000)
+    }], noopPaidCallbacks);
+
+    expect(requestedCaps).toEqual([12_500, 12_500, 12_500, 12_500]);
+    expect(result.outputTokens).toBeNull();
+  });
+
+  it("settles over-limit reported usage truthfully and blocks every later batch", async () => {
+    let parseCalls = 0;
+    let pendingMaximum = 0;
+    let failedSettlementCost = 0;
+    const client = fakeClient({
+      count: async () => ({ input_tokens: 1_000, object: "response.input_tokens" }),
+      parse: async (request) => {
+        parseCalls += 1;
+        return {
+          id: "response-over-limit-usage",
+          output_parsed: emptyDraft(),
+          usage: {
+            input_tokens: 1_000,
+            output_tokens: Number(request.max_output_tokens) + 1
+          }
+        };
+      }
+    });
+    const adapter = new OpenAIResponsesAdapter(testConfig(), client);
+    const failure = await adapter.extract([{
+      ...sourceDocument,
+      parsed_markdown: "paid batch text ".repeat(11_000)
+    }], {
+      beforePaidBatchDispatch: async (plan) => {
+        pendingMaximum = plan.maximumEstimatedCostMicroUsd;
+      },
+      settlePaidBatch: async (settlement) => {
+        expect(settlement.status).toBe("failed");
+        expect(settlement.remainingMaximumEstimatedCostMicroUsd).toBe(0);
+        failedSettlementCost = settlement.estimatedCostMicroUsd;
+      }
+    }).catch((error: unknown) => error);
+
+    expect(parseCalls).toBe(1);
+    expect(failedSettlementCost).toBeGreaterThan(pendingMaximum);
+    expect(failure).toMatchObject({
+      name: "ModelBatchError",
+      failureKind: "other",
+      attemptedBatches: 1,
+      completedOutputTokens: 12_501,
+      retryable: false
+    });
+  });
+
+  it.each([
+    ["timeout", () => new APIConnectionTimeoutError()],
+    ["rate_limit", () => new RateLimitError(429, {}, "rate limited", new Headers())]
+  ] as const)("classifies the closed provider failure kind %s", async (failureKind, makeError) => {
+    const client = fakeClient({
+      parse: async () => {
+        throw makeError();
+      }
+    });
+    const adapter = new OpenAIResponsesAdapter(testConfig(), client);
+    const failure = await adapter.extract([sourceDocument], noopPaidCallbacks)
+      .catch((error: unknown) => error);
+
+    expect(failure).toMatchObject({
+      name: "ModelBatchError",
+      failureKind,
+      attemptedBatches: 1,
+      retryable: false
+    });
+  });
+
+  it("rejects an output budget smaller than the batch count before preflight or dispatch", async () => {
+    let countCalls = 0;
+    let parseCalls = 0;
+    const client = fakeClient({
+      count: async () => {
+        countCalls += 1;
+        return { input_tokens: 1_000, object: "response.input_tokens" };
+      },
+      parse: async () => {
+        parseCalls += 1;
+        throw new Error("must not dispatch");
+      }
+    });
+    const adapter = new OpenAIResponsesAdapter(testConfig({
+      OPENAI_MAX_OUTPUT_TOKENS: "3"
+    }), client);
+
+    await expect(adapter.extract([{
+      ...sourceDocument,
+      parsed_markdown: "tiny output budget batch text ".repeat(11_000)
+    }], noopPaidCallbacks)).rejects.toMatchObject({ code: "BUDGET_EXCEEDED" });
+    expect(countCalls).toBe(0);
+    expect(parseCalls).toBe(0);
   });
 
   it("rejects an exact-token overage before any generation", async () => {
@@ -347,8 +561,10 @@ describe("OpenAI Responses structured output adapter", () => {
       estimatedAttemptedInputTokens: 2_000
     } satisfies Partial<ModelBatchError>);
     expect(failure).toBeInstanceOf(ModelBatchError);
+    const plannedBatchCount = (failure as ModelBatchError).preflightInputTokens.length;
+    const baselineBatchOutputTokens = Math.floor(50_000 / plannedBatchCount);
     expect((failure as ModelBatchError).estimatedAttemptedOutputTokens).toBe(
-      75 + Math.floor(50_000 / (failure as ModelBatchError).preflightInputTokens.length)
+      50_000 - ((plannedBatchCount - 2) * baselineBatchOutputTokens)
     );
     expect(estimateOpenAiBatchFailureCostMicroUsd(failure as ModelBatchError))
       .toBeGreaterThan(900 * 0.75 + 75 * 4.5);

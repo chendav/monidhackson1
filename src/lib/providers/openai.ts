@@ -1,4 +1,4 @@
-import OpenAI from "openai";
+import OpenAI, { APIConnectionTimeoutError, RateLimitError } from "openai";
 import { zodTextFormat } from "openai/helpers/zod";
 import { getConfig, type AppConfig } from "@/lib/config";
 import { sha256Hex, stableJson } from "@/lib/crypto";
@@ -39,6 +39,12 @@ const OPENAI_OUTPUT_MICRO_USD_PER_TOKEN = 4.5;
 export const OPENAI_EXTRACTION_PHASE_TIMEOUT_MS = 120_000;
 export const OPENAI_MIN_PAID_BATCH_WINDOW_MS = 22_000;
 export const OPENAI_API_BASE_URL = "https://api.openai.com/v1";
+
+export type ModelBatchFailureKind =
+  | "timeout"
+  | "rate_limit"
+  | "incomplete_max_output"
+  | "other";
 
 export interface ModelDocumentInput {
   document_sha256: string;
@@ -90,6 +96,8 @@ export interface AnalysisModel {
 }
 
 export class ModelBatchError extends AppError {
+  readonly failureKind: ModelBatchFailureKind;
+  readonly completedBatches: number;
   readonly completedResponseIds: string[];
   readonly completedInputTokens: number | null;
   readonly completedOutputTokens: number | null;
@@ -100,6 +108,8 @@ export class ModelBatchError extends AppError {
 
   constructor(options: {
     cause: unknown;
+    failureKind: ModelBatchFailureKind;
+    completedBatches: number;
     completedResponseIds: string[];
     completedInputTokens: number | null;
     completedOutputTokens: number | null;
@@ -114,6 +124,8 @@ export class ModelBatchError extends AppError {
       cause: options.cause
     });
     this.name = "ModelBatchError";
+    this.failureKind = options.failureKind;
+    this.completedBatches = options.completedBatches;
     this.completedResponseIds = [...options.completedResponseIds];
     this.completedInputTokens = options.completedInputTokens;
     this.completedOutputTokens = options.completedOutputTokens;
@@ -131,6 +143,34 @@ export function estimateOpenAiCostMicroUsd(inputTokens: number, outputTokens: nu
     inputTokens * OPENAI_INPUT_MICRO_USD_PER_TOKEN +
     outputTokens * OPENAI_OUTPUT_MICRO_USD_PER_TOKEN
   );
+}
+
+function estimateOpenAiMultiBatchCostMicroUsd(inputTokens: number[], outputTokens: number) {
+  if (inputTokens.length === 0) return 0;
+  // The provider rounds each request independently. Summing before pricing and
+  // adding n-1 micro-USD is a tight upper bound for all per-request ceilings.
+  return estimateOpenAiCostMicroUsd(
+    inputTokens.reduce((total, count) => total + count, 0),
+    outputTokens
+  ) + inputTokens.length - 1;
+}
+
+function classifyOpenAiFailure(error: unknown): ModelBatchFailureKind {
+  if (error instanceof APIConnectionTimeoutError) return "timeout";
+  if (error instanceof RateLimitError) return "rate_limit";
+  return "other";
+}
+
+function classifyIncompleteResponse(response: unknown): ModelBatchFailureKind {
+  if (typeof response !== "object" || response === null) return "other";
+  const candidate = response as {
+    status?: unknown;
+    incomplete_details?: { reason?: unknown } | null;
+  };
+  return candidate.status === "incomplete" &&
+    candidate.incomplete_details?.reason === "max_output_tokens"
+    ? "incomplete_max_output"
+    : "other";
 }
 
 function validatedResponseUsage(usage: unknown): {
@@ -511,7 +551,16 @@ export class OpenAIResponsesAdapter implements AnalysisModel {
         );
       }
       const inputs = prepareExtractionInputs(documents, this.config);
-      const perBatchOutputTokens = Math.floor(this.config.OPENAI_MAX_OUTPUT_TOKENS / inputs.length);
+      const baselineBatchOutputTokens = Math.floor(
+        this.config.OPENAI_MAX_OUTPUT_TOKENS / inputs.length
+      );
+      if (baselineBatchOutputTokens < 1) {
+        throw new AppError(
+          "BUDGET_EXCEEDED",
+          "The aggregate output-token budget cannot cover every extraction batch.",
+          { httpStatus: 422, retryable: false }
+        );
+      }
       const format = zodTextFormat(DraftAnalysisSchema, "rfp_xray_analysis");
       let tokenCounts: number[];
       try {
@@ -551,10 +600,10 @@ export class OpenAIResponsesAdapter implements AnalysisModel {
       }
       const totalInputTokens = tokenCounts.reduce((total, count) => total + count, 0);
       const exceedsContext = tokenCounts.some((count) =>
-        count + perBatchOutputTokens > GPT_5_4_MINI_CONTEXT_TOKENS
+        count + this.config.OPENAI_MAX_OUTPUT_TOKENS > GPT_5_4_MINI_CONTEXT_TOKENS
       );
-      const maximumEstimatedCost = estimateOpenAiCostMicroUsd(
-        totalInputTokens,
+      const maximumEstimatedCost = estimateOpenAiMultiBatchCostMicroUsd(
+        tokenCounts,
         this.config.OPENAI_MAX_OUTPUT_TOKENS
       );
       if (
@@ -568,34 +617,48 @@ export class OpenAIResponsesAdapter implements AnalysisModel {
           { httpStatus: 422 }
         );
       }
-      const maximumBatchCosts = tokenCounts.map((inputTokens) =>
-        estimateOpenAiCostMicroUsd(inputTokens, perBatchOutputTokens)
-      );
       const analyses: DraftAnalysis[] = [];
       const responseIds: string[] = [];
       let inputTokens: number | null = 0;
       let outputTokens: number | null = 0;
+      let accountedOutputTokens = 0;
       for (const [index, input] of inputs.entries()) {
         let responseReturned = false;
         let requestAttempted = false;
         let pendingPersisted = false;
         let settlementAttempted = false;
+        let batchFailureKind: ModelBatchFailureKind = "other";
         let responseInputTokens: number | null = null;
         let responseOutputTokens: number | null = null;
-        const maximumEstimatedCostMicroUsd = maximumBatchCosts[index];
-        if (maximumEstimatedCostMicroUsd === undefined) {
+        const batchInputTokens = tokenCounts[index];
+        if (batchInputTokens === undefined) {
           throw new AppError("MODEL_UNAVAILABLE", "The OpenAI batch cost plan is incomplete.", {
             httpStatus: 503,
             retryable: false
           });
         }
+        const laterBatchCount = inputs.length - index - 1;
+        const laterBatchFloorOutputTokens = laterBatchCount * baselineBatchOutputTokens;
+        const batchMaxOutputTokens = this.config.OPENAI_MAX_OUTPUT_TOKENS -
+          accountedOutputTokens - laterBatchFloorOutputTokens;
+        if (!Number.isSafeInteger(batchMaxOutputTokens) || batchMaxOutputTokens < 1) {
+          throw new AppError("BUDGET_EXCEEDED", "The OpenAI output-token budget was exhausted.", {
+            httpStatus: 503,
+            retryable: false
+          });
+        }
+        const maximumEstimatedCostMicroUsd = estimateOpenAiCostMicroUsd(
+          batchInputTokens,
+          batchMaxOutputTokens
+        );
         const plan: ExtractionBatchPlan = {
           batchIndex: index,
           totalBatches: inputs.length,
           maximumEstimatedCostMicroUsd,
-          remainingMaximumEstimatedCostMicroUsd: maximumBatchCosts
-            .slice(index + 1)
-            .reduce((total, amount) => total + amount, 0)
+          remainingMaximumEstimatedCostMicroUsd: estimateOpenAiMultiBatchCostMicroUsd(
+            tokenCounts.slice(index + 1),
+            laterBatchFloorOutputTokens
+          )
         };
         const batchStarted = this.now();
         const laterBatchReserveMs = (inputs.length - index - 1) * OPENAI_MIN_PAID_BATCH_WINDOW_MS;
@@ -629,7 +692,7 @@ export class OpenAIResponsesAdapter implements AnalysisModel {
             tools: [],
             instructions: CLOSED_WORLD_INSTRUCTIONS,
             input,
-            max_output_tokens: perBatchOutputTokens,
+            max_output_tokens: batchMaxOutputTokens,
             text: { format }
           }, {
             timeout,
@@ -640,21 +703,35 @@ export class OpenAIResponsesAdapter implements AnalysisModel {
           const validatedUsage = validatedResponseUsage(response.usage);
           responseInputTokens = validatedUsage?.inputTokens ?? null;
           responseOutputTokens = validatedUsage?.outputTokens ?? null;
+          accountedOutputTokens += validatedUsage?.outputTokens ?? batchMaxOutputTokens;
           inputTokens = validatedUsage === null
             ? null
             : addUsageTokens(inputTokens, validatedUsage.inputTokens);
           outputTokens = validatedUsage === null
             ? null
             : addUsageTokens(outputTokens, validatedUsage.outputTokens);
+          if (validatedUsage && validatedUsage.outputTokens > batchMaxOutputTokens) {
+            throw new AppError(
+              "ANALYSIS_INCOMPLETE",
+              "OpenAI reported output usage above the requested batch maximum."
+            );
+          }
           if (!response.output_parsed) {
+            batchFailureKind = classifyIncompleteResponse(response);
             throw new AppError(
               "ANALYSIS_INCOMPLETE",
               "The model did not return a complete structured analysis batch."
             );
           }
           settlementAttempted = true;
+          const remainingOutputTokens = this.config.OPENAI_MAX_OUTPUT_TOKENS -
+            accountedOutputTokens;
           await paidCallbacks.settlePaidBatch({
             ...plan,
+            remainingMaximumEstimatedCostMicroUsd: estimateOpenAiMultiBatchCostMicroUsd(
+              tokenCounts.slice(index + 1),
+              remainingOutputTokens
+            ),
             status: "succeeded",
             estimatedCostMicroUsd: observedCostOrMaximum(
               plan.maximumEstimatedCostMicroUsd,
@@ -666,11 +743,15 @@ export class OpenAIResponsesAdapter implements AnalysisModel {
           analyses.push(response.output_parsed);
         } catch (error) {
           let failure = error;
+          const failureKind = batchFailureKind === "other"
+            ? classifyOpenAiFailure(error)
+            : batchFailureKind;
           if (pendingPersisted && !settlementAttempted) {
             settlementAttempted = true;
             try {
               await paidCallbacks.settlePaidBatch({
                 ...plan,
+                remainingMaximumEstimatedCostMicroUsd: 0,
                 status: "failed",
                 estimatedCostMicroUsd: requestAttempted
                   ? observedCostOrMaximum(
@@ -687,15 +768,15 @@ export class OpenAIResponsesAdapter implements AnalysisModel {
           }
           throw new ModelBatchError({
             cause: failure,
+            failureKind,
+            completedBatches: analyses.length,
             completedResponseIds: responseIds,
             completedInputTokens: responseIds.length > 0 ? inputTokens : null,
             completedOutputTokens: responseIds.length > 0 ? outputTokens : null,
             attemptedBatches: index + (requestAttempted ? 1 : 0),
             preflightInputTokens: tokenCounts,
-            estimatedAttemptedOutputTokens:
-              outputTokens === null
-                ? (index + (requestAttempted ? 1 : 0)) * perBatchOutputTokens
-                : outputTokens + (requestAttempted && !responseReturned ? perBatchOutputTokens : 0)
+            estimatedAttemptedOutputTokens: accountedOutputTokens +
+              (requestAttempted && !responseReturned ? batchMaxOutputTokens : 0)
           });
         }
       }
