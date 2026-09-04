@@ -8,11 +8,12 @@ Task ID: MH-001
    release evidence as inputs rather than current acceptance.
 2. Preserve T4/QA2 and T5/QA3 as unaccepted evidence; do not extend the
    deterministic English-parser route.
-3. Complete T6 with high-recall deterministic candidate discovery, Agent
-   semantic adjudication, exact quote/page coverage, and deterministic
-   disagreement/unresolved resolution.
-4. Produce the T6 handoff and start independent QA4 only after its checks exist.
-5. On QA4 `PASS`, commit and deploy the accepted candidate once, then refresh
+3. Complete the current bounded task with saved, hash-bound fixtures and focused
+   module tests; do not reparse an official document or rerun the entire suite
+   after each edit.
+4. Produce its handoff and start independent QA only after focused checks pass.
+5. On independent QA `PASS`, run the full local gate once, commit and deploy the
+   accepted candidate once, then refresh
    deployment-bound checks and require healthy production dependencies.
 6. Run a controlled Edmonton analysis and require READY plus the golden facts;
    only then run the CER main-plus-three-amendment campaign.
@@ -23,23 +24,36 @@ Task ID: MH-001
 
 - T1-T3, QA1, and REV-1 are completed historical phases.
 - T4/QA2 and T5/QA3 are completed but unaccepted design evidence.
-- T6 depends on QA3's architectural findings; QA4 depends on a complete T6
-  handoff.
-- EXT-1 resumes only after QA4 returns `PASS`.
+- T13 depends on the T12 production falsification; QA11 depends on a complete
+  T13 handoff.
+- EXT-1 paid execution resumes only after QA11 returns `PASS`.
 
 ## Ownership
 
 - Chief: governance, sequencing, evidence boundaries, release, and knowledge disposition.
-- T6 Backend: declared analysis/provider/evidence files and bounded tests only.
+- T13 Backend: declared provider/submission files and bounded tests only.
 - Frontend: no active assignment in this phase.
-- QA4 Reviewer: read-only independent evaluation after the T6 handoff.
+- QA11 Reviewer: read-only independent evaluation after the T13 handoff.
 
 ## Verification
 
-- T6 candidate-coverage/adjudication/materialization tests, official audit, then
-  the full lint/typecheck/unit/integration/golden/build/Playwright gate.
-- Live provider work starts only after QA2 `PASS`; never print secrets or raw
-  tender content.
+- Level 1 iteration: unit tests for only the changed module, using small
+  synthetic counterexamples and saved provider-response shapes. Run freely.
+- Level 2 task gate: the affected Edmonton/CER golden fixtures, using the saved
+  local official PDFs and deterministic page indexes. Run once after focused
+  tests are stable; no Monid/OpenAI call.
+- Level 3 release-candidate gate: full lint/typecheck/unit/integration/golden,
+  build, and Playwright. Run once before independent acceptance/deployment, and
+  again only if Reviewer-requested code changes invalidate it.
+- Level 4 production proof: one paid full-document run only after independent
+  PASS and exact-deployment attestation. Ten-run stability and CER campaigns
+  occur only after the first Edmonton core result succeeds.
+- Reuse `.data/official-fixtures/` and ignored `.data/` replay artifacts. Every
+  cached artifact must record source SHA-256, schema/prompt/wire versions, and
+  generation provenance; a mismatch invalidates the cache. Never commit raw
+  PDFs, page text, Markdown, provider bodies, signed URLs, or credentials.
+- Never use a full production run to debug a module when a redacted audit plus a
+  deterministic local replay can falsify it.
 - Reviewer verifies acceptance IDs locally and at least 12 critical citations
   in the accepted production build.
 
@@ -48,6 +62,7 @@ Task ID: MH-001
 - All jobs are idempotent and checkpointed; cleanup retries fail closed.
 - Preserve the last buildable commit and use additive database migrations.
 - Omit optional polish before weakening cleanup, citations, or golden correctness.
-- Exhausted review loops are not extended. T6 is a new Agent-semantic redesign,
-  not another deterministic parser patch; if it exhausts its review contract,
-  redesign or request direction again.
+- T13 is the final submission-field redesign. If its single controlled
+  production proof still cannot resolve the field, publish `needs_review` with
+  verified evidence and continue the broader product release instead of opening
+  another architecture loop.

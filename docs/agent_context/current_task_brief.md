@@ -97,3 +97,15 @@ condition object while preserving canonical ownership and every current veto;
 run the falsification matrix and full local gates, then obtain independent
 QA11. Only after QA11 PASS may the Chief deploy and authorize one controlled
 Edmonton pilot. A full golden pass remains required before the CER campaign.
+
+## Verification Cadence
+
+- During edits, run only focused module tests against synthetic and saved,
+  hash-bound local fixtures.
+- After the focused result stabilizes, run the affected official golden tests
+  once without calling Monid or OpenAI.
+- Run the full check/build/browser gate once per release candidate, not after
+  every patch.
+- Run a paid full-document production proof only after independent QA PASS.
+- T13 is the final redesign for submission method; a remaining failure becomes
+  a cited `needs_review` result and does not open another redesign loop.
