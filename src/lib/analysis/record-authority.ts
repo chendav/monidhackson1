@@ -11,7 +11,10 @@ import type { CitationDocument } from "@/lib/evidence/citations";
 
 export const RECORD_AUTHORITY_ENVELOPE_VERSION = 1 as const;
 export const RECORD_AUTHORITY_VERSION = 3 as const;
-export const MAX_RECORD_AUTHORITY_ANNOTATIONS_PER_BATCH = 40;
+// T10 carries relevance inline on every private model record. This bound is the
+// sum of the strict private Draft collection maxima and is a server-only guard;
+// it is no longer a positional provider sidecar or a 40-record delivery limit.
+export const MAX_RECORD_AUTHORITY_RECORDS_PER_BATCH = 2_600;
 export const MAX_MODEL_CITATIONS_PER_ANNOTATED_RECORD = 3;
 export const MAX_EXACT_OCCURRENCES_PER_CITATION = 8;
 export const MAX_RECORD_AUTHORITY_RECEIPT_BYTES = 262_144;
@@ -22,7 +25,7 @@ export const RecordAuthorityEnvelopeSchema = z.object({
     z.enum(["c", "q", "r", "e"]),
     z.number().int().nonnegative(),
     z.enum(["s", "n", "u"])
-  ])).max(MAX_RECORD_AUTHORITY_ANNOTATIONS_PER_BATCH)
+  ])).max(MAX_RECORD_AUTHORITY_RECORDS_PER_BATCH)
 });
 
 export type RecordKind = "c" | "q" | "r" | "e";
@@ -443,7 +446,7 @@ export function recordAuthorityManifestDigest(draft: DraftAnalysis) {
 export function maximumRecordAuthorityEnvelope(draft: DraftAnalysis) {
   return JSON.stringify({
     v: RECORD_AUTHORITY_ENVELOPE_VERSION,
-    r: recordsIn(draft).slice(0, MAX_RECORD_AUTHORITY_ANNOTATIONS_PER_BATCH)
+    r: recordsIn(draft).slice(0, MAX_RECORD_AUTHORITY_RECORDS_PER_BATCH)
       .map(({ kind, ordinal }) => [kind, ordinal, "u"])
   });
 }
@@ -549,7 +552,7 @@ export function verifyRecordAuthorities(input: {
     if (batch.authority.r.some(([kind, ordinal]) => !expectedKeys.has(`${kind}:${ordinal}`))) {
       receiptReasons.push("unknown_annotation");
     }
-    if (expected.length > MAX_RECORD_AUTHORITY_ANNOTATIONS_PER_BATCH) {
+    if (expected.length > MAX_RECORD_AUTHORITY_RECORDS_PER_BATCH) {
       receiptReasons.push("record_authority_capacity");
     }
 

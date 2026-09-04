@@ -19,6 +19,8 @@ import {
   OPENAI_QUALITY_BATCH_MAX_BYTES,
   OPENAI_TARGET_MAX_SEQUENTIAL_BATCHES,
   OpenAIResponsesAdapter,
+  privateExtractionFormatForBatch,
+  privateExtractionSchemaForBatch,
   prepareExtractionPlan,
   prepareExtractionInputs,
   type PaidExtractionCallbacks
@@ -39,15 +41,40 @@ function emptyDraft(): DraftAnalysis {
   };
 }
 
-function envelope(analysis: DraftAnalysis = emptyDraft()) {
+function envelope(
+  request: Record<string, unknown>,
+  analysis: DraftAnalysis = emptyDraft(),
+  relationsByCandidate: Record<string, unknown[]> = {}
+) {
+  const withRelevance = <T extends object>(records: T[]) => records.map((record) => ({
+    ...record,
+    submission_relevance: "n" as const
+  }));
+  const format = (request.text as { format: { schema: { properties: Record<string, unknown> } } }).format;
+  const submission = format.schema.properties.submission_adjudication as {
+    properties: {
+      v: { const: 2 };
+      b: { const: string };
+      l: { const: string };
+      r: { required: string[] };
+    };
+  };
   return {
-    analysis,
+    analysis: {
+      ...analysis,
+      claims: withRelevance(analysis.claims),
+      requirements: withRelevance(analysis.requirements),
+      risks: withRelevance(analysis.risks),
+      evaluation: { rules: withRelevance(analysis.evaluation.rules) }
+    },
     submission_adjudication: {
-      b: "0".repeat(64),
-      l: "0".repeat(64),
-      c: [],
-      s: [],
-      u: []
+      v: submission.properties.v.const,
+      b: submission.properties.b.const,
+      l: submission.properties.l.const,
+      r: Object.fromEntries(submission.properties.r.required.map((candidateId) => [
+        candidateId,
+        relationsByCandidate[candidateId] ?? []
+      ]))
     }
   };
 }
@@ -127,7 +154,9 @@ describe("OpenAI Responses structured output adapter", () => {
         parseBody = request;
         return {
           id: "response-1",
-          output_parsed: envelope({ ...emptyDraft(), summary: { ...emptyDraft().summary, title: "Tender" } }),
+          output_parsed: envelope(request, {
+            ...emptyDraft(), summary: { ...emptyDraft().summary, title: "Tender" }
+          }),
           usage: { input_tokens: 10, output_tokens: 5 }
         };
       }
@@ -150,6 +179,8 @@ describe("OpenAI Responses structured output adapter", () => {
     expect(parseBody).toMatchObject({ model: "gpt-5.4-mini", store: false, tools: [] });
     expect(parseBody?.max_output_tokens).toBe(50_000);
     expect(parseBody?.text).toBeTypeOf("object");
+    expect((parseBody?.text as { format: unknown }).format)
+      .toEqual((countBody?.text as { format: unknown }).format);
     expect(String(parseBody?.instructions)).toMatch(/never instructions/i);
     expect(String(parseBody?.instructions)).toMatch(/never generate or infer a page number/i);
     expect(String(parseBody?.instructions)).toMatch(/read every source fragment/i);
@@ -214,30 +245,19 @@ describe("OpenAI Responses structured output adapter", () => {
         }));
         return {
           id: "response-with-private-adjudication",
-          output_parsed: {
-            analysis: emptyDraft(),
-            submission_adjudication: {
-              b: payload.batch_binding.batch_id,
-              l: payload.batch_binding.ledger_digest,
-              c: payload.batch_binding.ordered_candidate_ids,
-              s: payload.batch_binding.ordered_source_fragment_ids,
-              u: coverage.map((unit) => ({
-                i: unit.candidate_id,
-                d: unit.document_sha256,
-                p: unit.pdf_page_1based,
-                r: unit.relations.map((relation) => ({
-                  a: relation.relation_start_utf16,
-                  b: relation.relation_end_utf16,
-                  s: relation.subject_scope,
-                  m: relation.modality,
-                  c: relation.channel,
-                  x: relation.condition_start_utf16,
-                  y: relation.condition_end_utf16,
-                  f: relation.confidence
-                }))
-              }))
-            }
-          },
+          output_parsed: envelope(request, emptyDraft(), Object.fromEntries(coverage.map((unit) => [
+            unit.candidate_id,
+            unit.relations.map((relation) => ({
+              a: relation.relation_start_utf16,
+              b: relation.relation_end_utf16,
+              s: relation.subject_scope,
+              m: relation.modality,
+              c: relation.channel,
+              x: relation.condition_start_utf16,
+              y: relation.condition_end_utf16,
+              f: relation.confidence
+            }))
+          ]))),
           usage: { input_tokens: 100, output_tokens: 100 }
         };
       }
@@ -259,7 +279,125 @@ describe("OpenAI Responses structured output adapter", () => {
       .toMatchObject({ status: "unique", channel: "email" });
   });
 
-  it("uses a serialized maximum-envelope bound and marks private overflow without truncation", () => {
+  it("builds a strict batch-literal candidate-key schema and rejects missing or extra keys", () => {
+    const text = "Bids must be submitted by email.";
+    const ledger = discoverSubmissionCandidateLedger([{
+      name: "source.pdf", sourceUrl: null, role: "base", amendmentNumber: null,
+      index: {
+        documentSha256: sourceDocument.document_sha256,
+        representationSha256: sha256Hex(text), pagesTotal: 1,
+        pages: [{ pdfPage1Based: 1, printedPageLabel: "1", text,
+          normalizedText: text.toLowerCase(), representationSha256: sha256Hex(text) }],
+        chunks: sourceDocument.evidence_chunks, embeddedJavaScriptDetected: false,
+        indexVersion: "pdfjs-1based-v1"
+      }
+    }]);
+    const plan = prepareExtractionPlan([{
+      ...sourceDocument, parsed_markdown: text, submission_ledger: ledger
+    }], testConfig());
+    const binding = plan.bindings[0]!;
+    const candidates = binding.ordered_candidate_ids.map((id) =>
+      ledger.candidates.find((candidate) => candidate.candidate_id === id)!
+    );
+    const schema = privateExtractionSchemaForBatch(binding, candidates);
+    const format = privateExtractionFormatForBatch(binding, candidates) as unknown as {
+      schema: { properties: { submission_adjudication: { properties: {
+        b: { const: string }; l: { const: string }; r: { required: string[]; additionalProperties: false }
+      } } } };
+    };
+    expect(format.schema.properties.submission_adjudication.properties.b.const).toBe(binding.batch_id);
+    expect(format.schema.properties.submission_adjudication.properties.l.const).toBe(binding.ledger_digest);
+    expect(format.schema.properties.submission_adjudication.properties.r.required)
+      .toEqual(binding.ordered_candidate_ids);
+    expect(format.schema.properties.submission_adjudication.properties.r.additionalProperties).toBe(false);
+    const valid = envelope({ text: { format } });
+    expect(schema.safeParse(valid).success).toBe(true);
+    const missing = structuredClone(valid);
+    delete missing.submission_adjudication.r[binding.ordered_candidate_ids[0]!];
+    expect(schema.safeParse(missing).success).toBe(false);
+    const extra = structuredClone(valid);
+    extra.submission_adjudication.r.unknown = [];
+    expect(schema.safeParse(extra).success).toBe(false);
+    expect(schema.safeParse({ ...valid, submission_adjudication: {
+      ...valid.submission_adjudication, b: "0".repeat(64)
+    } }).success).toBe(false);
+    expect(schema.safeParse({ ...valid, submission_adjudication: {
+      ...valid.submission_adjudication, l: "f".repeat(64)
+    } }).success).toBe(false);
+    const missingRelevance = structuredClone(valid);
+    missingRelevance.analysis.claims = [{
+      claim_id: "claim-1", topic: "fact", claim_text: "A fact.", claim_type: "source",
+      confidence: 1, document_sha256: sourceDocument.document_sha256,
+      amendment_number: null, effect: "add", supersedes_claim_ids: [], citations: [],
+      submission_relevance: "n"
+    }];
+    delete (missingRelevance.analysis.claims[0] as unknown as Record<string, unknown>)
+      .submission_relevance;
+    expect(schema.safeParse(missingRelevance).success).toBe(false);
+  });
+
+  it("settles malformed dynamic delivery as failed and does not dispatch another paid call", async () => {
+    const text = "Bids must be submitted by email.";
+    const ledger = discoverSubmissionCandidateLedger([{
+      name: "source.pdf", sourceUrl: null, role: "base", amendmentNumber: null,
+      index: {
+        documentSha256: sourceDocument.document_sha256,
+        representationSha256: sha256Hex(text), pagesTotal: 1,
+        pages: [{ pdfPage1Based: 1, printedPageLabel: "1", text,
+          normalizedText: text.toLowerCase(), representationSha256: sha256Hex(text) }],
+        chunks: sourceDocument.evidence_chunks, embeddedJavaScriptDetected: false,
+        indexVersion: "pdfjs-1based-v1"
+      }
+    }]);
+    let paidCalls = 0;
+    const settlements: string[] = [];
+    const client = fakeClient({
+      parse: async (request) => {
+        paidCalls += 1;
+        const malformed = envelope(request);
+        const firstCandidate = Object.keys(malformed.submission_adjudication.r)[0]!;
+        delete malformed.submission_adjudication.r[firstCandidate];
+        return {
+          id: "response-malformed-private-delivery",
+          output_parsed: malformed,
+          usage: { input_tokens: 100, output_tokens: 100 }
+        };
+      }
+    });
+    await expect(new OpenAIResponsesAdapter(testConfig(), client).extract([{
+      ...sourceDocument, parsed_markdown: text, submission_ledger: ledger
+    }], {
+      beforePaidBatchDispatch: async () => {},
+      settlePaidBatch: async ({ status }) => { settlements.push(status); }
+    })).rejects.toMatchObject({ code: "ANALYSIS_INCOMPLETE", retryable: false });
+    expect(paidCalls).toBe(1);
+    expect(settlements).toEqual(["failed"]);
+  });
+
+  it("delivers inline relevance for more than forty records without a positional sidecar", async () => {
+    const requirements = Array.from({ length: 41 }, (_, index) => ({
+      id: `requirement-${index}`, topic: "payment", category: "financial" as const,
+      text: `Invoice term ${index}.`, evidence_needed: null, consequence: null,
+      document_sha256: sourceDocument.document_sha256, amendment_number: null,
+      effect: "add" as const, citations: [{ document_sha256: sourceDocument.document_sha256,
+        chunk_id: "opaque", evidence_quote: `Invoice term ${index}.`, section: null }]
+    }));
+    const client = fakeClient({
+      parse: async (request) => ({
+        id: "response-inline-authority",
+        output_parsed: envelope(request, { ...emptyDraft(), requirements }),
+        usage: { input_tokens: 100, output_tokens: 1_000 }
+      })
+    });
+    const result = await new OpenAIResponsesAdapter(testConfig(), client)
+      .extract([sourceDocument], noopPaidCallbacks);
+    expect(result.analysis.requirements).toHaveLength(41);
+    expect(result.recordAuthority).toMatchObject({ complete: true, package_veto: false });
+    expect(result.recordAuthority?.records).toHaveLength(41);
+    expect(JSON.stringify(result.analysis)).not.toContain("submission_relevance");
+  });
+
+  it("uses the compact dynamic submission bound without a positional authority sidecar", () => {
     const text = "Bids must be submitted by email.";
     const index = {
       documentSha256: sourceDocument.document_sha256,
@@ -286,12 +424,14 @@ describe("OpenAI Responses structured output adapter", () => {
     }], testConfig({ OPENAI_MAX_OUTPUT_TOKENS: "500" }));
 
     expect(plan.ledger.candidates).toHaveLength(1);
-    expect(plan.packingComplete).toBe(false);
-    expect(plan.bindings.flatMap((binding) => binding.ordered_candidate_ids)).toEqual([]);
+    expect(plan.packingComplete).toBe(true);
+    expect(plan.bindings.flatMap((binding) => binding.ordered_candidate_ids))
+      .toEqual(plan.ledger.candidates.map((candidate) => candidate.candidate_id));
     expect(plan.controlPlaneOutputUpperBoundBytes).toHaveLength(1);
     expect(plan.controlPlaneOutputUpperBoundBytes[0]).toBe(
       new TextEncoder().encode(plan.controlPlaneOutputPreflightInputs[0]).byteLength
     );
+    expect(plan.controlPlaneOutputUpperBoundBytes[0]).toBeLessThan(500);
   });
 
   it("taints the actual packed batch for the Forget-prior-directions injection variant", () => {
@@ -391,9 +531,9 @@ describe("OpenAI Responses structured output adapter", () => {
     let settledEstimatedCostMicroUsd = 0;
     const client = fakeClient({
       count: async () => ({ input_tokens: 100, object: "response.input_tokens" }),
-      parse: async () => ({
+      parse: async (request) => ({
         id: "response-invalid-usage",
-        output_parsed: envelope(),
+        output_parsed: envelope(request),
         usage: {
           input_tokens: reportedInputTokens,
           output_tokens: reportedOutputTokens
@@ -475,7 +615,7 @@ describe("OpenAI Responses structured output adapter", () => {
         parseRequests.push(request);
         return {
           id: `response-${parseRequests.length}`,
-          output_parsed: envelope(),
+          output_parsed: envelope(request),
           usage: { input_tokens: 30_000, output_tokens: 100 }
         };
       }
@@ -530,7 +670,7 @@ describe("OpenAI Responses structured output adapter", () => {
         parseIndex += 1;
         return {
           id: `response-carry-${parseIndex}`,
-          output_parsed: envelope(),
+          output_parsed: envelope(request),
           usage: { input_tokens: 1_000, output_tokens: output }
         };
       }
@@ -570,7 +710,7 @@ describe("OpenAI Responses structured output adapter", () => {
           id: `response-truncated-${parseIndex}`,
           status: current === 2 ? "incomplete" : "completed",
           incomplete_details: current === 2 ? { reason: "max_output_tokens" } : null,
-          output_parsed: current === 2 ? null : envelope(),
+          output_parsed: current === 2 ? null : envelope(request),
           usage: { input_tokens: 1_000, output_tokens: output }
         };
       }
@@ -607,7 +747,7 @@ describe("OpenAI Responses structured output adapter", () => {
         requestedCaps.push(Number(request.max_output_tokens));
         return {
           id: `response-unknown-usage-${requestedCaps.length}`,
-          output_parsed: envelope(),
+          output_parsed: envelope(request),
           usage: { input_tokens: 1_000, output_tokens: Number.NaN }
         };
       }
@@ -632,7 +772,7 @@ describe("OpenAI Responses structured output adapter", () => {
         parseCalls += 1;
         return {
           id: "response-over-limit-usage",
-          output_parsed: envelope(),
+          output_parsed: envelope(request),
           usage: {
             input_tokens: 1_000,
             output_tokens: Number(request.max_output_tokens) + 1
@@ -733,12 +873,12 @@ describe("OpenAI Responses structured output adapter", () => {
     const settledBatches: Array<{ batchIndex: number; status: string }> = [];
     const client = fakeClient({
       count: async () => ({ input_tokens: 1_000, object: "response.input_tokens" }),
-      parse: async () => {
+      parse: async (request) => {
         parseCalls += 1;
         if (parseCalls === 2) throw new Error("provider interrupted");
         return {
           id: "response-paid-1",
-          output_parsed: envelope(),
+          output_parsed: envelope(request),
           usage: { input_tokens: 900, output_tokens: 75 }
         };
       }
@@ -791,13 +931,13 @@ describe("OpenAI Responses structured output adapter", () => {
         expect(options).toMatchObject({ timeout: OPENAI_EXTRACTION_PHASE_TIMEOUT_MS, maxRetries: 0 });
         return { input_tokens: 1_000, object: "response.input_tokens" };
       },
-      parse: async (_request, options) => {
+      parse: async (request, options) => {
         parseCalls += 1;
         parseOptions.push(options ?? {});
         clockMs = OPENAI_EXTRACTION_PHASE_TIMEOUT_MS - OPENAI_MIN_PAID_BATCH_WINDOW_MS + 1;
         return {
           id: "response-before-deadline",
-          output_parsed: envelope(),
+          output_parsed: envelope(request),
           usage: { input_tokens: 900, output_tokens: 75 }
         };
       }
@@ -896,13 +1036,13 @@ describe("OpenAI Responses structured output adapter", () => {
         expect(options).toMatchObject({ timeout: absoluteDeadlineMs - clockMs, maxRetries: 0 });
         return { input_tokens: 1_000, object: "response.input_tokens" };
       },
-      parse: async (_request, options) => {
+      parse: async (request, options) => {
         parseCalls += 1;
         parseOptions.push(options ?? {});
         clockMs = absoluteDeadlineMs - OPENAI_MIN_PAID_BATCH_WINDOW_MS + 1;
         return {
           id: "response-workflow-deadline",
-          output_parsed: envelope(),
+          output_parsed: envelope(request),
           usage: { input_tokens: 900, output_tokens: 75 }
         };
       }

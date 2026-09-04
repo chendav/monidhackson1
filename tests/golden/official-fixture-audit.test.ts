@@ -34,7 +34,11 @@ import {
 import { buildPdfPageIndex, normalizeEvidenceText, type PdfPageIndex } from "@/lib/pdf/page-index";
 import { discoverSubmissionCandidateLedger } from "@/lib/analysis/submission-channel";
 import { getConfig } from "@/lib/config";
-import { mergeDrafts, prepareExtractionPlan } from "@/lib/providers/openai";
+import {
+  mergeDrafts,
+  prepareExtractionPlan,
+  privateExtractionFormatForBatch
+} from "@/lib/providers/openai";
 import { verifiedFixtureSubmissionAdjudication } from "../helpers/submission-adjudication";
 
 const fixtureDirectory = process.env.RFP_XRAY_FIXTURE_DIR;
@@ -45,6 +49,27 @@ function modelPlanConfig() {
     NODE_ENV: "test",
     OPENAI_API_KEY: "test-key",
     SESSION_SIGNING_SECRET: "test-session-signing-secret-that-is-long-enough"
+  });
+}
+
+function dynamicFormatMeasurements(plan: ReturnType<typeof prepareExtractionPlan>) {
+  return plan.bindings.map((binding) => {
+    const candidates = binding.ordered_candidate_ids.map((id) =>
+      plan.ledger.candidates.find((candidate) => candidate.candidate_id === id)!
+    );
+    const format = privateExtractionFormatForBatch(binding, candidates) as unknown as {
+      schema: { properties: { submission_adjudication: { properties: {
+        b: { const: string }; l: { const: string }; r: {
+          required: string[]; additionalProperties: false
+        }
+      } } } };
+    };
+    expect(format.schema.properties.submission_adjudication.properties.b.const).toBe(binding.batch_id);
+    expect(format.schema.properties.submission_adjudication.properties.l.const).toBe(binding.ledger_digest);
+    expect(format.schema.properties.submission_adjudication.properties.r.required)
+      .toEqual(binding.ordered_candidate_ids);
+    expect(format.schema.properties.submission_adjudication.properties.r.additionalProperties).toBe(false);
+    return new TextEncoder().encode(JSON.stringify(format)).byteLength;
   });
 }
 
@@ -211,17 +236,19 @@ describe("optional official-PDF local audit (PDFs are never committed)", () => {
     )).toBe(true);
     expect(extractionPlan.bindings.flatMap((binding) => binding.ordered_candidate_ids).toSorted())
       .toEqual(submissionLedger.candidates.map((candidate) => candidate.candidate_id).toSorted());
-    expect(extractionPlan.controlPlaneOutputUpperBoundBytes).toEqual([8617, 9553, 9907]);
+    expect(extractionPlan.controlPlaneOutputUpperBoundBytes).toEqual([4772, 5339, 5696]);
     expect(extractionPlan.controlPlaneOutputUpperBoundBytes.reduce((sum, bytes) => sum + bytes, 0))
-      .toBe(28_077);
+      .toBe(15_807);
     expect(extractionPlan.controlPlaneOutputPreflightInputs.every((item) =>
-      (JSON.parse(item) as { record_authority: { r: unknown[] } }).record_authority.r.length === 40
+      (JSON.parse(item) as { submission_adjudication: { v: number } }).submission_adjudication.v === 2 &&
+      !("record_authority" in JSON.parse(item))
     )).toBe(true);
     expect(Math.min(...extractionPlan.controlPlaneOutputUpperBoundBytes.map((bytes) =>
       Math.floor(50_000 / extractionPlan.inputs.length) - bytes
-    ))).toBe(6_759);
+    ))).toBe(10_970);
     expect(50_000 - extractionPlan.controlPlaneOutputUpperBoundBytes.reduce((sum, bytes) => sum + bytes, 0))
-      .toBe(21_923);
+      .toBe(34_193);
+    expect(dynamicFormatMeasurements(extractionPlan)).toEqual([29_389, 32_029, 32_029]);
     const emptyAuthorityReceipt = verifyRecordAuthorities({
       batches: extractionPlan.bindings.map((binding) => ({
         binding,
@@ -446,17 +473,21 @@ describe("optional official-PDF local audit (PDFs are never committed)", () => {
     )).toBe(true);
     expect(extractionPlan.bindings.flatMap((binding) => binding.ordered_candidate_ids).toSorted())
       .toEqual(submissionLedger.candidates.map((candidate) => candidate.candidate_id).toSorted());
-    expect(extractionPlan.controlPlaneOutputUpperBoundBytes).toEqual([7533, 7455, 7759, 8237, 9257]);
+    expect(extractionPlan.controlPlaneOutputUpperBoundBytes).toEqual([4180, 3979, 4406, 4517, 6164]);
     expect(extractionPlan.controlPlaneOutputUpperBoundBytes.reduce((sum, bytes) => sum + bytes, 0))
-      .toBe(40_241);
+      .toBe(23_246);
     expect(extractionPlan.controlPlaneOutputPreflightInputs.every((item) =>
-      (JSON.parse(item) as { record_authority: { r: unknown[] } }).record_authority.r.length === 40
+      (JSON.parse(item) as { submission_adjudication: { v: number } }).submission_adjudication.v === 2 &&
+      !("record_authority" in JSON.parse(item))
     )).toBe(true);
     expect(Math.min(...extractionPlan.controlPlaneOutputUpperBoundBytes.map((bytes) =>
       Math.floor(50_000 / extractionPlan.inputs.length) - bytes
-    ))).toBe(743);
+    ))).toBe(3_836);
     expect(50_000 - extractionPlan.controlPlaneOutputUpperBoundBytes.reduce((sum, bytes) => sum + bytes, 0))
-      .toBe(9_759);
+      .toBe(26_754);
+    expect(dynamicFormatMeasurements(extractionPlan)).toEqual([
+      25_869, 26_749, 25_869, 28_509, 24_111
+    ]);
     const submissionAdjudication = verifiedFixtureSubmissionAdjudication(
       candidateDocuments,
       () => undefined,

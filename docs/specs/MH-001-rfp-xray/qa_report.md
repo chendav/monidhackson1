@@ -245,3 +245,67 @@ skipped, official Edmonton/CER fixtures 3/3, production build, and
 `git diff --check`. The strict v3 audit contains only bounded enum counters plus
 the existing non-body fields. No product/channel lexicon, public/API contract,
 SQL schema, or migration changed.
+
+## QA8 — T10 Three Independent Delivery Contracts
+
+```yaml
+verdict: PASS
+revision_round: 0
+p0: 0
+p1: 0
+p2: 0
+deployment_allowed: true
+reviewed_base: 10ff4f53bd7d5dd5e313b5e53fa0ca0bb8a00973
+```
+
+Independent source tracing and adversarial reruns found no remaining defect in
+the accepted T10 scope. The provider-private v2 format fixes the server batch
+and ledger digests as literals and represents every server-owned candidate as
+one required key of a strict object with no additional keys. The same generated
+format object is passed to token counting and paid parsing. Returned candidate
+metadata is reconstructed from server bindings; the existing offset,
+confidence, condition, overlap, occurrence, prompt-taint, packing, cost and
+deadline checks remain downstream of delivery validation.
+
+Every private Claim, Requirement, Risk and Evaluation record requires inline
+`submission_relevance`; the decoder removes it mechanically while constructing
+the private authority rows. A 41-record probe crosses the former positional
+40-tuple boundary, and the only remaining server guard is the 2,600-record sum
+of the four strict collection maxima. A malformed batch is settled failed after
+one paid dispatch and terminates before another batch or retry.
+
+The three contracts remain independent: corrupt record authority suppresses
+model records and their Q&A/lineage without suppressing a complete unique Email
+ledger decision, while an incomplete source ledger withholds Email regardless
+of complete record authority. Invented/paraphrased or unfamiliar SecureDrop
+evidence remains unpublished and unavailable to persisted-evidence Q&A. No new
+semantic/channel vocabulary or public API/UI contract was introduced.
+
+The separate submission-adjudication audit is nullable JSONB under schema v11,
+round-trips through both RunRecord/Neon mappings, survives 24-hour result scrub,
+and is removed with the run at the existing 30-day audit expiry. Its strict
+allowlist contains only fixed-length non-body integrity digest, bounded counts,
+fixed enums/booleans, and a timestamp; it contains no source/quote/window text,
+candidate or record ID, page value, offset, URL, or raw model output. The
+operator-only reader validates and parameter-binds a UUID, strictly parses the
+stored object, exposes no public route, and fails nonzero for invalid or absent
+evidence. Migration 0010, journal order, schema marker, column mappings and the
+offline database probe are complete; no database operation was performed.
+
+Independent commands:
+
+- `pnpm exec vitest run tests/unit/migrations.test.ts tests/unit/database-health.test.ts tests/unit/openai-adapter.test.ts tests/unit/submission-adjudication.test.ts tests/unit/record-authority.test.ts tests/unit/submission-adjudication-audit.test.ts tests/unit/record-authority-audit.test.ts tests/integration/record-authority-audit.test.ts`: 8 files, 121 tests passed.
+- `$env:RFP_XRAY_FIXTURE_DIR='D:\monidhackson\.data\official-fixtures'; pnpm exec vitest run tests/golden/official-fixture-audit.test.ts`: Edmonton/CER 3/3 passed; generated dynamic-format and control-plane bounds matched the frozen measurements.
+- `pnpm check`: lint and TypeScript passed; 58 files passed/4 skipped, 737 tests passed/10 skipped.
+- `pnpm build`: Next production build passed with 9 Workflow steps, 5 workflows and 13 static pages.
+- `$env:CI='1'; pnpm test:e2e`: 14 passed; 2 credentialed Railway live cases skipped.
+- `git diff --check 10ff4f5` plus `git diff --no-index --check` for all four untracked T10 files: passed with only Windows line-ending notices.
+- `node scripts/read-submission-adjudication-audit.mjs not-a-uuid`: sanitized failure, exit 64; a valid UUID without database configuration failed closed with exit 78.
+
+The unchanged limits remain $2 per run, $20 per day, a $0.495 OpenAI extraction
+reserve, a 50,000-token aggregate output cap, one attempt per paid batch and the
+existing extraction/workflow deadlines. Provider acceptance of the dynamic
+schema and actual T10 production audit values remain intentionally unknown until
+the separately controlled post-QA deployment/run. QA8 permits that controlled
+deployment gate; it does not convert the stale T9 production evidence into a
+release-ready result.

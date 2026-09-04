@@ -2400,3 +2400,151 @@ tests passed/10 skipped, production build passes, and Playwright passes 14/2
 skipped. No deployment, network/paid call, credential use, DB operation or
 migration, commit, push, public route, or Reviewer-verdict edit occurred. QA7 is
 the next independent gate.
+
+## T10 Implementation — Three Independent Delivery Contracts
+
+This is the bounded T10 implementation handoff for QA8. It is implementation
+evidence, not self-certification. No network/provider call, credential access,
+paid call, deployment, database operation, commit, push, public route, source
+body persistence, channel lexicon, or Reviewer-verdict edit occurred.
+
+### Implemented Contracts
+
+1. **ExtractionDelivery** now uses a provider-private schema generated for each
+   actual batch. `v=2`, the batch ID, and ledger digest are literals. The
+   submission relation map is a strict object whose required keys are exactly
+   the server-owned ordered candidate IDs and whose values are individually
+   capped relation arrays. The identical generated format object is used for
+   input-token counting and the paid parse request. Missing/extra candidate
+   keys, wrong batch/digest literals, a missing inline relevance field, or any
+   other schema mismatch stop the run as `ANALYSIS_INCOMPLETE`; a malformed
+   returned response is cost-settled as failed and does not dispatch another
+   paid batch.
+2. **RecordPublicationAuthority** receives a required private
+   `submission_relevance=s|n|u` on every emitted Claim, Requirement, Risk, and
+   Evaluation rule. The server strips this field before creating the existing
+   public `DraftAnalysis` and mechanically constructs the existing authority
+   receipt. This removes the positional 40-tuple delivery dependency. The
+   server-only maximum is 2,600 records, exactly the sum of the strict private
+   collection maxima (1,000 Claims + 1,000 Requirements + 500 Risks + 100
+   Evaluation rules). Existing canonical identity, exact citation, source
+   occurrence, lineage, semantic crosscheck, receipt-size, and Q&A gates remain.
+3. **SourceLedgerAdjudication** remains independently server-verified. Its
+   `VerifiedSubmissionAdjudication` now records expected/verified batch counts
+   in addition to the existing candidate, page, and fragment coverage. Record
+   receipt failure still cannot replace a complete unique ledger result, and a
+   complete record receipt cannot repair an incomplete ledger.
+
+### Private Audit and Migration
+
+- A strict `SubmissionAdjudicationAudit` v1 persists only its version, ledger
+  SHA-256 digest, bounded expected/verified candidate/page/fragment/batch
+  counts, unresolved batch count, completeness boolean, fixed resolution enum,
+  all 22 fixed unresolved-reason counters, and timestamp. It rejects additional
+  fields and inconsistent count/completeness combinations. It contains no
+  source text, quote, window, URL, candidate/record ID, page value, offset, or
+  raw model output.
+- Successful production-shaped pipeline completion writes the actual source
+  adjudication audit beside, but not inside, the record authority audit. It is
+  retained after 24-hour result expiry and removed only with the run row at the
+  existing 30-day audit expiry. New/historical rows are nullable; absence is not
+  interpreted as success.
+- Additive migration `0010_submission_adjudication_audit.sql` adds the nullable
+  JSONB column and advances the application marker to
+  `rfp-xray-schema-v11`. The schema probe now requires both independent audit
+  columns. This migration was tested locally but was not applied to any
+  database.
+- Operator evidence is read with
+  `node scripts/read-submission-adjudication-audit.mjs <run-id>`. The script
+  validates a UUID, binds it as a query parameter, strictly parses the allowlist,
+  emits only `run_id` plus the audit fields, and returns nonzero for absent or
+  malformed evidence. It creates no public endpoint.
+
+### Offline Falsification Evidence
+
+- Local `zodTextFormat` generation accepted every dynamic official batch schema;
+  strict `additionalProperties=false`, literal batch/digest fields, and exact
+  required candidate keys are asserted. Edmonton generated three schema JSON
+  envelopes of 29,389 / 32,029 / 32,029 bytes. CER generated five of 25,869 /
+  26,749 / 25,869 / 28,509 / 24,111 bytes. These are formatter-envelope byte
+  measurements, not provider-token or worst-case output claims.
+- The compact submission control-plane preflight remains separate from the full
+  response. Edmonton measures 4,772 / 5,339 / 5,696 bytes (15,807 aggregate);
+  CER measures 4,180 / 3,979 / 4,406 / 4,517 / 6,164 bytes (23,246 aggregate).
+  The provider's actual input-token count, deterministic per-plan output caps
+  summing to 50,000, and plan-specific reserve gate remain authoritative.
+- Tests reject missing/extra candidate keys, wrong batch/digest literals, and
+  missing inline relevance; prove 41 inline-annotated records cross the former
+  tuple boundary; prove malformed delivery is one paid dispatch, failed
+  settlement, no retry; and show token-count/parse use the same generated
+  format.
+- Existing and newly connected falsifiers cover exact offset, low-confidence,
+  overlap disagreement and their corresponding sanitized audit counters;
+  unfamiliar SecureDrop uncertainty; prompt taint; corrupt record authority
+  with independent Email; complete record authority with an incomplete ledger;
+  canonical/lineage/Q&A suppression; strict redaction; deadline, usage,
+  reservation, and zero-retry behavior.
+- The official Edmonton fixture remains a complete unique Email result and the
+  CER fixture preserves its established ambiguity/reconciliation outcomes. The
+  unchanged limits are $2.00 total per run, $20.00 per day, and $0.495 OpenAI
+  extraction reserve per run.
+
+### Changed Files
+
+- `src/lib/providers/openai.ts`
+- `src/lib/analysis/record-authority.ts`
+- `src/lib/analysis/submission-channel.ts`
+- `src/lib/runs/submission-adjudication-audit.ts`
+- `src/lib/runs/types.ts`
+- `src/lib/runs/store.ts`
+- `src/lib/pipeline.ts`
+- `src/db/schema.ts`
+- `src/db/neon-store.ts`
+- `drizzle/0010_submission_adjudication_audit.sql`
+- `drizzle/meta/_journal.json`
+- `scripts/database-schema-probe.mjs`
+- `scripts/read-submission-adjudication-audit.mjs`
+- `tests/unit/openai-adapter.test.ts`
+- `tests/unit/submission-adjudication.test.ts`
+- `tests/unit/submission-adjudication-audit.test.ts`
+- `tests/unit/record-authority-audit.test.ts`
+- `tests/unit/migrations.test.ts`
+- `tests/integration/record-authority-audit.test.ts`
+- `tests/golden/official-fixture-audit.test.ts`
+- This T10 section in `docs/specs/MH-001-rfp-xray/handoff-backend.md`
+
+### Exact Checks
+
+- `pnpm exec vitest run tests/unit/migrations.test.ts tests/unit/database-health.test.ts tests/unit/openai-adapter.test.ts tests/unit/submission-adjudication.test.ts tests/unit/record-authority.test.ts tests/unit/submission-adjudication-audit.test.ts tests/unit/record-authority-audit.test.ts tests/integration/record-authority-audit.test.ts`:
+  PASS, 8 files and 121 tests.
+- `$env:RFP_XRAY_FIXTURE_DIR='D:\monidhackson\.data\official-fixtures'; pnpm exec vitest run tests/golden/official-fixture-audit.test.ts`:
+  PASS, 1 file and 3 tests; all five PDFs remained outside Git.
+- `pnpm check`: PASS; ESLint and TypeScript passed, 58 test files passed/4
+  skipped, and 737 tests passed/10 skipped.
+- `pnpm build`: PASS; Next production compilation, TypeScript, 9 Workflow
+  steps, 5 workflows, and 13 static-generation entries completed.
+- `pnpm exec playwright test`: PASS, 14 browser tests passed and 2 credentialed
+  live-storage tests skipped.
+- Scoped changed-content credential-pattern scan: PASS, zero suspicious secret
+  values.
+
+### Unknowns, Risks, and Next Gate
+
+- Dynamic schema support is confirmed only through the installed SDK's local
+  formatter and offline official fixtures. No provider/network call was
+  authorized, so provider acceptance and actual post-T10 Edmonton audit values
+  remain unknown until QA8 approves one controlled paid run.
+- The schema-v11 migration is additive and nullable but unapplied. Deployment
+  must migrate and pass `pnpm probe:database` before starting a T10 run; rolling
+  application code back may leave the harmless nullable column in place.
+- The strict candidate-key schema increases request-format size. Runtime provider
+  token counting includes this exact format and the pre-dispatch plan-specific
+  reserve check remains the controlling safety boundary; the offline byte
+  measurements are usefulness evidence only.
+- QA8 must independently falsify this handoff. No deployment or paid Edmonton
+  run is authorized until QA8 returns `PASS` with P0=0 and P1=0.
+
+### Proposed Long-Term Memory
+
+None. T10 is a project-specific provider contract and requires production
+falsification before any durable rule is proposed.

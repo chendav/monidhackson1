@@ -54,6 +54,7 @@ import {
 } from "@/lib/providers/openai";
 import { getRunStore, type RunStore } from "@/lib/runs/store";
 import { createRecordAuthorityAudit } from "@/lib/runs/record-authority-audit";
+import { createSubmissionAdjudicationAudit } from "@/lib/runs/submission-adjudication-audit";
 import { startProcessingHeartbeat } from "@/lib/runs/processing-heartbeat";
 import {
   markPaidCostAttemptStarted,
@@ -1140,10 +1141,15 @@ export async function processRun(runId: string, dependencies: PipelineDependenci
     await budget.settle(runId, updated.costMicroUsd, now());
     assertBeforeDeadline(workflowStarted + RESULT_COMMIT_DEADLINE_MS, "final-ready-transition");
     const recordAuthorityAudit = createRecordAuthorityAudit(recordAuthority, now());
+    const submissionAdjudicationAudit = createSubmissionAdjudicationAudit(
+      extraction.submissionAdjudication,
+      now()
+    );
     updated = await store.update(runId, (record) => ({
       ...transitionRun(record, finalStatus),
       result: materialized.result,
       recordAuthorityAudit,
+      submissionAdjudicationAudit,
       processingLeaseId: null,
       processingLeaseExpiresAt: null
     }), claim);

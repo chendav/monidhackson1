@@ -2,8 +2,8 @@
 
 - Task ID: MH-001
 - Title: RFP X-Ray contest MVP
-- Status: active; T9 is independently accepted and deployed, while T10 is in
-  Reframing after the third controlled Edmonton production gate failed
+- Status: active; T10 is independently accepted and authorized for controlled
+  schema-v11 migration, deployment, attestation, and one Edmonton pilot
 - Chief owner: chief
 - Updated: 2026-09-04
 - Active packet: `docs/specs/MH-001-rfp-xray/`
@@ -77,6 +77,10 @@ cost. The product is document-only and does not search for tenders.
   receipt failure cannot itself null Email; the independent source-ledger
   adjudication was also incomplete or unresolved. V3 retained neither bounded
   initiating reason, so no further paid run is authorized before T10 and QA8.
+- T10 now has independent QA8 `PASS`, P0=0/P1=0/P2=0. Root repeated 737/10
+  full checks, official fixtures 3/3, build, and Playwright 14/14. The accepted
+  private contract uses exact batch schemas, inline record relevance, and a
+  separate redacted submission audit. Deployment is authorized, not release.
 
 ## Owners
 
@@ -88,6 +92,6 @@ cost. The product is document-only and does not search for tenders.
 
 ## Immediate Next Action
 
-Complete and review the T10 falsification experiment: inline record relevance,
-batch-bound exact submission coverage, and redacted v4 diagnostics. Only after
-QA8 approval may Chief deploy and run one controlled Edmonton pilot.
+Commit T10, apply the additive schema-v11 migration, deploy, refresh exact-build
+runtime/provider attestations, and run one controlled Edmonton pilot. A full
+golden pass is required before the CER campaign.

@@ -236,12 +236,12 @@ id: T10
 owner_profile: backend
 objective: Replace lossy sidecar delivery with record-local relevance and batch-bound exact submission coverage, and persist redacted v4 diagnostics that distinguish receipt and adjudication failures without weakening unfamiliar-channel safety.
 depends_on: [QA7]
-include_paths: [src/lib/providers/openai.ts, src/lib/analysis/record-authority.ts, src/lib/analysis/submission-channel.ts, src/lib/analysis/materialize.ts, src/lib/runs/record-authority-audit.ts, src/lib/pipeline.ts, src/lib/runs/**, scripts/read-record-authority-audit.mjs, tests/**, docs/specs/MH-001-rfp-xray/**]
+include_paths: [src/lib/providers/openai.ts, src/lib/analysis/record-authority.ts, src/lib/analysis/submission-channel.ts, src/lib/analysis/materialize.ts, src/lib/runs/record-authority-audit.ts, src/lib/pipeline.ts, src/lib/runs/**, src/db/**, drizzle/**, scripts/read-record-authority-audit.mjs, scripts/read-submission-adjudication-audit.mjs, scripts/database-schema-probe.mjs, tests/**, docs/specs/MH-001-rfp-xray/**]
 exclude_paths: [src/app/page.tsx, src/components/**, src/app/globals.css]
 edits_allowed: true
 acceptance: [AC-2, AC-4, AC-5, AC-9, AC-10]
 handoff: handoff-backend.md
-status: reframing_accepted
+status: completed_accepted
 ```
 
 ## QA8 T10 semantic delivery review
@@ -256,7 +256,7 @@ exclude_paths: []
 edits_allowed: false
 acceptance: [AC-2, AC-4, AC-5, AC-9, AC-10, AC-11]
 handoff: qa_report.md
-status: blocked_on_t10_handoff
+status: completed_pass
 ```
 
 ## EXT-1 Production evidence and publication

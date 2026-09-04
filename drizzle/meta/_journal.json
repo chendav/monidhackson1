@@ -71,6 +71,13 @@
       "when": 1788393609000,
       "tag": "0009_record_authority_audit",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1788393610000,
+      "tag": "0010_submission_adjudication_audit",
+      "breakpoints": true
     }
   ]
 }

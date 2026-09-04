@@ -14,6 +14,7 @@ import { sql } from "drizzle-orm";
 import type { AnalysisResult, CostEvent, CreateRunRequest, DocumentManifest } from "@/contracts";
 import type { QuoteVerificationReceipt } from "@/lib/evidence/citations";
 import type { RecordAuthorityAudit } from "@/lib/runs/record-authority-audit";
+import type { SubmissionAdjudicationAudit } from "@/lib/runs/submission-adjudication-audit";
 import type {
   AnalysisDispatchStatus,
   CleanupReceipt,
@@ -22,8 +23,8 @@ import type {
   SourceCleanupWatchdog
 } from "@/lib/runs/types";
 
-export const APP_SCHEMA_VERSION = 10;
-export const APP_SCHEMA_MARKER = "rfp-xray-schema-v10";
+export const APP_SCHEMA_VERSION = 11;
+export const APP_SCHEMA_MARKER = "rfp-xray-schema-v11";
 
 export const appSchemaMeta = pgTable("app_schema_meta", {
   id: text("id").primaryKey(),
@@ -97,6 +98,8 @@ export const runs = pgTable(
     reservedMicroUsd: integer("reserved_micro_usd").notNull().default(0),
     result: jsonb("result").$type<AnalysisResult>(),
     recordAuthorityAudit: jsonb("record_authority_audit").$type<RecordAuthorityAudit>(),
+    submissionAdjudicationAudit: jsonb("submission_adjudication_audit")
+      .$type<SubmissionAdjudicationAudit>(),
     error: jsonb("error").$type<RunFailure>(),
     workflowRunId: text("workflow_run_id"),
     analysisDispatchClaimId: uuid("analysis_dispatch_claim_id"),

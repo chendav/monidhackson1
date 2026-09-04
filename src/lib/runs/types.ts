@@ -9,6 +9,7 @@ import type {
 } from "@/contracts";
 import type { QuoteVerificationReceipt } from "@/lib/evidence/citations";
 import type { RecordAuthorityAudit } from "@/lib/runs/record-authority-audit";
+import type { SubmissionAdjudicationAudit } from "@/lib/runs/submission-adjudication-audit";
 
 export type CleanupControlScope = "application" | "provider";
 export type CleanupReceiptStatus = "deleted" | "failed" | "unknown";
@@ -97,6 +98,7 @@ export interface RunRecord {
   reservedMicroUsd: number;
   result: AnalysisResult | null;
   recordAuthorityAudit: RecordAuthorityAudit | null;
+  submissionAdjudicationAudit: SubmissionAdjudicationAudit | null;
   error: RunFailure | null;
   workflowRunId: string | null;
   analysisDispatchClaimId: string | null;

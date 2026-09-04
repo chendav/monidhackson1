@@ -13,6 +13,7 @@ import {
   type SubmissionChannelHint,
   type SubmissionRelationDecision
 } from "@/lib/analysis/submission-channel";
+import { createSubmissionAdjudicationAudit } from "@/lib/runs/submission-adjudication-audit";
 
 const baseSha = "a".repeat(64);
 
@@ -248,6 +249,8 @@ describe("agent-semantic submission adjudication", () => {
     const artifact = verify(ledger, (response) => mutate(response));
     expect(artifact.complete).toBe(false);
     expect(artifact.unresolved_reasons).toContain(reason);
+    expect(createSubmissionAdjudicationAudit(artifact).unresolved_reason_counts[reason])
+      .toBeGreaterThan(0);
     expect(resolveVerifiedSubmissionChannel(artifact)).toMatchObject({ status: "unresolved" });
   });
 
@@ -437,6 +440,8 @@ describe("agent-semantic submission adjudication", () => {
       }, index))
     );
     expect(artifact.unresolved_reasons).toContain("overlap_disagreement");
+    expect(createSubmissionAdjudicationAudit(artifact)
+      .unresolved_reason_counts.overlap_disagreement).toBeGreaterThan(0);
     expect(resolveVerifiedSubmissionChannel(artifact)).toMatchObject({ status: "unresolved" });
   });
 

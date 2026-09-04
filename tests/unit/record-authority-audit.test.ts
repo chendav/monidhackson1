@@ -9,6 +9,7 @@ import {
   RecordAuthorityAuditSchema
 } from "@/lib/runs/record-authority-audit";
 import { newRunRecord } from "@/lib/runs/store";
+import { SubmissionAdjudicationAuditSchema } from "@/lib/runs/submission-adjudication-audit";
 // @ts-expect-error The operator CLI is intentionally plain ESM for direct Node execution.
 import { formatRecordAuthorityAudit, readRecordAuthorityAudit, runCli } from "../../scripts/read-record-authority-audit.mjs";
 
@@ -126,14 +127,41 @@ describe("record authority audit persistence", () => {
   it("round-trips the nullable audit through the Neon row mapping", () => {
     const original = run();
     expect(original.recordAuthorityAudit).toBeNull();
+    expect(original.submissionAdjudicationAudit).toBeNull();
     original.recordAuthorityAudit = createRecordAuthorityAudit(
       unresolvedRecordAuthority("fixture_incomplete"),
       new Date("2026-09-04T12:01:00Z")
     );
+    original.submissionAdjudicationAudit = SubmissionAdjudicationAuditSchema.parse({
+      version: 1,
+      ledger_digest: "b".repeat(64),
+      expected_candidate_count: 0,
+      verified_candidate_count: 0,
+      expected_page_count: 0,
+      covered_page_count: 0,
+      expected_source_fragment_count: 0,
+      verified_source_fragment_count: 0,
+      expected_batch_count: 0,
+      verified_batch_count: 0,
+      unresolved_batch_count: 0,
+      complete: true,
+      resolution_status: "none",
+      unresolved_reason_counts: Object.fromEntries([
+        "capacity", "incomplete_page_coverage", "invalid_amendment_metadata", "missing_batch",
+        "duplicate_batch", "unknown_batch", "ledger_digest_mismatch", "batch_manifest_mismatch",
+        "missing_candidate", "duplicate_candidate", "unknown_candidate", "sha_mismatch",
+        "page_mismatch", "channel_mismatch", "offset_mismatch", "quote_too_long",
+        "condition_mismatch", "low_confidence", "semantic_uncertainty", "overlap_disagreement",
+        "prompt_injection", "draft_disagreement"
+      ].map((reason) => [reason, 0])),
+      recorded_at: "2026-09-04T12:01:00.000Z"
+    });
     const row = runRecordToRow(original);
     expect(row.recordAuthorityAudit).toEqual(original.recordAuthorityAudit);
+    expect(row.submissionAdjudicationAudit).toEqual(original.submissionAdjudicationAudit);
     const restored = runRowToRecord(row as RunRow);
     expect(restored.recordAuthorityAudit).toEqual(original.recordAuthorityAudit);
+    expect(restored.submissionAdjudicationAudit).toEqual(original.submissionAdjudicationAudit);
   });
 
   it("uses a bound run id and fails closed when no audit row exists", async () => {

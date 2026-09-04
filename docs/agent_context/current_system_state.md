@@ -54,6 +54,11 @@ Updated: 2026-09-04
   zero. Static tracing proves that failure cannot null Email; the independent
   submission adjudication was also incomplete or unresolved. V3 did not retain
   either subsystem's bounded initiating reason, so guessing is not evidence.
+- T10 passed independent QA8 with P0=0/P1=0/P2=0 and root local gates. It
+  replaces generic submission arrays with exact required candidate keys,
+  carries semantic relevance inline on each private record, and adds a separate
+  bounded submission-adjudication audit under additive schema v11. Migration
+  and production provider acceptance remain unexecuted.
 - Root `AGENTS.md`, Chief governance, role catalog, context bundles, knowledge
   policy, and reusable task templates match the refreshed global
   `chief-agent-orchestration` assets. Bootstrap and active validation pass.

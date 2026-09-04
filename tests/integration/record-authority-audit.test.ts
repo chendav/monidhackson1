@@ -163,12 +163,22 @@ describe("record authority pipeline audit", () => {
       .toBe(actualRecordCount);
     expect((await store.get(record.id))?.recordAuthorityAudit)
       .toEqual(completed.recordAuthorityAudit);
+    expect(completed.submissionAdjudicationAudit).toMatchObject({
+      version: 1,
+      complete: true,
+      expected_batch_count: 1,
+      verified_batch_count: 1,
+      unresolved_batch_count: 0
+    });
+    expect((await store.get(record.id))?.submissionAdjudicationAudit)
+      .toEqual(completed.submissionAdjudicationAudit);
 
     const expiredAt = new Date(new Date(completed.expiresAt).getTime() + 1);
     const expired = await expireRun(completed, store, storage, expiredAt);
     expect(expired.status).toBe("expired");
     expect(expired.result).toBeNull();
     expect(expired.recordAuthorityAudit).toEqual(completed.recordAuthorityAudit);
+    expect(expired.submissionAdjudicationAudit).toEqual(completed.submissionAdjudicationAudit);
     expect(expired.auditExpiresAt).not.toBeNull();
     await expireDueRuns(
       store,

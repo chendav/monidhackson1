@@ -112,29 +112,16 @@ export interface SubmissionBatchBinding {
   prompt_injection_tainted: boolean;
 }
 
-export type SubmissionUnresolvedReason =
-  | "capacity"
-  | "incomplete_page_coverage"
-  | "invalid_amendment_metadata"
-  | "missing_batch"
-  | "duplicate_batch"
-  | "unknown_batch"
-  | "ledger_digest_mismatch"
-  | "batch_manifest_mismatch"
-  | "missing_candidate"
-  | "duplicate_candidate"
-  | "unknown_candidate"
-  | "sha_mismatch"
-  | "page_mismatch"
-  | "channel_mismatch"
-  | "offset_mismatch"
-  | "quote_too_long"
-  | "condition_mismatch"
-  | "low_confidence"
-  | "semantic_uncertainty"
-  | "overlap_disagreement"
-  | "prompt_injection"
-  | "draft_disagreement";
+export const SUBMISSION_UNRESOLVED_REASON_KEYS = [
+  "capacity", "incomplete_page_coverage", "invalid_amendment_metadata", "missing_batch",
+  "duplicate_batch", "unknown_batch", "ledger_digest_mismatch", "batch_manifest_mismatch",
+  "missing_candidate", "duplicate_candidate", "unknown_candidate", "sha_mismatch",
+  "page_mismatch", "channel_mismatch", "offset_mismatch", "quote_too_long",
+  "condition_mismatch", "low_confidence", "semantic_uncertainty", "overlap_disagreement",
+  "prompt_injection", "draft_disagreement"
+] as const;
+
+export type SubmissionUnresolvedReason = typeof SUBMISSION_UNRESOLVED_REASON_KEYS[number];
 
 export interface RedactedSubmissionRelation {
   occurrence_key: string;
@@ -177,6 +164,8 @@ export interface VerifiedSubmissionAdjudication {
   covered_page_count: number;
   expected_source_fragment_count: number;
   verified_source_fragment_count: number;
+  expected_batch_count: number;
+  verified_batch_count: number;
   complete: boolean;
   unresolved_reasons: SubmissionUnresolvedReason[];
   records: VerifiedSubmissionRecord[];
@@ -483,7 +472,8 @@ function uniqueReasons(values: SubmissionUnresolvedReason[]) {
 function unresolvedArtifact(
   ledger: SubmissionCandidateLedger,
   reason: SubmissionUnresolvedReason,
-  expectedSourceFragments: number
+  expectedSourceFragments: number,
+  expectedBatches = 0
 ): VerifiedSubmissionAdjudication {
   return {
     ledger_version: SUBMISSION_LEDGER_VERSION,
@@ -494,6 +484,8 @@ function unresolvedArtifact(
     covered_page_count: ledger.covered_page_count,
     expected_source_fragment_count: expectedSourceFragments,
     verified_source_fragment_count: 0,
+    expected_batch_count: expectedBatches,
+    verified_batch_count: 0,
     complete: false,
     unresolved_reasons: [reason],
     records: ledger.candidates.map((candidate) => ({
@@ -615,13 +607,15 @@ export function verifySubmissionAdjudication(input: {
     0
   );
   if (input.ledger.capacity_exceeded || !input.packingComplete) {
-    return unresolvedArtifact(input.ledger, "capacity", expectedSourceFragments);
+    return unresolvedArtifact(input.ledger, "capacity", expectedSourceFragments, input.bindings.length);
   }
   if (input.ledger.expected_page_count !== input.ledger.covered_page_count) {
-    return unresolvedArtifact(input.ledger, "incomplete_page_coverage", expectedSourceFragments);
+    return unresolvedArtifact(input.ledger, "incomplete_page_coverage", expectedSourceFragments,
+      input.bindings.length);
   }
   if (!input.ledger.metadata_complete) {
-    return unresolvedArtifact(input.ledger, "invalid_amendment_metadata", expectedSourceFragments);
+    return unresolvedArtifact(input.ledger, "invalid_amendment_metadata", expectedSourceFragments,
+      input.bindings.length);
   }
   const knownCandidateIds = new Set(input.ledger.candidates.map((candidate) => candidate.candidate_id));
   const bindingAssignmentCounts = new Map<string, number>();
@@ -634,17 +628,20 @@ export function verifySubmissionAdjudication(input: {
     bindingAssignmentCounts.set(candidateId, (bindingAssignmentCounts.get(candidateId) ?? 0) + 1);
   }
   if (unknownBoundCandidate) {
-    return unresolvedArtifact(input.ledger, "unknown_candidate", expectedSourceFragments);
+    return unresolvedArtifact(input.ledger, "unknown_candidate", expectedSourceFragments,
+      input.bindings.length);
   }
   if (input.ledger.candidates.some((candidate) =>
     (bindingAssignmentCounts.get(candidate.candidate_id) ?? 0) > 1
   )) {
-    return unresolvedArtifact(input.ledger, "duplicate_candidate", expectedSourceFragments);
+    return unresolvedArtifact(input.ledger, "duplicate_candidate", expectedSourceFragments,
+      input.bindings.length);
   }
   if (input.ledger.candidates.some((candidate) =>
     (bindingAssignmentCounts.get(candidate.candidate_id) ?? 0) === 0
   )) {
-    return unresolvedArtifact(input.ledger, "missing_candidate", expectedSourceFragments);
+    return unresolvedArtifact(input.ledger, "missing_candidate", expectedSourceFragments,
+      input.bindings.length);
   }
 
   const responseByBatch = new Map<string, SubmissionBatchAdjudication[]>();
@@ -656,6 +653,7 @@ export function verifySubmissionAdjudication(input: {
   const records = new Map<string, VerifiedSubmissionRecord>();
   const globalReasons: SubmissionUnresolvedReason[] = hasUnknownBatch ? ["unknown_batch"] : [];
   let verifiedSourceFragments = 0;
+  const transportVerifiedBatchIds = new Set<string>();
 
   for (const binding of input.bindings) {
     const candidates = binding.ordered_candidate_ids.map((id) =>
@@ -691,6 +689,7 @@ export function verifySubmissionAdjudication(input: {
       continue;
     }
     verifiedSourceFragments += binding.ordered_source_fragment_ids.length;
+    transportVerifiedBatchIds.add(binding.batch_id);
     const decisionsByCandidate = new Map<string, SubmissionCoverageDecision[]>();
     for (const coverage of response.coverage_units) {
       decisionsByCandidate.set(
@@ -794,6 +793,11 @@ export function verifySubmissionAdjudication(input: {
 
   const orderedRecords = input.ledger.candidates.map((candidate) => records.get(candidate.candidate_id)!);
   const verifiedCount = orderedRecords.filter((record) => record.disposition === "verified").length;
+  const verifiedBatchCount = input.bindings.filter((binding) =>
+    transportVerifiedBatchIds.has(binding.batch_id) && binding.ordered_candidate_ids.every((id) =>
+      records.get(id)?.disposition === "verified"
+    )
+  ).length;
   const unresolvedReasons = uniqueReasons([
     ...globalReasons,
     ...orderedRecords.flatMap((record) => record.reason ? [record.reason] : [])
@@ -807,6 +811,8 @@ export function verifySubmissionAdjudication(input: {
     covered_page_count: input.ledger.covered_page_count,
     expected_source_fragment_count: expectedSourceFragments,
     verified_source_fragment_count: verifiedSourceFragments,
+    expected_batch_count: input.bindings.length,
+    verified_batch_count: verifiedBatchCount,
     complete: input.ledger.candidates.length > 0 && unresolvedReasons.length === 0 &&
       verifiedCount === input.ledger.candidates.length &&
       verifiedSourceFragments === expectedSourceFragments,

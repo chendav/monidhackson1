@@ -43,18 +43,16 @@ regression_checks:
 
 review:
   required: true
-  verdict: BLOCKED
+  verdict: PASS
   active_review_task: QA8
   revision_round: 0
   starts_after: T10 handoff exists and implementation checks are recorded
-  implementation_handoff: pending T10 section in handoff-backend.md
-  active_failures:
-    - T9 production did not retain the initiating submission-adjudication reason.
-    - T9 production private delivery allowed a globally incomplete record receipt.
+  implementation_handoff: handoff-backend.md T10 Implementation — Three Independent Delivery Contracts
+  active_failures: []
   p0: 0
-  p1: 2
+  p1: 0
   p2: 0
-  deployment_allowed: false
+  deployment_allowed: true
   previous_review:
     task: QA4
     verdict: REQUEST_CHANGES
@@ -92,5 +90,5 @@ current_release_evidence:
 
 release:
   status: NOT_READY
-  next_gate: Complete T10 falsification evidence and QA8 before another deployment or paid Edmonton pilot.
+  next_gate: Commit T10, apply additive schema-v11 migration, deploy and attest the exact build, then run one controlled Edmonton pilot.
   remaining_after_edmonton: CER campaign, 12-citation review, final video, contest submission, and five publications.
