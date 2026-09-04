@@ -1,0 +1,61 @@
+{
+  "evidence_version": 1,
+  "observed_at": "2026-09-04",
+  "deployment_id": "dpl_4FFWpEa4ZHZZJKm3aRJ5C5pK6jgy",
+  "git_commit_sha": "dd3037f3aa9515da7d1a325a2bc3b8b4cffedc52",
+  "run_id_sha256": "6d9b589d0d73e8824a196420d69cf12c7b47696bffe552a2f59a4e7898948941",
+  "terminal_state": "ready",
+  "cleanup_confirmed": true,
+  "release_gate": "EDMONTON_EVALUATION_GATE_FAILED",
+  "cost_micro_usd": {
+    "monid_actual": 3600,
+    "estimated": 1117201,
+    "known_total": 1120801
+  },
+  "public_result": {
+    "pages_total": 55,
+    "critical_claims": 26,
+    "critical_claims_cited": 26,
+    "citations_verified": 27,
+    "unsupported_items_removed": 132,
+    "mandatory_gate": true,
+    "submission_method": null,
+    "selection_method": null,
+    "search_events": 0,
+    "follow_embedded_link_events": 0
+  },
+  "submission_adjudication_audit": {
+    "version": 1,
+    "complete": false,
+    "resolution_status": "unresolved",
+    "expected_candidate_count": 81,
+    "verified_candidate_count": 63,
+    "expected_page_count": 55,
+    "covered_page_count": 55,
+    "expected_source_fragment_count": 16,
+    "verified_source_fragment_count": 16,
+    "expected_batch_count": 4,
+    "verified_batch_count": 2,
+    "unresolved_batch_count": 2,
+    "nonzero_unresolved_reason_counts": {
+      "quote_too_long": 15,
+      "low_confidence": 3
+    }
+  },
+  "record_authority_audit": {
+    "version": 3,
+    "receipt_byte_length": 172540,
+    "receipt_limit_bytes": 262144,
+    "record_count": 134,
+    "complete": false,
+    "counters": {
+      "relevance": { "s": 57, "n": 44, "u": 29, "missing": 4 },
+      "source_binding": { "unlocated": 35, "exact_bound": 59, "coverage_gap": 1, "relation_gap": 38, "relation_conflict": 1 },
+      "semantic_crosscheck": { "consistent": 40, "disagrees": 58, "unknown": 36 },
+      "publication": { "verified": 40, "discarded": 94 },
+      "publication_reason": { "verified": 40, "source_unlocated": 35, "source_coverage_gap": 1, "source_relation_gap": 38, "source_relation_conflict": 1, "semantic_unknown": 0, "semantic_disagreement": 19, "receipt_integrity": 0 },
+      "submission_veto_reason": { "exact_submission_coverage_gap": 0, "exact_submission_relation_gap": 35, "exact_submission_relation_conflict": 0, "exact_non_submission_overlap": 1, "exact_semantic_uncertainty": 19, "exact_relevance_disagreement": 3 }
+    }
+  },
+  "diagnosis_boundary": "The real provider accepted the T10 dynamic schema. The source-ledger failure is fully explained by 15 overlong relation spans and three low-confidence relations. The record audit proves delivery no longer failed globally, but semantic relevance was overclassified. No source text, raw run ID, page offsets, provider output, or signed URL is stored here."
+}

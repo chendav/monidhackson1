@@ -92,6 +92,7 @@ cost. The product is document-only and does not search for tenders.
 
 ## Immediate Next Action
 
-Commit T10, apply the additive schema-v11 migration, deploy, refresh exact-build
-runtime/provider attestations, and run one controlled Edmonton pilot. A full
-golden pass is required before the CER campaign.
+Implement T11 provider wire v3 and recovered-selection precedence, run the
+bounded falsification matrix and full local gates, then obtain independent QA9.
+Only after QA9 PASS may the Chief deploy and authorize one controlled Edmonton
+pilot. A full golden pass is required before the CER campaign.

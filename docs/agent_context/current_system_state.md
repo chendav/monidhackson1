@@ -86,6 +86,9 @@ Updated: 2026-09-04
   and conflict requirement in production.
 - Final 12-citation production review, 90-second video, contest submission, and
   five-platform publication evidence.
+- Whether T11 provider wire v3 and recovered-selection precedence yield a
+  complete Edmonton result; local implementation and QA9 must precede another
+  controlled production run.
 
 ## Active Constraints
 

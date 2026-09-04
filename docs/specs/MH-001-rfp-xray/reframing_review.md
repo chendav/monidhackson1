@@ -209,3 +209,33 @@ Chief disposition: ACCEPT. No deployment or paid run is authorized before this
 experiment passes and independent QA8 returns `PASS` with P0=0 and P1=0. The
 migration is private-contract and nullable-audit only; rollback is the prior app
 commit plus retention of any additive nullable database field.
+
+## T11 Addendum — Make rejected relations unrepresentable
+
+The controlled T10 production run closed the delivery diagnosis: 81 expected
+minus 63 verified candidates equals exactly 15 `quote_too_long` plus 3
+`low_confidence` rejections. All 55 pages and 16 fragments were covered and the
+dynamic batch schema was accepted. The minimum correction is therefore the
+provider-private representation, not another authority ontology.
+
+Chief disposition: ACCEPT provider wire v3 with descriptive record relevance,
+`start_utf16 + length_utf16` where length is structurally bounded to 1..500, and
+an explicit uncertainty outlet while decisive confidence is structurally at
+least 0.9. Server checked-add, window, occurrence, condition, overlap, taint, and
+unfamiliar-channel verification remain mandatory. Old private wire v2 is not
+accepted because raw provider output is not persisted.
+
+The production audit's four `missing` relevances are not missing strict fields:
+the required inline schema and decoder make that impossible after a successful
+parse. They are canonical merges with disagreeing classifications and must be
+reported as unresolved merge disagreement. Receipt integrity and package veto
+must also remain separately observable.
+
+Selection recovery is an independent publication issue. Once a server-recovered
+evaluation field is source-verified, model rules for that same document and
+field cannot overwrite it or cause a submission-relevance veto to clear it.
+Contrary-value, same-value/different-ID, and no-recovery controls must falsify
+that precedence rule.
+
+No deployment or paid run is authorized until the bounded local experiment and
+full regression gates pass and independent QA9 returns `PASS` with P0=0/P1=0.

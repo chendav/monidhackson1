@@ -283,6 +283,36 @@ open_gates:
 truth_boundary: Healthy components and a partial run do not establish final product or contest completion.
 ```
 
+## T11 Provider-private bounded-relation repair
+
+```yaml
+id: T11
+owner_profile: backend
+objective: Make invalid submission spans and low-confidence decisive relations structurally unrepresentable in provider wire v3, distinguish merged relevance disagreement from missing delivery, and prevent model evaluation records from clearing a server-recovered selection method.
+depends_on: [QA8]
+include_paths: [src/lib/providers/openai.ts, src/lib/analysis/submission-channel.ts, src/lib/analysis/record-authority.ts, src/lib/analysis/materialize.ts, src/lib/runs/record-authority-audit.ts, tests/**, docs/specs/MH-001-rfp-xray/**]
+exclude_paths: [src/app/page.tsx, src/components/**, src/app/globals.css, drizzle/**]
+edits_allowed: true
+acceptance: [AC-2, AC-4, AC-5, AC-9, AC-10]
+handoff: handoff-backend.md
+status: in_progress
+```
+
+## QA9 T11 bounded-relation review
+
+```yaml
+id: QA9
+owner_profile: reviewer
+objective: Independently falsify provider wire v3 bounds, explicit uncertainty, descriptive relevance decoding, merged-relevance diagnostics, recovered-selection precedence, unfamiliar-channel safety, and unchanged call/retry/budget limits.
+depends_on: [T11]
+include_paths: [src/lib/providers/openai.ts, src/lib/analysis/submission-channel.ts, src/lib/analysis/record-authority.ts, src/lib/analysis/materialize.ts, src/lib/runs/record-authority-audit.ts, tests/**]
+exclude_paths: []
+edits_allowed: false
+acceptance: [AC-2, AC-4, AC-5, AC-9, AC-10, AC-11]
+handoff: qa_report.md
+status: blocked_on_T11
+```
+
 ## T8 Publication/submission authority separation
 
 ```yaml
