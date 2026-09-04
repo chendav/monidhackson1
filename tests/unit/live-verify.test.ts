@@ -803,6 +803,36 @@ describe("paid-live verifier safety policy", () => {
     expect(new Set(observed.map((item) => item.key))).toEqual(new Set(["stable-idempotency-key"]));
   });
 
+  it("carries an in-memory deployment-protection cookie without allowing fixed headers to be overridden", async () => {
+    const runner = await runnerPromise;
+    const runId = "55555555-5555-4555-8555-555555555555";
+    let observedHeaders = new Headers();
+    vi.stubGlobal("fetch", vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
+      observedHeaders = new Headers(init?.headers);
+      return Response.json({
+        run_id: runId,
+        status: "queued",
+        status_url: `/api/v1/runs/${runId}`
+      }, { status: 202 });
+    }));
+    await runner.createRunWithRecovery({
+      baseUrl: "https://rfp-xray-exact-chendavs-projects.vercel.app",
+      apiKey: "app-api-key",
+      idempotencyKey: "fixed-key",
+      body: { documents: [] },
+      additionalHeaders: {
+        cookie: "_vercel_jwt=in-memory-only",
+        authorization: "Bearer attacker",
+        "content-type": "text/plain",
+        "idempotency-key": "attacker-key"
+      }
+    });
+    expect(observedHeaders.get("cookie")).toBe("_vercel_jwt=in-memory-only");
+    expect(observedHeaders.get("authorization")).toBe("Bearer app-api-key");
+    expect(observedHeaders.get("content-type")).toBe("application/json");
+    expect(observedHeaders.get("idempotency-key")).toBe("fixed-key");
+  });
+
   it("retains observed over-cap cost and counts every attempt in aggregate spend", async () => {
     const runner = await runnerPromise;
     const runId = "22222222-2222-4222-8222-222222222222";

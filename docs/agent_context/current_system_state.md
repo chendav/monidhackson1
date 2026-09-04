@@ -1,5 +1,32 @@
 # Current System State
 
+## 2026-09-04 T19 authoritative release state
+
+- `HEAD` and `origin/main` are
+  `f84e92b2bb6be1de15aa9bb351aa9c742e73f508`; exact production deployment is
+  `dpl_D7vxrruGA11tLACAahAGCyvVGm7s` and the public alias is
+  `https://rfp-xray.vercel.app`.
+- Runtime/provider receipts, live dependency health, and strict production
+  smoke 4/4 passed for that exact candidate. Repository checks passed 60 files
+  / 794 tests with 12 designed skips. Saved official CER regression passed
+  10/10 without provider calls.
+- Production input was staged without mutation in deliberate order amendment
+  003, base, amendment 001, amendment 002. The sanitized screenshot SHA-256 is
+  `c5284564759e9531c07949b0839b05ed4782cc89115d00812d292ba094ca42a2`.
+- The current UTC budget window has USD 0.869684 remaining against the fixed USD
+  23 cap, below the USD 2 reservation. The next admissible paid action is one
+  CER run after the 18:00 MDT reset; failure forbids an automatic second run.
+- On CER success, perform at least 12 authenticated UI citation disclosures,
+  then run Edmonton once through signed PUT with CORS, replay rejection,
+  cleanup, golden, citation, and Q&A gates. Operational helpers persist
+  sanitized pass/fail receipts and never publish raw run IDs or source text.
+- Older sections below are retained as historical failure/repair evidence and
+  are not the current release binding.
+- QA17 Revision 2 independently passed the final operator helpers with
+  P0=0/P1=0/P2=0. Exact-deployment routing, in-memory protection-cookie handling,
+  immutable headers, exactly-once locks, and redacted evidence are accepted;
+  deployment-bound responses still require refresh on the new commit.
+
 ## 2026-09-04 T16 production diagnosis
 
 - T15 is committed at `aa8d10d7d3930eb335734ee5fef7a5052d590806`, pushed,

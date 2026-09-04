@@ -1,8 +1,39 @@
 # Current Task Brief
 
+## Authoritative release continuation — T19
+
+This section supersedes older current-phase statements below wherever they
+conflict. Historical diagnosis remains for provenance.
+
+- Current `HEAD` and `origin/main`: `f84e92b2bb6be1de15aa9bb351aa9c742e73f508`.
+- Current public deployment: `dpl_D7vxrruGA11tLACAahAGCyvVGm7s` at
+  `https://rfp-xray.vercel.app`.
+- Exact-deployment runtime/provider attestations, public health, and strict
+  production smoke 4/4 passed. The release-candidate repository gate passed 60
+  test files / 794 tests with 12 designed skips; saved-fixture deterministic
+  CER regression passed 10/10.
+- The authenticated retained-run fragment review path passed independent QA
+  with P0=0/P1=0/P2=0. It adds no authorization and the API still enforces
+  request authentication plus run ownership.
+- The remaining core evidence is exactly one shuffled CER production run after
+  the UTC budget reset, at least 12 verified UI citation disclosures, and then
+  exactly one Edmonton production run using the saved PDF through signed PUT.
+  Neither live run may be repeated automatically after failure.
+- Daily production cap remains USD 23 and per-run cap remains USD 2. At
+  2026-09-04 13:05 MDT, only USD 0.869684 remained in the current UTC window,
+  so no paid run is admissible before the 18:00 MDT reset.
+- The ignored release helpers are bound to the exact deployment and commit,
+  store raw run IDs only in ignored local control files, and emit sanitized
+  pass/fail evidence with hashed run identity. CER uses the four fixed official
+  manifest URLs in order 003, base, 001, 002 and validates against saved local
+  PDFs; Edmonton uses the saved PDF through signed PUT.
+- QA17 Revision 2 returned `PASS` with P0=0/P1=0/P2=0 and permits deployment.
+  The next action is one full local candidate gate, commit/push, immutable
+  deployment, and fresh deployment-bound attestations before any paid run.
+
 - Task ID: MH-001
 - Title: RFP X-Ray contest MVP
-- Status: active; T15 commit `aa8d10d7d3930eb335734ee5fef7a5052d590806`
+- Historical status through T17: active; T15 commit `aa8d10d7d3930eb335734ee5fef7a5052d590806`
   is deployed, freshly attested, and proved all five CER extraction batches can
   complete within the unchanged provider budget. The retained production run
   ended `partial`: 190 model records were received, but record authority

@@ -44,10 +44,10 @@ regression_checks:
 review:
   required: true
   verdict: PASS
-  active_review_task: QA16
-  revision_round: 3
-  starts_after: T18 Revision 3 implementation handoff independently reviewed
-  implementation_handoff: handoff-backend.md T18 Revision 3 — Preserve the external-fixture test convention
+  active_review_task: QA17
+  revision_round: 2
+  starts_after: T19 operations handoff
+  implementation_handoff: handoff-operations.md
   active_failures: []
   p0: 0
   p1: 0
@@ -72,26 +72,22 @@ governance_may_change_automatically: false
 
 current_release_evidence:
   observed_at: 2026-09-04
-  deployed_commit: aa8d10d7d3930eb335734ee5fef7a5052d590806
-  deployment_id: dpl_Fc6KfgMNHyYQ6bmv1fTYyZ5vJ1v3
+  deployed_commit: f84e92b2bb6be1de15aa9bb351aa9c742e73f508
+  deployment_id: dpl_D7vxrruGA11tLACAahAGCyvVGm7s
   public_url: https://rfp-xray.vercel.app
   health:
     http_status: 200
     status: ok
     mode: live
     dependencies: ready
+  deterministic_regression: 10/10 passed against saved official fixtures
+  repository_gate: 60 test files and 794 tests passed with 12 designed skips
+  production_smoke: 4/4 passed
   last_controlled_cer_run:
-    result: partial
-    conservative_total_usd: 1.219916
-    elapsed_ms: 250565
-    app_controlled_cleanup: confirmed
-    model_records: 190
-    verified_model_records: 32
-    source_unlocated: 127
-    limitation: All four Monid parses and five OpenAI extraction batches completed, but evaluation, amendment replacement, and conflict evidence did not survive the physical-source authority gate.
-  evidence_boundary: The run proves provider completion, bounded cost, and cleanup only; it does not prove CER analysis completeness or READY.
+    result: partial_historical_not_current_candidate_proof
+  evidence_boundary: Deterministic and component evidence does not prove final-candidate CER or Edmonton live outcomes, cleanup, Q&A, or citation review.
 
 release:
   status: NOT_READY
-  next_gate: Commit/deploy/attest T17, then run one CER proof after the daily production budget window resets.
-  remaining_after_edmonton: CER campaign, 12-citation review, final video, contest submission, and five publications.
+  next_gate: Commit and deploy the QA17-approved candidate, refresh exact-deployment attestations, then run one CER proof after the daily production budget window resets.
+  remaining_after_cer: 12-citation review, one Edmonton signed-PUT proof, final independent review, final video, contest submission, and five publications.

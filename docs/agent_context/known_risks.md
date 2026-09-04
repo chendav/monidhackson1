@@ -2,6 +2,25 @@
 
 Updated: 2026-09-04
 
+## T19 release-continuation risks
+
+- The live CER and final Edmonton results remain unproved for the exact
+  candidate. Deterministic 10/10 evidence cannot substitute for provider,
+  cleanup, cost, Q&A, or citation-click evidence.
+- A lost create response may be retried only with the identical idempotency key;
+  this is recovery of one durable run, not authorization for a second paid run.
+- Raw run IDs are required locally for owned-result review, but may exist only
+  in ignored control files. Published pass/fail receipts use a SHA-256 identity
+  and exclude document text, evidence quotes, signed URLs, and credentials.
+- CER must use only the four fixed tracked manifest URLs and validate against
+  saved official PDFs. Edmonton must use the saved official PDF through signed
+  PUT and prove CORS, replay rejection, and cleanup before acceptance.
+- Demo frames and claims remain evidence-gated until the exact live results are
+  accepted; no READY state, cost, latency, or conflict result may be staged.
+- QA17 closed all static operator-safety findings. Residual risk is operational:
+  the new commit must receive fresh immutable-deployment and provider/runtime
+  attestations before the one-shot paid evidence sequence begins.
+
 | ID | Trigger | Impact | Mitigation | Owner | Status |
 |---|---|---|---|---|---|
 | R-1 | Monid parse schema, price, or retention drifts from the credentialed spike | Live pipeline or privacy claim becomes invalid | Pin the canonical inspect hash, require a fresh deployment-bound provider receipt, and disclose observed seven-day upstream retention while ZDR is unavailable | backend | live contract spike and current exact-deployment receipt passed; refresh after redeploy or expiry |

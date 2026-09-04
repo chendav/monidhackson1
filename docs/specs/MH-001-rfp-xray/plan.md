@@ -2,6 +2,17 @@
 
 Task ID: MH-001
 
+## T19 final-live-evidence continuation
+
+This continuation supersedes older ordering only for the final candidate. The
+current accepted product code is already deployed and deterministic CER
+regression is 10/10. After the UTC daily budget reset, execute exactly one
+shuffled CER live run, review at least 12 owned UI citations if it passes, and
+then execute exactly one Edmonton live run through signed PUT. A failed live
+run is retained for bounded diagnosis and is not automatically repeated.
+Operational pass/fail receipts are sanitized; raw run IDs remain only in
+ignored local control files required for authenticated ownership review.
+
 ## Sequence
 
 1. Treat the completed foundation, baseline implementation, and historical

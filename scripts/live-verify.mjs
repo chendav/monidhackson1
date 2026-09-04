@@ -1361,12 +1361,14 @@ export async function createRunWithRecovery({
   apiKey,
   idempotencyKey,
   body,
+  additionalHeaders = {},
   signal
 }) {
   return requestJson(`${baseUrl}/api/v1/runs`, {
     stage: "run_create",
     method: "POST",
     headers: authHeaders(apiKey, {
+      ...additionalHeaders,
       "content-type": "application/json",
       "idempotency-key": idempotencyKey
     }),
@@ -1575,7 +1577,7 @@ function sanitizedFailure(error) {
   return { code: "UNEXPECTED_FAILURE", stage: "unknown", http_status: null, remote_error_code: null };
 }
 
-function validatePresignResponse(payload) {
+export function validatePresignResponse(payload) {
   const value = asRecord(payload, "PRESIGN_RESPONSE_INVALID", "signed_put_ingress");
   let uploadUrl;
   try {
@@ -1602,7 +1604,7 @@ function validatePresignResponse(payload) {
   return { ...value, uploadUrl, headers };
 }
 
-async function putSignedPdf({ uploadUrl, headers, bytes, baseUrl, signal }) {
+export async function putSignedPdf({ uploadUrl, headers, bytes, baseUrl, signal }) {
   const nonSafelistedHeaders = [...headers.keys()]
     .filter((header) => header.toLowerCase() !== "content-length");
   let preflight;

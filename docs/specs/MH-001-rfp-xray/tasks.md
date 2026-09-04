@@ -199,6 +199,45 @@ handoff: qa_report.md
 status: completed_approve
 ```
 
+## T19 Final production evidence operators
+
+```yaml
+id: T19
+owner_profile: operations
+objective: Bind the final candidate to one shuffled CER run, authenticated citation review, and one Edmonton signed-PUT run while preventing evidence leakage, cap expansion, or automatic paid reruns.
+depends_on: [QA16]
+include_paths: [.data/single-cer-production.mjs, .data/single-edmonton-production.mjs, .data/review-retained-run.mjs, .data/demo-captures/**, docs/agent_context/**, docs/specs/MH-001-rfp-xray/**]
+exclude_paths: [src/**, tests/**, drizzle/**, videos/**]
+edits_allowed: true
+acceptance: [AC-3, AC-4, AC-5, AC-6, AC-9, AC-10]
+handoff: handoff-operations.md
+status: completed_accepted
+constraints: [no_paid_calls_before_budget_reset, exact_candidate_binding, one_CER_run, one_Edmonton_run_after_CER_review, no_automatic_paid_rerun, raw_run_ids_ignored_local_only, sanitized_public_evidence]
+```
+
+## QA17 T19 operator safety review
+
+```yaml
+id: QA17
+owner_profile: reviewer
+objective: Independently verify exact candidate/input binding, one-run semantics, same-key response recovery, Edmonton signed-PUT materialization, cleanup gates, failure evidence, and redaction boundaries without network or provider calls.
+depends_on: [T19]
+include_paths: [.data/release-operator-safety.mjs, .data/release-operator-safety.selftest.mjs, .data/single-cer-production.mjs, .data/single-edmonton-production.mjs, .data/review-retained-run.mjs, .data/demo-captures/*.json, scripts/live-verify.mjs, docs/agent_context/**, docs/specs/MH-001-rfp-xray/**]
+exclude_paths: [src/**, tests/**, drizzle/**, videos/**]
+edits_allowed: false
+acceptance: [AC-3, AC-4, AC-5, AC-6, AC-9, AC-10, AC-11]
+handoff: qa17-report.md
+status: completed_pass
+revision_round: 2
+revision_scope: [P1_MUTABLE_ALIAS_TOCTOU]
+forbidden_actions: [network_calls, provider_calls, production_mutations, paid_runs, file_edits]
+verdict: PASS
+p0: 0
+p1: 0
+p2: 0
+deployment_allowed: true
+```
+
 ## T9 Source-ledger package authority
 
 ```yaml
