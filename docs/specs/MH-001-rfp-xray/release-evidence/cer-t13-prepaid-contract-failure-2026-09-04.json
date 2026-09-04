@@ -1,0 +1,19 @@
+{
+  "evidence_version": 1,
+  "observed_at": "2026-09-04",
+  "deployment_id": "dpl_HvFsb8jkyRkYLWFLpnRSuXem7Zqx",
+  "git_commit_sha": "613da553d5cb001a332214c902d7b02097dcb206",
+  "terminal_state": "failed",
+  "cleanup_confirmed": true,
+  "error_code": "MONID_PARSE_FAILED",
+  "retryable": false,
+  "elapsed_ms": 5631,
+  "provider_dispatch": {
+    "monid_attempts": 0,
+    "openai_attempts": 0,
+    "actual_micro_usd": 0
+  },
+  "conservative_infrastructure_estimate_micro_usd": 889998,
+  "diagnosis": "The run failed before paid dispatch because the volatile full Monid inspect response no longer matched the pinned whole-response hash. A credentialed non-paid reinspection confirmed that live metrics share the response with stable request and price contracts. Blind hash refresh and repeat execution are prohibited; T14 replaces this with a reviewed semantic contract projection.",
+  "evidence_boundary": "No tender content, raw run ID, provider response, signed URL, credential, or inspect payload is stored here. This failure is infrastructure evidence and does not establish CER amendment correctness."
+}
