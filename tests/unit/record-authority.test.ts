@@ -3,9 +3,11 @@ import type { DocumentManifest } from "@/contracts";
 import type { DraftAnalysis } from "@/lib/analysis/draft";
 import {
   MAX_RECORD_AUTHORITY_RECEIPT_BYTES,
+  RECORD_AUTHORITY_VERSION,
   RecordAuthorityEnvelopeSchema,
   recordAuthorityManifestIntegrity,
   recordAuthorityReceiptWithinCapacity,
+  unresolvedRecordAuthority,
   verifiedRecordAuthorityManifestDigest,
   verifyRecordAuthorities
 } from "@/lib/analysis/record-authority";
@@ -139,6 +141,400 @@ function verifyBundle(options: {
 }
 
 describe("T7 record-bound semantic authority", () => {
+  it("keeps Email and recovered facts when 25 of 126 canonical n records are discarded", () => {
+    const submissionClause = "send its bid only to the e-mail address specified on Page 1;";
+    const pages = [
+      "RETURN BIDS TO:\nProcurement Office\nREQUEST FOR PROPOSAL\nProposal To: Example Department\nWe hereby offer to sell to Canada.\nTitle: Edmonton-shaped Procurement\nSolicitation No.: RFP-1 Date:",
+      `2.1.4 Submission of bids\nIt is the Bidder's responsibility to:\n${submissionClause}`,
+      "4.2 Basis of Selection\n4.2.1 Mandatory Technical Criteria\nA bid must comply with all mandatory technical evaluation criteria. The responsive bid with the lowest evaluated price will be recommended for award of a contract.",
+      "Mandatory Criteria\nM1 The Bidder must provide a signed declaration.\nANNEX A",
+      ...Array.from({ length: 122 }, (_, index) =>
+        `Operational record ${index + 1} is retained for audit control ${index + 1000}.`
+      )
+    ];
+    const claims: DraftAnalysis["claims"] = [{
+      claim_id: "email", topic: "submission method", claim_text: "Email",
+      claim_type: "source", confidence: 1, document_sha256: sha,
+      amendment_number: null, effect: "add", citations: [citation(submissionClause)],
+      supersedes_claim_ids: []
+    }, ...Array.from({ length: 125 }, (_, index) => ({
+      claim_id: `noise-${index + 1}`,
+      topic: `operational record ${index + 1}`,
+      claim_text: index < 25
+        ? `Fabricated publication noise ${index + 1}.`
+        : pages[index + 1]!,
+      claim_type: "source" as const,
+      confidence: 1,
+      document_sha256: sha,
+      amendment_number: null,
+      effect: "add" as const,
+      citations: [citation(index < 25
+        ? `Fabricated publication noise ${index + 1}.`
+        : pages[index + 1]!)],
+      supersedes_claim_ids: []
+    }))];
+    const batches = Array.from({ length: 4 }, (_, batchIndex) => {
+      const batchClaims = claims.slice(batchIndex * 40, (batchIndex + 1) * 40);
+      return draft({
+        summary: {
+          ...draft().summary,
+          submission_method: batchIndex === 0 ? "Email" : null
+        },
+        claims: batchClaims
+      });
+    });
+    const merged = mergeDrafts(batches);
+    const state = artifact(pages, (_page, text) => relation(text, submissionClause));
+    const authority = verifyRecordAuthorities({
+      batches: batches.map((batch, batchIndex) => ({
+        binding: {
+          ...state.binding,
+          batch_id: sha256Hex(`authority-batch-${batchIndex}`)
+        },
+        draft: batch,
+        authority: RecordAuthorityEnvelopeSchema.parse({
+          v: 1,
+          r: batch.claims.map((_claim, ordinal) => [
+            "c",
+            ordinal,
+            batchIndex === 0 && ordinal === 0 ? "s" : "n"
+          ])
+        })
+      })),
+      ledger: state.ledger,
+      submission: state.submission,
+      documents: [state.source],
+      mergedDraft: merged
+    });
+
+    expect(authority).toMatchObject({
+      version: RECORD_AUTHORITY_VERSION,
+      complete: true,
+      package_veto: false,
+      unresolved_reasons: []
+    });
+    expect(authority.records.filter((record) => record.disposition === "discarded"))
+      .toHaveLength(25);
+    expect(authority.discarded_reasons).toEqual(["non_exact_or_uncovered_citation"]);
+    const discarded = authority.records.find((record) => record.merged_record_id === "noise-1")!;
+    expect(materializedModelOriginKeysForRecord(
+      new Map(authority.records.map((record) => [`${record.kind}:${record.merged_record_id}`, record])),
+      { c: new Set(), q: new Set(), r: new Set(), e: new Set() },
+      "c",
+      discarded.merged_record_id
+    )).toEqual([]);
+
+    const result = materializeAnalysis({
+      draft: merged,
+      documents: [state.source],
+      manifests: [{
+        document_id: "10000000-0000-4000-8000-000000000001", role: "base",
+        source_type: "upload", source_name: "base.pdf", source_url: null, sha256: sha,
+        pages: pages.length, language: "en", solicitation_number: "RFP-1",
+        amendment_number: null, status: "active", cleanup_status: "deleted"
+      }],
+      costs: [],
+      submissionAdjudication: state.submission,
+      recordAuthority: authority,
+      expiresAt: new Date("2026-09-04T00:00:00.000Z")
+    }).result;
+    expect(result.summary.submission_method).toBe("Email");
+    expect(result.summary.title).toBe("Edmonton-shaped Procurement");
+    expect(result.summary.closing_date).toBeNull();
+    expect(result.requirements.some((requirement) => requirement.text.includes("signed declaration")))
+      .toBe(true);
+    expect(result.claims.some((claim) => claim.claim_text.includes("Fabricated publication noise")))
+      .toBe(false);
+    expect(answerFromPersistedEvidence("What is fabricated publication noise 1?", result).answerability)
+      .toBe("not_found");
+  });
+
+  it("discards bad canonical n records across all four model collections without a package veto", () => {
+    const email = "Bids must be submitted by email.";
+    const phantom = "Phantom unsupported publication record.";
+    const analysis = draft({
+      summary: { ...draft().summary, submission_method: "Email" },
+      claims: [{
+        claim_id: "email", topic: "submission", claim_text: email, claim_type: "source",
+        confidence: 1, document_sha256: sha, amendment_number: null, effect: "add",
+        citations: [citation(email)], supersedes_claim_ids: []
+      }, {
+        claim_id: "bad-claim", topic: "phantom", claim_text: phantom, claim_type: "source",
+        confidence: 1, document_sha256: sha, amendment_number: null, effect: "add",
+        citations: [citation(phantom)], supersedes_claim_ids: []
+      }],
+      requirements: [{
+        id: "bad-requirement", topic: "phantom", category: "contractual", text: phantom,
+        evidence_needed: null, consequence: null, document_sha256: sha,
+        amendment_number: null, effect: "add", citations: [citation(phantom)]
+      }],
+      risks: [{
+        id: "bad-risk", topic: "phantom", severity: "low", category: "phantom",
+        finding: phantom, impact: phantom, recommended_action: phantom,
+        document_sha256: sha, amendment_number: null, effect: "add",
+        citations: [citation(phantom)]
+      }],
+      evaluation: { rules: [{
+        id: "bad-evaluation", topic: "phantom", field: "selection_method", value: phantom,
+        document_sha256: sha, amendment_number: null, effect: "add",
+        citations: [citation(phantom)]
+      }] }
+    });
+    const { authority, state } = verifyBundle({
+      pages: [email],
+      analysis,
+      annotations: [
+        ["c", 0, "s"], ["c", 1, "n"], ["q", 0, "n"],
+        ["r", 0, "n"], ["e", 0, "n"]
+      ],
+      relationForPage: (_page, text) => relation(text, email)
+    });
+    expect(authority).toMatchObject({ complete: true, package_veto: false });
+    expect(authority.records.filter((record) => record.disposition === "discarded"))
+      .toHaveLength(4);
+    const result = materializeAnalysis({
+      draft: analysis,
+      documents: [state.source],
+      manifests: [{
+        document_id: "10000000-0000-4000-8000-000000000001", role: "base",
+        source_type: "upload", source_name: "base.pdf", source_url: null, sha256: sha,
+        pages: 1, language: "en", solicitation_number: "RFP-1", amendment_number: null,
+        status: "active", cleanup_status: "deleted"
+      }],
+      costs: [],
+      submissionAdjudication: state.submission,
+      recordAuthority: authority,
+      expiresAt: new Date("2026-09-04T00:00:00.000Z")
+    }).result;
+    expect(result.summary.submission_method).toBe("Email");
+    expect(result.claims.some((record) => record.claim_id === "bad-claim")).toBe(false);
+    expect(result.requirements.some((record) => record.id === "bad-requirement")).toBe(false);
+    expect(result.risks.some((record) => record.id === "bad-risk")).toBe(false);
+    expect(result.evaluation.selection_method).toBeNull();
+    expect(answerFromPersistedEvidence("What is the phantom record?", result).answerability)
+      .toBe("not_found");
+  });
+
+  it("omits later publication failures for verified n records across all collections", () => {
+    const email = "Bids must be submitted by email.";
+    const invoice = "Invoices are payable within 30 days.";
+    const unsupported = "Wire transfers are the only accepted payment method.";
+    const analysis = draft({
+      summary: { ...draft().summary, submission_method: "Email" },
+      claims: [{
+        claim_id: "email", topic: "submission", claim_text: email, claim_type: "source",
+        confidence: 1, document_sha256: sha, amendment_number: null, effect: "add",
+        citations: [citation(email)], supersedes_claim_ids: []
+      }, {
+        claim_id: "bad-claim", topic: "payment", claim_text: unsupported, claim_type: "source",
+        confidence: 1, document_sha256: sha, amendment_number: null, effect: "add",
+        citations: [citation(invoice)], supersedes_claim_ids: []
+      }],
+      requirements: [{
+        id: "bad-requirement", topic: "payment", category: "financial", text: unsupported,
+        evidence_needed: null, consequence: null, document_sha256: sha,
+        amendment_number: null, effect: "add", citations: [citation(invoice)]
+      }],
+      risks: [{
+        id: "bad-risk", topic: "payment", severity: "high", category: "payment",
+        finding: unsupported, impact: unsupported, recommended_action: unsupported,
+        document_sha256: sha, amendment_number: null, effect: "add",
+        citations: [citation(invoice)]
+      }],
+      evaluation: { rules: [{
+        id: "bad-evaluation", topic: "selection", field: "selection_method",
+        value: "Highest combined score", document_sha256: sha, amendment_number: null,
+        effect: "add", citations: [citation(invoice)]
+      }] }
+    });
+    const { authority, state } = verifyBundle({
+      pages: [email, invoice], analysis,
+      annotations: [
+        ["c", 0, "s"], ["c", 1, "n"], ["q", 0, "n"],
+        ["r", 0, "n"], ["e", 0, "n"]
+      ],
+      relationForPage: (_page, text) => relation(text, email)
+    });
+    expect(authority).toMatchObject({ complete: true, package_veto: false });
+    expect(authority.records.filter((record) => record.merged_record_id.startsWith("bad-")))
+      .toEqual(expect.arrayContaining([
+        expect.objectContaining({ disposition: "verified", relevance: "n" })
+      ]));
+    const result = materializeAnalysis({
+      draft: analysis,
+      documents: [state.source],
+      manifests: [{
+        document_id: "10000000-0000-4000-8000-000000000001", role: "base",
+        source_type: "upload", source_name: "base.pdf", source_url: null, sha256: sha,
+        pages: 2, language: "en", solicitation_number: "RFP-1", amendment_number: null,
+        status: "active", cleanup_status: "deleted"
+      }],
+      costs: [], submissionAdjudication: state.submission, recordAuthority: authority,
+      expiresAt: new Date("2026-09-04T00:00:00.000Z")
+    }).result;
+    expect(result.summary.submission_method).toBe("Email");
+    expect(result.claims.some((record) => record.claim_id === "bad-claim")).toBe(false);
+    expect(result.requirements.some((record) => record.id === "bad-requirement")).toBe(false);
+    expect(result.risks.some((record) => record.id === "bad-risk")).toBe(false);
+    expect(result.evaluation.selection_method).toBeNull();
+    expect(answerFromPersistedEvidence("Are wire transfers required?", result).answerability)
+      .toBe("not_found");
+  });
+
+  it("turns a verified s record's later publication failure into a package veto", () => {
+    const email = "Bids must be submitted by email.";
+    const analysis = draft({
+      summary: { ...draft().summary, submission_method: "Email" },
+      claims: [{
+        claim_id: "bad-submission", topic: "submission method",
+        claim_text: "SecureDrop", claim_type: "source", confidence: 1,
+        document_sha256: sha, amendment_number: null, effect: "add",
+        citations: [citation(email)], supersedes_claim_ids: []
+      }]
+    });
+    const { authority, state } = verifyBundle({
+      pages: [email], analysis, annotations: [["c", 0, "s"]],
+      relationForPage: (_page, text) => relation(text, email)
+    });
+    expect(authority).toMatchObject({ complete: true, package_veto: false });
+    const result = materializeAnalysis({
+      draft: analysis,
+      documents: [state.source],
+      manifests: [{
+        document_id: "10000000-0000-4000-8000-000000000001", role: "base",
+        source_type: "upload", source_name: "base.pdf", source_url: null, sha256: sha,
+        pages: 1, language: "en", solicitation_number: "RFP-1", amendment_number: null,
+        status: "active", cleanup_status: "deleted"
+      }],
+      costs: [], submissionAdjudication: state.submission, recordAuthority: authority,
+      expiresAt: new Date("2026-09-04T00:00:00.000Z")
+    }).result;
+    expect(result.summary.submission_method).toBeNull();
+    expect(answerFromPersistedEvidence("How must bids be submitted?", result).answerability)
+      .toBe("not_found");
+  });
+
+  it("rejects a legacy v1 authority receipt rather than upgrading it", () => {
+    const quote = "Bids must be submitted by email.";
+    const analysis = draft({
+      summary: { ...draft().summary, submission_method: "Email" },
+      claims: [{
+        claim_id: "email", topic: "submission", claim_text: quote, claim_type: "source",
+        confidence: 1, document_sha256: sha, amendment_number: null, effect: "add",
+        citations: [citation(quote)], supersedes_claim_ids: []
+      }]
+    });
+    const { authority: current, state } = verifyBundle({
+      pages: [quote], analysis, annotations: [["c", 0, "s"]],
+      relationForPage: (_page, text) => relation(text, quote)
+    });
+    const legacy = { ...current, version: 1 as const };
+    expect(recordAuthorityManifestIntegrity(legacy)).toBe(false);
+    const result = materializeAnalysis({
+      draft: analysis,
+      documents: [state.source],
+      manifests: [{
+        document_id: "10000000-0000-4000-8000-000000000001", role: "base",
+        source_type: "upload", source_name: "base.pdf", source_url: null, sha256: sha,
+        pages: 1, language: "en", solicitation_number: "RFP-1", amendment_number: null,
+        status: "active", cleanup_status: "deleted"
+      }],
+      costs: [],
+      submissionAdjudication: state.submission,
+      recordAuthority: legacy,
+      expiresAt: new Date("2026-09-04T00:00:00.000Z")
+    }).result;
+    expect(result.summary.submission_method).toBeNull();
+    expect(answerFromPersistedEvidence("How must bids be submitted?", result).answerability)
+      .toBe("not_found");
+  });
+
+  it("keeps semantic, annotation, taint, mapping, and capacity failures as global vetoes", () => {
+    const financial = "Invoices are payable within 30 days.";
+    const base = draft({ requirements: [{
+      id: "payment", topic: "payment", category: "financial", text: financial,
+      evidence_needed: null, consequence: null, document_sha256: sha,
+      amendment_number: null, effect: "add", citations: [citation(financial)]
+    }] });
+    const invalidN = draft({ requirements: [{
+      ...base.requirements[0]!, citations: [citation("Unsupported publication noise.")]
+    }] });
+    expect(verify({ pages: [financial], analysis: invalidN, annotations: [["q", 0, "n"]] }))
+      .toMatchObject({ complete: true, package_veto: false });
+    expect(verify({ pages: [financial], analysis: invalidN, annotations: [["q", 0, "s"]] }))
+      .toMatchObject({ complete: false, package_veto: true });
+    expect(verify({ pages: [financial], analysis: base, annotations: [["q", 0, "u"]] }))
+      .toMatchObject({ complete: false, package_veto: true });
+    expect(verify({ pages: [financial], analysis: base, annotations: [] }))
+      .toMatchObject({ complete: false, package_veto: true });
+    expect(verify({
+      pages: [financial], analysis: base,
+      annotations: [["q", 0, "n"], ["q", 0, "n"]]
+    })).toMatchObject({ complete: false, package_veto: true });
+    expect(verify({
+      pages: [financial], analysis: base,
+      annotations: [["q", 0, "n"], ["c", 0, "n"]]
+    })).toMatchObject({ complete: false, package_veto: true });
+    expect(verify({ pages: [financial], analysis: base, annotations: [["q", 0, "n"]], tainted: true }))
+      .toMatchObject({ complete: false, package_veto: true });
+
+    const email = "Bids must be submitted by email.";
+    const falselyNonSubmission = draft({ claims: [{
+      claim_id: "email-as-n", topic: "opaque", claim_text: email, claim_type: "source",
+      confidence: 1, document_sha256: sha, amendment_number: null, effect: "add",
+      citations: [citation(email)], supersedes_claim_ids: []
+    }] });
+    expect(verify({
+      pages: [email], analysis: falselyNonSubmission, annotations: [["c", 0, "n"]],
+      relationForPage: (_page, text) => relation(text, email)
+    })).toMatchObject({ complete: false, package_veto: true });
+
+    const submissionRequirement = draft({ requirements: [{
+      ...base.requirements[0]!, category: "submission"
+    }] });
+    expect(verify({
+      pages: [financial], analysis: submissionRequirement, annotations: [["q", 0, "n"]]
+    })).toMatchObject({ complete: false, package_veto: true });
+
+    const unmirrored = draft({
+      summary: { ...draft().summary, submission_method: "Email" },
+      requirements: base.requirements
+    });
+    expect(verify({ pages: [financial], analysis: unmirrored, annotations: [["q", 0, "n"]] }))
+      .toMatchObject({ complete: false, package_veto: true });
+
+    const state = artifact([financial]);
+    const incompleteLedger = verifyRecordAuthorities({
+      batches: [{
+        binding: state.binding,
+        draft: base,
+        authority: RecordAuthorityEnvelopeSchema.parse({ v: 1, r: [["q", 0, "n"]] })
+      }],
+      ledger: state.ledger,
+      submission: { ...state.submission, complete: false },
+      documents: [state.source],
+      mergedDraft: base
+    });
+    expect(incompleteLedger).toMatchObject({ complete: false, package_veto: true });
+    const mappingMismatch = verifyRecordAuthorities({
+      batches: [{
+        binding: state.binding,
+        draft: base,
+        authority: RecordAuthorityEnvelopeSchema.parse({ v: 1, r: [["q", 0, "n"]] })
+      }],
+      ledger: state.ledger,
+      submission: state.submission,
+      documents: [state.source],
+      mergedDraft: draft({ requirements: [{
+        ...base.requirements[0]!, id: "different-record"
+      }] })
+    });
+    expect(mappingMismatch).toMatchObject({ complete: false, package_veto: true });
+    expect(mappingMismatch.unresolved_reasons).toContain("merged_record_mapping_mismatch");
+    expect(unresolvedRecordAuthority("record_authority_receipt_capacity"))
+      .toMatchObject({ complete: false, package_veto: true });
+  });
+
   it("keeps a cited financial control authoritative while binding Email submission authority", () => {
     const email = "Bids must be submitted by email.";
     const financial = "Invoices are payable within 30 days.";

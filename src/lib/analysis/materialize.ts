@@ -79,8 +79,15 @@ export function materializedModelOriginKeysForRecord(
   kind: RecordAuthorityKind,
   id: string
 ) {
-  return materializedModelAuthorityForRecord(authorityByRecord, recoveredIdsByKind, kind, id)
-    ?.contributing_origin_record_keys ?? [];
+  const authority = materializedModelAuthorityForRecord(
+    authorityByRecord,
+    recoveredIdsByKind,
+    kind,
+    id
+  );
+  return authority?.disposition === "verified"
+    ? authority.contributing_origin_record_keys
+    : [];
 }
 
 function deduplicateCitations(citations: Citation[]) {
@@ -938,6 +945,8 @@ export function materializeAnalysis(input: MaterializeInput): {
     const authority = authorityFor(kind, id);
     return Boolean(authority?.disposition === "verified" && authority.relevance !== "u");
   };
+  const discardedModelRecord = (kind: RecordAuthorityKind, id: string) =>
+    authorityFor(kind, id)?.disposition === "discarded";
   const originKeysFor = (kind: RecordAuthorityKind, id: string) =>
     materializedModelOriginKeysForRecord(authorityByRecord, recoveredIdsByKind, kind, id);
   const submissionRelevantClaimIds = new Set<string>();
@@ -1145,8 +1154,9 @@ export function materializeAnalysis(input: MaterializeInput): {
     const claimAuthority = authorityFor("c", claim.claim_id);
     if (!recoveredClaim && !authoritativeModelRecord("c", claim.claim_id)) {
       unsupportedItemsRemoved += 1;
-      truthReviewItems += 1;
-      if (claim.effect !== "delete" && matchingCitations.length > 0) {
+      const discarded = discardedModelRecord("c", claim.claim_id);
+      if (!discarded) truthReviewItems += 1;
+      if (!discarded && claim.effect !== "delete" && matchingCitations.length > 0) {
         reviewClaims.push({
           claim_id: claim.claim_id,
           claim_text: claim.claim_text,
@@ -1182,8 +1192,12 @@ export function materializeAnalysis(input: MaterializeInput): {
     const proseOrTypedFieldSupported = proseSupported || Boolean(typedField && fieldBound);
     if (!sourceConsistent || !scalarSupported || !proseOrTypedFieldSupported || !fieldBound) {
       unsupportedItemsRemoved += 1;
-      truthReviewItems += 1;
-      if (claim.effect !== "delete" && matchingCitations.length > 0) {
+      const discard = !recoveredClaim && claimAuthority?.relevance === "n";
+      if (!discard) truthReviewItems += 1;
+      if (!recoveredClaim && claimAuthority?.relevance === "s") {
+        unboundDraftSubmissionEvidence = true;
+      }
+      if (!discard && claim.effect !== "delete" && matchingCitations.length > 0) {
         reviewClaims.push({
           claim_id: claim.claim_id,
           claim_text: claim.claim_text,
@@ -1343,8 +1357,9 @@ export function materializeAnalysis(input: MaterializeInput): {
     const requirementAuthority = authorityFor("q", requirement.id);
     if (!recoveredRequirement && !authoritativeModelRecord("q", requirement.id)) {
       unsupportedItemsRemoved += 1;
-      truthReviewItems += 1;
-      if (requirement.effect !== "delete" && matchingCitations.length > 0) {
+      const discarded = discardedModelRecord("q", requirement.id);
+      if (!discarded) truthReviewItems += 1;
+      if (!discarded && requirement.effect !== "delete" && matchingCitations.length > 0) {
         reviewRequirements.push({
           id: requirement.id,
           category: requirement.category,
@@ -1366,8 +1381,12 @@ export function materializeAnalysis(input: MaterializeInput): {
       (requirement.effect === "delete" || requirement.category !== "mandatory" || sourceMarksMandatory));
     if (!supported) {
       unsupportedItemsRemoved += 1;
-      truthReviewItems += 1;
-      if (requirement.effect !== "delete" && matchingCitations.length > 0) {
+      const discard = !recoveredRequirement && requirementAuthority?.relevance === "n";
+      if (!discard) truthReviewItems += 1;
+      if (!recoveredRequirement && requirementAuthority?.relevance === "s") {
+        unboundDraftSubmissionEvidence = true;
+      }
+      if (!discard && requirement.effect !== "delete" && matchingCitations.length > 0) {
         reviewRequirements.push({
           id: requirement.id,
           category: requirement.category,
@@ -1566,7 +1585,7 @@ export function materializeAnalysis(input: MaterializeInput): {
     const evaluationAuthority = authorityFor("e", rule.id);
     if (!recoveredEvaluation && !authoritativeModelRecord("e", rule.id)) {
       unsupportedItemsRemoved += 1;
-      truthReviewItems += 1;
+      if (!discardedModelRecord("e", rule.id)) truthReviewItems += 1;
       continue;
     }
     if (!recoveredEvaluation && evaluationAuthority?.relevance === "s") {
@@ -1583,7 +1602,15 @@ export function materializeAnalysis(input: MaterializeInput): {
       : null;
     if (!supportedCitations) {
       unsupportedItemsRemoved += 1;
-      truthReviewItems += 1;
+      if (evaluationAuthority?.relevance === "n") {
+        // Canonical-bound non-submission noise is omitted without becoming a
+        // package truth blocker.
+      } else {
+        truthReviewItems += 1;
+        if (!recoveredEvaluation && evaluationAuthority?.relevance === "s") {
+          unboundDraftSubmissionEvidence = true;
+        }
+      }
       continue;
     }
     validEvaluationRules.push({ rule, citations: supportedCitations, document: document! });
@@ -1665,7 +1692,7 @@ export function materializeAnalysis(input: MaterializeInput): {
     const riskAuthority = authorityFor("r", risk.id);
     if (!authoritativeModelRecord("r", risk.id)) {
       unsupportedItemsRemoved += 1;
-      truthReviewItems += 1;
+      if (!discardedModelRecord("r", risk.id)) truthReviewItems += 1;
       continue;
     }
     if (riskAuthority?.relevance === "s") {
@@ -1685,7 +1712,10 @@ export function materializeAnalysis(input: MaterializeInput): {
       ));
     if (!supported) {
       unsupportedItemsRemoved += 1;
-      truthReviewItems += 1;
+      if (riskAuthority?.relevance !== "n") {
+        truthReviewItems += 1;
+        if (riskAuthority?.relevance === "s") unboundDraftSubmissionEvidence = true;
+      }
       continue;
     }
     validRiskDrafts.push({ risk, citations: matchingCitations, document: document! });

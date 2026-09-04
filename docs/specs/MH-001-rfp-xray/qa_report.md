@@ -198,3 +198,26 @@ Independent evidence: focused audit suite 10/10, official Edmonton/CER fixtures
 3/3, `pnpm check` 715 passed/10 skipped, production build passed, invalid CLI
 input exited 64 with a sanitized error, and `git diff --check` passed. QA5 found
 no remaining P0, P1, or P2 issue; normal migration and deployment gates may run.
+
+## QA6 — T8 Publication/Submission Authority Separation
+
+```yaml
+verdict: APPROVE
+revision_round: 0
+p0: 0
+p1: 0
+p2: 0
+deployment_allowed: true
+```
+
+The bounded reframe is independently accepted. Only four citation-publication
+failures on exactly-once canonical non-submission records may become
+`discarded`; those records are omitted with no lineage or Q&A authority. All
+submission-relevant, unknown, missing/duplicate, tainted, relation-overlap,
+mapping, integrity, and receipt-cap failures remain unresolved global vetoes.
+
+Independent evidence: focused T8 suite 243/243, `pnpm check` 721 passed/10
+skipped, official Edmonton/CER fixtures 3/3, production build, and
+`git diff --check`. The internal receipt is v2; v1 full receipts remain
+fail-closed, the private audit/CLI strictly dual-read 1|2, and no public API or
+database migration changed.

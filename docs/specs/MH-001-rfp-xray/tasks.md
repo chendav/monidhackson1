@@ -222,3 +222,33 @@ open_gates:
   - Final 90-second video, contest submission, and five required publications.
 truth_boundary: Healthy components and a partial run do not establish final product or contest completion.
 ```
+
+## T8 Publication/submission authority separation
+
+```yaml
+id: T8
+owner_profile: backend
+objective: Separate discarded non-submission model records from package submission safety without weakening unfamiliar-channel, citation, mapping, taint, or Q&A vetoes.
+depends_on: [QA5]
+include_paths: [src/lib/analysis/record-authority.ts, src/lib/analysis/materialize.ts, src/lib/runs/record-authority-audit.ts, src/lib/providers/openai.ts, tests/**, docs/specs/MH-001-rfp-xray/**]
+exclude_paths: [src/app/**, src/components/**, drizzle/**]
+edits_allowed: true
+acceptance: [AC-2, AC-4, AC-5, AC-9, AC-10]
+handoff: handoff-backend.md
+status: completed_accepted
+```
+
+## QA6 T8 production-reframe review
+
+```yaml
+id: QA6
+owner_profile: reviewer
+objective: Independently falsify the publication/submission state split and confirm no weakening of SecureDrop, prompt-taint, mapping, citation, Q&A, or budget gates.
+depends_on: [T8]
+include_paths: [src/lib/analysis/**, src/lib/providers/**, src/lib/runs/record-authority-audit.ts, tests/**]
+exclude_paths: []
+edits_allowed: false
+acceptance: [AC-2, AC-4, AC-5, AC-9, AC-10, AC-11]
+handoff: qa_report.md
+status: completed_approve
+```

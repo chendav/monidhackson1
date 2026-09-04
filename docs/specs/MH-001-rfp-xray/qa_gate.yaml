@@ -44,10 +44,10 @@ regression_checks:
 review:
   required: true
   verdict: APPROVE
-  active_review_task: QA5
-  revision_round: 3
-  starts_after: T7 handoff exists and implementation checks are recorded
-  implementation_handoff: handoff-backend.md T7 QA5 Revision 3
+  active_review_task: QA6
+  revision_round: 0
+  starts_after: T8 handoff exists and implementation checks are recorded
+  implementation_handoff: handoff-backend.md T8 Implementation — Publication Validity vs Submission Safety
   active_failures: []
   p0: 0
   p1: 0
@@ -71,9 +71,9 @@ scope_may_expand_automatically: false
 governance_may_change_automatically: false
 
 current_release_evidence:
-  observed_at: 2026-09-03
-  deployed_commit: d0b937e8e75ae5b2ae52985f1e1a0cfc7f13a0c5
-  deployment_id: dpl_2jKkhjjxeRGzq5yxgGS5nL3GJzJF
+  observed_at: 2026-09-04
+  deployed_commit: 885404f15cdd4b2c095123c2eb4d8037d3f4c3d3
+  deployment_id: dpl_7wWdF8MR2XfzV2EebDLWTPN1AfGn
   public_url: https://rfp-xray.vercel.app
   health:
     http_status: 200
@@ -81,13 +81,14 @@ current_release_evidence:
     mode: live
     dependencies: ready
   last_controlled_edmonton_run:
-    result: partial
-    actual_cost_usd: 1.020701
+    result: ready_but_core_accuracy_failed
+    actual_cost_usd: 0.0036
+    estimated_cost_usd: 1.125910
     app_controlled_cleanup: confirmed
-    limitation: Evaluation and some executive fields were absent; this is not golden acceptance.
-  evidence_boundary: Component health and a partial run are not final campaign or contest-completion evidence.
+    limitation: 25 rejected model citations made authority incomplete and withheld the independently adjudicated Email method.
+  evidence_boundary: Health and terminal READY do not override the failed core accuracy gate.
 
 release:
   status: NOT_READY
-  next_gate: Run root release checks, migrate and deploy the accepted build, attest it, then rerun Edmonton to READY.
+  next_gate: Root-recheck and deploy QA6-approved T8, attest it, then rerun Edmonton to pass the core accuracy gate.
   remaining_after_edmonton: CER campaign, 12-citation review, final video, contest submission, and five publications.

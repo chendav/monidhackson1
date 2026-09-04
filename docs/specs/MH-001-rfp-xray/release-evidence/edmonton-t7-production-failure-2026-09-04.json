@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "observed_at": "2026-09-04T09:04:10.130Z",
+  "verdict": "fail_core_accuracy_gate",
+  "deployment_id": "dpl_7wWdF8MR2XfzV2EebDLWTPN1AfGn",
+  "git_commit_sha": "885404f15cdd4b2c095123c2eb4d8037d3f4c3d3",
+  "run_id_sha256": "01b571f5b503abd40024b973080dfc578b0d61cdca3c5f1e80e6c98a180173fa",
+  "terminal_status": "ready",
+  "cleanup_confirmed": true,
+  "physical_pages": 55,
+  "critical_claims": 91,
+  "critical_claims_cited": 91,
+  "citations_verified": 93,
+  "rejected_model_citation_candidates": 25,
+  "record_authority_audit": {
+    "version": 1,
+    "manifest_digest": "a4a9c223429d99271b6a5eb015ef6c995c8cca380d1bc69f50efa04da8b01aac",
+    "receipt_byte_length": 128171,
+    "receipt_limit_bytes": 262144,
+    "record_count": 126,
+    "complete": false
+  },
+  "costs": {
+    "currency": "USD",
+    "actual_micro_usd": 3600,
+    "estimated_micro_usd": 1125910,
+    "known_subtotal_micro_usd": 1129510,
+    "completeness": "complete"
+  },
+  "passed_boundaries": {
+    "mandatory_m1_to_m4": true,
+    "security_pages_15_to_17": true,
+    "lowest_evaluated_price": true,
+    "annex_d_e_conflict": true,
+    "search_events": 0,
+    "follow_embedded_link_events": 0
+  },
+  "failure": {
+    "submission_method": null,
+    "closing_date": null,
+    "reason": "Non-publishable model records globally vetoed the independently adjudicated submission channel."
+  },
+  "evidence_boundary": "This run is retained as falsifying evidence and is not a passing Edmonton release run. OpenAI and infrastructure amounts remain estimates, not actual charges."
+}

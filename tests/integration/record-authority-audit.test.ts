@@ -142,7 +142,7 @@ describe("record authority pipeline audit", () => {
 
     expect(completed.cleanupConfirmed).toBe(true);
     expect(completed.recordAuthorityAudit).toMatchObject({
-      version: 1,
+      version: 2,
       manifest_digest: actualReceiptDigest,
       receipt_byte_length: actualReceiptBytes,
       receipt_limit_bytes: 262_144,

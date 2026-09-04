@@ -6,7 +6,7 @@ import { z } from "zod";
 const RECEIPT_LIMIT_BYTES = 262_144;
 
 export const RecordAuthorityAuditCliSchema = z.object({
-  version: z.literal(1),
+  version: z.union([z.literal(1), z.literal(2)]),
   manifest_digest: z.string().regex(/^[a-f0-9]{64}$/),
   receipt_byte_length: z.number().int().nonnegative().max(RECEIPT_LIMIT_BYTES),
   receipt_limit_bytes: z.literal(RECEIPT_LIMIT_BYTES),

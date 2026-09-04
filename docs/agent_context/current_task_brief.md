@@ -49,11 +49,9 @@ cost. The product is document-only and does not search for tenders.
 
 ## Current Phase
 
-- `main` and `origin/main` include governance commit `2a5f8d9`; the working tree
-  contains the uncommitted T6 Agent-semantic redesign.
-- Production at `https://rfp-xray.vercel.app` is deliberately fail-closed because
-  the old deployment's Workflow/provider attestations expired; database,
-  storage, and maintenance remain ready. Refresh after the accepted deployment.
+- `main` and `origin/main` are commit `885404f`; production deployment
+  `dpl_7wWdF8MR2XfzV2EebDLWTPN1AfGn` is live with schema v10 and fresh runtime
+  and provider attestations.
 - The last controlled Edmonton run reached `partial`, not READY. It cost
   USD 1.020701, completed controlled cleanup, and recovered requirements,
   security facts, M1-M4, and the Annex D/E conflict, but evaluation and several
@@ -61,6 +59,13 @@ cost. The product is document-only and does not search for tenders.
 - T7 record-bound Agent authority and its sanitized 30-day receipt audit passed
   independent QA5 Revision 3 with `APPROVE`, P0=0/P1=0/P2=0. Root reruns passed
   715 tests, official fixtures 3/3, production build, and Playwright 14/14.
+- The post-deploy Edmonton run reached `ready` and cleaned sources, but failed
+  the core gate because 25 discarded model citations made the global authority
+  incomplete and suppressed an independent Email result. T8 addresses only
+  that state-model coupling; no repeat paid run occurs before QA6 approval.
+- T8 passed independent QA6 with `APPROVE`, P0=0/P1=0/P2=0. Root reruns passed
+  721 tests, official fixtures 3/3, build, and Playwright 14/14. Deployment is
+  authorized; a second controlled Edmonton run remains the production proof.
 
 ## Owners
 
@@ -72,7 +77,6 @@ cost. The product is document-only and does not search for tenders.
 
 ## Immediate Next Action
 
-Commit and push the accepted candidate, apply schema v10 migration, deploy and
-bind fresh runtime/provider attestations, then run one controlled Edmonton pilot.
-Only a READY pilot that passes golden, cleanup, cost, latency, and receipt-audit
-checks can authorize the remaining campaign.
+Commit and deploy the QA6-approved T8, refresh exact-deployment attestations,
+then run one controlled Edmonton pilot. Only a full pass can authorize the
+remaining campaign.

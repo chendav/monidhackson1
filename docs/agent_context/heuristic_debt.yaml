@@ -3,4 +3,11 @@ thresholds:
   review_at: 3
   mandatory_at: 5
   block_local_heuristics_at: 8
-subsystems: []
+subsystems:
+  - id: submission_authority_publication_boundary
+    evidence_count: 1
+    status: reframed
+    trigger: discarded model citations globally vetoed an independent submission ledger
+    accepted_model: separate record publication disposition from package submission safety
+    review: docs/specs/MH-001-rfp-xray/reframing_review.md
+    local_heuristics_blocked: true

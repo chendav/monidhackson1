@@ -9,14 +9,15 @@ import type {
 import { sha256Hex, stableJson } from "@/lib/crypto";
 import type { CitationDocument } from "@/lib/evidence/citations";
 
-export const RECORD_AUTHORITY_VERSION = 1 as const;
+export const RECORD_AUTHORITY_ENVELOPE_VERSION = 1 as const;
+export const RECORD_AUTHORITY_VERSION = 2 as const;
 export const MAX_RECORD_AUTHORITY_ANNOTATIONS_PER_BATCH = 40;
 export const MAX_MODEL_CITATIONS_PER_ANNOTATED_RECORD = 3;
 export const MAX_EXACT_OCCURRENCES_PER_CITATION = 8;
 export const MAX_RECORD_AUTHORITY_RECEIPT_BYTES = 262_144;
 
 export const RecordAuthorityEnvelopeSchema = z.object({
-  v: z.literal(RECORD_AUTHORITY_VERSION),
+  v: z.literal(RECORD_AUTHORITY_ENVELOPE_VERSION),
   r: z.array(z.tuple([
     z.enum(["c", "q", "r", "e"]),
     z.number().int().nonnegative(),
@@ -45,7 +46,7 @@ export interface JoinedRecordAuthority {
   canonical_record_digest: string;
   kind: RecordKind;
   relevance: SubmissionRelevance;
-  disposition: "verified" | "unresolved";
+  disposition: "verified" | "discarded" | "unresolved";
   reason: string | null;
   contributing_origin_record_keys: string[];
   whole_bid_channels: SubmissionChannelSignature[];
@@ -73,16 +74,17 @@ export interface VerifiedOriginRecordAuthority {
   relevance: SubmissionRelevance | null;
   canonical_record_digest: string;
   merged_record_id: string;
-  disposition: "verified" | "unresolved";
+  disposition: "verified" | "discarded" | "unresolved";
   reason: string | null;
   citation_bindings: RecordAuthorityCitationBinding[];
 }
 
 export interface VerifiedRecordAuthorityManifest {
-  version: typeof RECORD_AUTHORITY_VERSION;
+  version: 1 | typeof RECORD_AUTHORITY_VERSION;
   complete: boolean;
   package_veto: boolean;
   unresolved_reasons: string[];
+  discarded_reasons: string[];
   receipt_byte_length: number;
   receipt_capacity_bytes: typeof MAX_RECORD_AUTHORITY_RECEIPT_BYTES;
   /** Server-computed digest over every origin and its merged attachment. */
@@ -93,13 +95,14 @@ export interface VerifiedRecordAuthorityManifest {
 }
 
 function authorityManifestDigestPayload(input: Pick<VerifiedRecordAuthorityManifest,
-  "version" | "complete" | "package_veto" | "unresolved_reasons" |
+  "version" | "complete" | "package_veto" | "unresolved_reasons" | "discarded_reasons" |
   "origin_record_key_to_merged_record_id" | "origins" | "records">) {
   return {
     version: input.version,
     complete: input.complete,
     package_veto: input.package_veto,
     unresolved_reasons: input.unresolved_reasons,
+    discarded_reasons: input.discarded_reasons,
     origin_record_key_to_merged_record_id: input.origin_record_key_to_merged_record_id,
     origins: input.origins,
     records: input.records
@@ -107,7 +110,7 @@ function authorityManifestDigestPayload(input: Pick<VerifiedRecordAuthorityManif
 }
 
 export function verifiedRecordAuthorityManifestDigest(input: Pick<VerifiedRecordAuthorityManifest,
-  "version" | "complete" | "package_veto" | "unresolved_reasons" |
+  "version" | "complete" | "package_veto" | "unresolved_reasons" | "discarded_reasons" |
   "origin_record_key_to_merged_record_id" | "origins" | "records">) {
   return sha256Hex(stableJson(authorityManifestDigestPayload(input)));
 }
@@ -135,6 +138,12 @@ function sealRecordAuthorityManifest(
 }
 
 export function recordAuthorityManifestIntegrity(input: VerifiedRecordAuthorityManifest) {
+  // Version 1 coupled every publication miss to a package-wide veto. It is
+  // intentionally accepted by the TypeScript boundary only so old receipts
+  // can be rejected deterministically instead of being guessed forward.
+  if (input.version !== RECORD_AUTHORITY_VERSION || !Array.isArray(input.discarded_reasons)) {
+    return false;
+  }
   const contributors = input.records.flatMap((record) => record.contributing_origin_record_keys.map(
     (origin) => ({ origin, mergedId: record.merged_record_id })
   ));
@@ -150,7 +159,11 @@ export function recordAuthorityManifestIntegrity(input: VerifiedRecordAuthorityM
     new Set(contributorKeys).size === contributorKeys.length &&
     new Set(mappingKeys).size === mappingKeys.length &&
     contributorKeys.length === mappingKeys.length &&
-    contributors.every(({ origin, mergedId }) =>
+    input.package_veto === (!input.complete || input.records.some((record) =>
+      record.disposition === "unresolved" || record.relevance === "u"
+    )) && input.records.every((record) =>
+      record.disposition !== "discarded" || record.relevance === "n"
+    ) && contributors.every(({ origin, mergedId }) =>
       input.origin_record_key_to_merged_record_id[origin] === mergedId
     ) && input.origins.every((origin) =>
       input.origin_record_key_to_merged_record_id[origin.origin_record_key] === origin.merged_record_id &&
@@ -168,7 +181,7 @@ interface OriginRecord {
   record: ModelRecord;
   binding: SubmissionBatchBinding;
   relevance: SubmissionRelevance | null;
-  disposition: "verified" | "unresolved";
+  disposition: "verified" | "discarded" | "unresolved";
   reason: string | null;
   wholeBidChannels: Set<SubmissionChannelSignature>;
   citationBindings: RecordAuthorityCitationBinding[];
@@ -269,7 +282,7 @@ export function recordAuthorityManifestDigest(draft: DraftAnalysis) {
 
 export function maximumRecordAuthorityEnvelope(draft: DraftAnalysis) {
   return JSON.stringify({
-    v: RECORD_AUTHORITY_VERSION,
+    v: RECORD_AUTHORITY_ENVELOPE_VERSION,
     r: recordsIn(draft).slice(0, MAX_RECORD_AUTHORITY_ANNOTATIONS_PER_BATCH)
       .map(({ kind, ordinal }) => [kind, ordinal, "u"])
   });
@@ -339,6 +352,18 @@ function mergedIds(origins: OriginRecord[]) {
   return result;
 }
 
+// These failures concern whether an exactly-once, canonical-bound `n` record
+// may be published. The Agent has already stated that the record is unrelated
+// to submission method, so omitting it is safe. Semantic/structural failures
+// (including relation overlap and every capacity/integrity failure) are not in
+// this set and retain the package-wide veto.
+const DISCARDABLE_NON_SUBMISSION_PUBLICATION_FAILURES = new Set([
+  "missing_exact_citation",
+  "cross_document_citation",
+  "non_exact_or_uncovered_citation",
+  "incomplete_occurrence_coverage"
+]);
+
 export function verifyRecordAuthorities(input: {
   batches: RecordAuthorityBatch[];
   ledger: SubmissionCandidateLedger;
@@ -349,6 +374,7 @@ export function verifyRecordAuthorities(input: {
 }): VerifiedRecordAuthorityManifest {
   const origins: OriginRecord[] = [];
   const globalReasons: string[] = [];
+  const discardedReasons: string[] = [];
   const verifiedCoverage = new Map(input.submission.records.map((record) => [record.candidate_id, record]));
   const knownBatchIds = new Set(input.batches.map((batch) => batch.binding.batch_id));
   if (knownBatchIds.size !== input.batches.length) globalReasons.push("duplicate_batch");
@@ -473,6 +499,12 @@ export function verifyRecordAuthorities(input: {
         array_ordinal: ordinal,
         canonical_public_record: canonicalModelRecord(kind, record)
       }));
+      const disposition = !reason
+        ? "verified" as const
+        : relevance === "n" &&
+            DISCARDABLE_NON_SUBMISSION_PUBLICATION_FAILURES.has(reason)
+          ? "discarded" as const
+          : "unresolved" as const;
       origins.push({
         originKey,
         kind,
@@ -480,12 +512,14 @@ export function verifyRecordAuthorities(input: {
         record,
         binding: batch.binding,
         relevance,
-        disposition: reason ? "unresolved" : "verified",
+        disposition,
         reason,
         wholeBidChannels,
         citationBindings
       });
-      if (reason) globalReasons.push(reason);
+      if (reason) {
+        (disposition === "discarded" ? discardedReasons : globalReasons).push(reason);
+      }
     }
   }
 
@@ -507,16 +541,30 @@ export function verifyRecordAuthorities(input: {
     let reason = relevances.size !== 1
       ? "duplicate_record_relevance_disagreement"
       : group.find((origin) => origin.disposition === "unresolved")?.reason ?? null;
+    let disposition: JoinedRecordAuthority["disposition"] = reason
+      ? "unresolved"
+      : group.some((origin) => origin.disposition === "discarded")
+        ? "discarded"
+        : "verified";
+    if (!reason && disposition === "discarded") {
+      reason = group.find((origin) => origin.disposition === "discarded")?.reason ??
+        "non_submission_publication_failure";
+    }
     const relevance = relevances.has("s") ? "s" : relevances.has("u") ? "u" : "n";
     const channels = new Set(group.flatMap((origin) => [...origin.wholeBidChannels]));
-    if (!reason && relevance === "s" && channels.size === 0) reason = "submission_record_without_whole_bid_relation";
-    if (reason) globalReasons.push(reason);
+    if (disposition === "verified" && relevance === "s" && channels.size === 0) {
+      reason = "submission_record_without_whole_bid_relation";
+      disposition = "unresolved";
+    }
+    if (reason) {
+      (disposition === "discarded" ? discardedReasons : globalReasons).push(reason);
+    }
     joined.push({
       merged_record_id: idParts.join(":"),
       canonical_record_digest: canonicalModelRecordDigest(kind as RecordKind, group[0]!.record),
       kind: kind as RecordKind,
       relevance,
-      disposition: reason ? "unresolved" : "verified",
+      disposition,
       reason,
       contributing_origin_record_keys: group.map((origin) => origin.originKey),
       whole_bid_channels: [...channels].toSorted()
@@ -579,6 +627,7 @@ export function verifyRecordAuthorities(input: {
     package_veto: !complete || joined.some((record) => record.relevance === "u" ||
       record.disposition === "unresolved"),
     unresolved_reasons: uniqueReasons,
+    discarded_reasons: [...new Set(discardedReasons)],
     origin_record_key_to_merged_record_id: Object.fromEntries(originToMerged),
     origins: verifiedOrigins,
     records: joined
@@ -595,6 +644,7 @@ export function unresolvedRecordAuthority(reason: string): VerifiedRecordAuthori
     complete: false,
     package_veto: true,
     unresolved_reasons: [reason],
+    discarded_reasons: [],
     origin_record_key_to_merged_record_id: {},
     origins: [],
     records: []

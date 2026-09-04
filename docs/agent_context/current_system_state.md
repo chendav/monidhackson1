@@ -4,13 +4,10 @@ Updated: 2026-09-04
 
 ## Confirmed
 
-- The repository is on `main`; `HEAD` and `origin/main` include governance
-  commit `2a5f8d9`. The current T6 Edmonton recovery redesign is uncommitted.
-- The public application is `https://rfp-xray.vercel.app`. A read-only health
-  check on 2026-09-04 MDT returned `status=not_ready`, `mode=unavailable` because
-  the old deployment's short-lived Workflow and provider attestations expired.
-  Database, Neon capacity, maintenance, and private storage remain ready. This
-  is the intended fail-closed state until the accepted deployment is re-attested.
+- The repository is on `main`; `HEAD` and `origin/main` are commit `885404f`.
+- The public application is `https://rfp-xray.vercel.app`, deployment
+  `dpl_7wWdF8MR2XfzV2EebDLWTPN1AfGn`. Schema v10 is migrated and fresh runtime
+  and provider attestations make health report `status=ok`, `mode=live`.
 - Production compute is Vercel Web/API/Workflow; durable application state is
   Neon; Railway provides private S3-compatible temporary storage and one
   bounded no-domain maintenance trigger. Railway does not run RFP analysis.
@@ -38,6 +35,14 @@ Updated: 2026-09-04
   persistence and migration, retention separation, and a safe operator reader.
   Independent QA5 returned `APPROVE`, P0=0/P1=0/P2=0; deployment is allowed
   subject to the normal root migration and release gates.
+- The first post-T7 Edmonton run reached `ready` with cleanup confirmed but
+  failed the core accuracy gate. Its private audit recorded 126 authority
+  records, 128171/262144 receipt bytes, and `complete=false`; 25 rejected model
+  citations globally suppressed an independently adjudicated Email channel.
+  T8 is an accepted bounded reframe separating publication validity from
+  package submission safety. T8 passed independent QA6 with
+  `APPROVE`, P0=0/P1=0/P2=0; root release checks passed and redeployment is
+  authorized before the second controlled run.
 - Root `AGENTS.md`, Chief governance, role catalog, context bundles, knowledge
   policy, and reusable task templates match the refreshed global
   `chief-agent-orchestration` assets. Bootstrap and active validation pass.
@@ -56,7 +61,7 @@ Updated: 2026-09-04
 
 ## Unknown
 
-- Whether the next Edmonton run will reach READY with all golden executive and
+- Whether T8 and the next Edmonton run will reach READY with all golden executive and
   evaluation fields at acceptable cost and latency.
 - Whether the full CER main-plus-three-amendment campaign passes every replacement
   and conflict requirement in production.

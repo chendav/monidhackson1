@@ -51,7 +51,7 @@ describe("record authority audit persistence", () => {
       "version"
     ]);
     expect(audit).toMatchObject({
-      version: 1,
+      version: 2,
       manifest_digest: manifest.record_manifest_digest,
       receipt_byte_length: manifest.receipt_byte_length,
       receipt_limit_bytes: MAX_RECORD_AUTHORITY_RECEIPT_BYTES,
@@ -77,6 +77,17 @@ describe("record authority audit persistence", () => {
     }, new Date("2026-09-04T12:01:00Z"));
     expect(audit.complete).toBe(false);
     expect(audit.manifest_digest).not.toBe("f".repeat(64));
+
+    const legacy = createRecordAuthorityAudit({
+      ...manifest,
+      version: 1,
+      record_manifest_digest: "1".repeat(64)
+    }, new Date("2026-09-04T12:02:00Z"));
+    expect(legacy).toMatchObject({ version: 2, complete: false, record_count: 0 });
+    expect(formatRecordAuthorityAudit(runId, {
+      ...audit,
+      version: 1
+    }).version).toBe(1);
   });
 
   it("round-trips the nullable audit through the Neon row mapping", () => {

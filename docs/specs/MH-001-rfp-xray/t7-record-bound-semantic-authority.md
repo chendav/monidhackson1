@@ -1,5 +1,9 @@
 # T7 Record-Bound Agent Semantic Authority
 
+> T8 refines this design by separating non-submission publication failure from
+> submission safety. The provider annotation wire remains v1; server authority
+> receipts are v2. See `reframing_review.md` for the current disposition model.
+
 ## Decision
 
 T6 is closed without acceptance after QA4 exhausted three revision rounds. Its
@@ -104,7 +108,7 @@ multiply mapped origin makes the authority manifest incomplete.
 Duplicate semantic records use the conservative lattice:
 
 ```text
-invalid or unresolved > submission relevant > non-submission
+unresolved > discarded > submission relevant > non-submission
 ```
 
 An `s` versus `n` disagreement is unresolved. Cross-batch identity cannot be
@@ -116,7 +120,8 @@ For every model-authored record:
 
 1. Exactly one `(kind, ordinal)` annotation exists in the same parsed batch.
 2. Every model citation passes existing exact PDF.js verification before the
-   record can be authoritative.
+   record can be published. An exactly-once canonical `n` record that fails only
+   an allowed publication check is discarded instead of vetoing submission.
 3. Exact verification produces all raw UTF-16 occurrences of the quote on the
    verified physical page; repaired/normalized-only citations cannot authorize
    a model record.
@@ -135,9 +140,11 @@ For every model-authored record:
 10. A populated Draft summary submission method must be mirrored by at least
     one verified `s` Claim or Requirement, but Draft output never establishes
     authority by itself.
-11. Missing, duplicate, unknown, cross-document, cross-page, non-exact,
-    uncovered, relationless `s`, conflicting `s/n`, or prompt-injection
-    taint makes the record unresolved and vetoes package submission authority.
+11. Missing, duplicate, unknown, relationless `s`, conflicting `s/n`, relation
+    overlap/mismatch, capacity, integrity, or prompt-injection taint makes the
+    record unresolved and vetoes package submission authority. Cross-document,
+    non-exact, missing, or uncovered citation evidence is discardable only for
+    an otherwise valid exactly-once `n` record.
 12. Server-recovered deterministic records retain their existing path and are
     not required to carry model annotations. Recovery creates a new server
     identity: a recovered Claim, Requirement, Evaluation rule, or future Risk
@@ -186,17 +193,17 @@ MAX_EXACT_OCCURRENCES_PER_CITATION = 8
 MAX_RECORD_AUTHORITY_RECEIPT_BYTES = 262144
 ```
 
-The receipt hashes its complete canonical payload: canonical record digest,
+The v2 receipt hashes its complete canonical payload: canonical record digest,
 origin-to-merged mapping, exact occurrence offsets, candidate/relation binding
 digests, disposition, and contributor lineage. A ninth exact occurrence or a
 receipt byte length above 262,144 produces an unresolved package veto. Nothing
 is truncated and no new call or retry is attempted. Official empty-record
-Edmonton and CER control receipts are 143 bytes, leaving 262,001 bytes of
-server-receipt headroom. Non-empty `representative_local` receipts made from
-real PDF.js quotes and complete official ledgers measure 3,806 bytes for
-Edmonton (one verified `s` plus two `n` records across three batches; 258,338
-bytes headroom) and 5,998 bytes for CER (five `n` records across five batches
-and four documents; 256,146 bytes headroom). These are neither paid-output nor
+Edmonton and CER v2 control receipts are 166 bytes, leaving 261,978 bytes of
+server-receipt headroom. Non-empty `representative_local` v2 receipts made from
+real PDF.js quotes and complete official ledgers measure 3,829 bytes for
+Edmonton (one verified `s` plus two `n` records across three batches; 258,315
+bytes headroom) and 6,021 bytes for CER (five `n` records across five batches
+and four documents; 256,123 bytes headroom). These are neither paid-output nor
 worst-case claims. The first controlled post-deploy Edmonton/CER run must record
 the actual non-empty receipt byte length as the empirical sufficiency gate; all
 receipts are checked at runtime against the same hard cap.
@@ -248,10 +255,11 @@ Record-specific publication:
 
 | Verified record state | Result |
 |---|---|
-| `n` | ordinary Claim/Requirement/Risk/Evaluation validation may proceed |
+| verified `n` | ordinary Claim/Requirement/Risk/Evaluation validation may proceed |
+| discarded `n` | omitted; no contributor lineage, conflict input, or Q&A authority |
 | `s`, compatible with final channel | ordinary validation may proceed |
 | `s`, unbound or incompatible | Claim/Requirement `needs_review`; Risk/Evaluation omitted; method null |
-| `u`, invalid, or missing | Claim/Requirement `needs_review`; Risk/Evaluation omitted; method null |
+| `u`, structurally invalid, or missing | Claim/Requirement `needs_review`; Risk/Evaluation omitted; method null |
 | server-recovered | preserve existing deterministic behavior |
 
 Server-generated conflicts inherit the conservative join of their contributing

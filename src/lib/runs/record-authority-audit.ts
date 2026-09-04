@@ -8,7 +8,7 @@ import {
 } from "@/lib/analysis/record-authority";
 
 export const RecordAuthorityAuditSchema = z.object({
-  version: z.literal(RECORD_AUTHORITY_VERSION),
+  version: z.union([z.literal(1), z.literal(RECORD_AUTHORITY_VERSION)]),
   manifest_digest: z.string().regex(/^[a-f0-9]{64}$/),
   receipt_byte_length: z.number().int().nonnegative()
     .max(MAX_RECORD_AUTHORITY_RECEIPT_BYTES),

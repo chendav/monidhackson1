@@ -1290,6 +1290,136 @@ self-certification.
 
 Memory disposition: proposed only; Chief/Reviewer owns promotion or rejection.
 
+## T8 Implementation — Publication Validity vs Submission Safety
+
+This bounded reframe implements the accepted experiment in
+`reframing_review.md`. It changes only private record authority and public
+materialization policy; it adds no lexical classifier, closing-date fallback,
+public route/schema, database migration, provider call, retry, or cost change.
+No network, credential, paid call, deployment, commit, push, or Reviewer-verdict
+edit occurred. This is evidence for QA6, not self-certification.
+
+### Changed Files
+
+- `src/lib/analysis/record-authority.ts`
+- `src/lib/analysis/materialize.ts`
+- `src/lib/runs/record-authority-audit.ts`
+- `scripts/read-record-authority-audit.mjs`
+- `tests/unit/record-authority.test.ts`
+- `tests/unit/record-authority-audit.test.ts`
+- `tests/integration/record-authority-audit.test.ts`
+- `tests/golden/official-fixture-audit.test.ts`
+- `docs/specs/MH-001-rfp-xray/reframing_review.md`
+- `docs/specs/MH-001-rfp-xray/t7-record-bound-semantic-authority.md`
+- `docs/specs/MH-001-rfp-xray/tasks.md`
+- This T8 section in `docs/specs/MH-001-rfp-xray/handoff-backend.md`
+
+### Implemented Decisions
+
+- The paid provider annotation sidecar remains v1. The server-owned authority
+  receipt is v2 and hashes the new `discarded_reasons` field. Full v1 authority
+  receipts fail the integrity gate and are never upgraded or published.
+- Every origin and joined model record is `verified`, `discarded`, or
+  `unresolved`. Only an exactly-once canonical `n` record can be discarded, and
+  only for `missing_exact_citation`, `cross_document_citation`,
+  `non_exact_or_uncovered_citation`, or `incomplete_occurrence_coverage`.
+- `discarded` records remain represented in the private canonical mapping so
+  exactly-once identity can be proven, but materialization omits them and gives
+  them no contributor lineage, generated conflict input, or Q&A authority.
+  They increment the disclosed unsupported-item count without creating a
+  package truth blocker.
+- All semantic/structural faults remain global: any `s` binding failure, `u`,
+  missing/duplicate/unknown annotation, prompt taint, submission Requirement
+  marked `n`, relation overlap/mismatch, `s/n` disagreement, unmirrored non-null
+  submission summary, incomplete ledger, lost/multiple origin, merged mismatch,
+  capacity/integrity failure, exact-occurrence overflow, or receipt overflow
+  yields `complete=false` and `package_veto=true`.
+- Field-specific materialization uses the same split. A verified `n` record that
+  later fails publication validation is omitted without lineage or a truth
+  blocker. The same failure on a verified `s` record sets the package unbound
+  signal and withholds submission authority.
+- The behavior applies uniformly to Claims, Requirements, Risks, and Evaluation
+  rules. Recovered server facts stay origin-free and can coexist with discarded
+  model noise. No closing date is synthesized.
+- The private seven-field `RecordAuthorityAudit` and schema v10 JSONB column are
+  unchanged. Audit/CLI validation accepts historical version 1 and current
+  version 2; new verified or fallback writes are v2. No database migration or
+  public endpoint is needed.
+
+### Falsification Evidence
+
+- The Edmonton-shaped fixture has 126 canonical model records in four bounded
+  batches. Twenty-five exactly-once `n` records carry non-existent citations.
+  The v2 receipt contains exactly 25 `discarded` records,
+  `complete=true`, `package_veto=false`, and no unresolved reasons.
+- Materialization retains independently adjudicated Email, recovered title, and
+  recovered M1 while keeping `closing_date=null`. None of the 25 fabricated
+  records is visible or answerable; a discarded origin returns zero public
+  contributor keys.
+- A companion fixture injects bad `n` records into Claim, Requirement, Risk,
+  and Evaluation simultaneously. All four are omitted, Email remains, and Q&A
+  returns `not_found`.
+- A second companion uses exact citations but unsupported record assertions so
+  authority is initially verified `n`; later field validation still omits all
+  four collections without suppressing Email. Replacing the record with a
+  verified `s` assertion failure suppresses Email and Q&A.
+- The global-veto matrix covers bad `s`, `u`, missing, duplicate and unknown
+  annotations, prompt taint, submission Requirement=`n`, `n` overlap with a
+  whole-bid relation, unmirrored summary, incomplete ledger, merged mismatch,
+  legacy v1 authority, and receipt-cap fallback. Existing `s/n` disagreement,
+  exact-occurrence 8/9, origin/digest mutation, SecureDrop, amendment lineage,
+  recovered collision, provider-cap, cost, and replay regressions remain green.
+
+### Exact Checks
+
+- `pnpm exec tsc --noEmit; pnpm exec vitest run tests/unit/record-authority.test.ts tests/unit/record-authority-audit.test.ts tests/integration/record-authority-audit.test.ts tests/unit/materialize-reconciliation.test.ts tests/unit/closed-world.test.ts tests/unit/openai-adapter.test.ts tests/integration/openai-paid-cost-ledger.test.ts`:
+  PASS; TypeScript passed, then 7 files and 241 tests passed.
+- `$env:RFP_XRAY_FIXTURE_DIR='D:\monidhackson\.data\official-fixtures'; pnpm exec vitest run tests/golden/official-fixture-audit.test.ts`:
+  PASS, 1 file and 3 tests. V2 freezes empty receipts at 166 bytes,
+  representative Edmonton at 3,829 bytes, and representative CER at 6,021
+  bytes, all with positive 262,144-byte headroom.
+- `pnpm check`: PASS; ESLint and TypeScript passed, 57 test files passed/4
+  skipped, and 721 tests passed/10 skipped.
+- `pnpm build`: PASS; Next production compilation and TypeScript passed;
+  Workflow reported 9 steps and 5 workflows; 13 static entries generated.
+- `pnpm exec playwright test tests/e2e/rfp-workspace.spec.ts`: PASS, 14/14
+  Chromium/mobile tests.
+- `git diff --check` and separate no-index checks for both currently untracked
+  evidence/design files: PASS (line-ending notices ignored); the bounded T8
+  secret-pattern scan passed with zero hits.
+
+### Confirmed / Inferred / Unknown
+
+- Confirmed: the accepted 126/25 local falsifier and every declared fail-closed
+  counterexample pass without changing provider request count or public schema.
+- Confirmed: official Edmonton/CER hashes, pages, source facts, amendment
+  behavior, and v2 representative receipt bounds pass locally.
+- Inferred: the production Edmonton failure mode (126 records, 25 rejected
+  citations) no longer suppresses an otherwise complete exact Email ledger.
+- Unknown: whether a new paid production Edmonton run returns the same record
+  mix and passes every product gate. No repeat paid run is authorized before
+  QA6 approval.
+
+### Risks and Reviewer Focus
+
+- QA6 should change each of the 25 `n` annotations to `s` or `u`, remove or
+  duplicate one annotation, taint one batch, and mutate one mapping; every case
+  must restore the global veto without admitting any affected collection.
+- QA6 should use an exact but semantically unsupported citation on both `n` and
+  `s`: `n` must disappear without lineage/Q&A; `s` must withhold the method.
+- The v2 receipt is internal. A stored v1 audit remains readable, but a v1 full
+  authority receipt must never become current authority.
+
+### Proposed Long-Term Memory
+
+- Publication failure and submission safety are separate state axes. Safely
+  omitted, Agent-declared non-submission noise should not erase an independent
+  submission fact.
+- Only a narrow enumerated publication-failure class may be discarded; semantic,
+  structural, taint, and capacity uncertainty remain package-wide vetoes.
+
+Memory disposition: proposed only; Chief/Reviewer owns promotion or rejection.
+
 ## Revision 18 — QA4 Non-Requirement Global Veto Delta
 
 This final bounded T6 delta addresses QA4 round 2 finding

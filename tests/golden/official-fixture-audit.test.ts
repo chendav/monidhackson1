@@ -234,9 +234,9 @@ describe("optional official-PDF local audit (PDFs are never committed)", () => {
       mergedDraft: emptyDraft()
     });
     expect(emptyAuthorityReceipt).toMatchObject({ complete: true, package_veto: false });
-    expect(emptyAuthorityReceipt.receipt_byte_length).toBe(143);
+    expect(emptyAuthorityReceipt.receipt_byte_length).toBe(166);
     expect(MAX_RECORD_AUTHORITY_RECEIPT_BYTES - emptyAuthorityReceipt.receipt_byte_length)
-      .toBe(262_001);
+      .toBe(261_978);
     const representativeDrafts: DraftAnalysis[] = [
       emptyDraft({ claims: [{
         claim_id: "representative-email",
@@ -284,9 +284,9 @@ describe("optional official-PDF local audit (PDFs are never committed)", () => {
       mergedDraft: mergeDrafts(representativeDrafts)
     });
     expect(representativeReceipt).toMatchObject({ complete: true, package_veto: false });
-    expect(representativeReceipt.receipt_byte_length).toBe(3_806);
+    expect(representativeReceipt.receipt_byte_length).toBe(3_829);
     expect(MAX_RECORD_AUTHORITY_RECEIPT_BYTES - representativeReceipt.receipt_byte_length)
-      .toBe(258_338);
+      .toBe(258_315);
 
     const recoveredEvaluation = recoverBasisOfSelectionEvaluationAnchors(
       emptyDraft(),
@@ -474,9 +474,9 @@ describe("optional official-PDF local audit (PDFs are never committed)", () => {
       mergedDraft: emptyDraft()
     });
     expect(emptyAuthorityReceipt).toMatchObject({ complete: true, package_veto: false });
-    expect(emptyAuthorityReceipt.receipt_byte_length).toBe(143);
+    expect(emptyAuthorityReceipt.receipt_byte_length).toBe(166);
     expect(MAX_RECORD_AUTHORITY_RECEIPT_BYTES - emptyAuthorityReceipt.receipt_byte_length)
-      .toBe(262_001);
+      .toBe(261_978);
     const representativeQuotes = [
       {
         id: "representative-cer-mandatory", topic: "mandatory evaluation", category: "mandatory" as const,
@@ -521,9 +521,9 @@ describe("optional official-PDF local audit (PDFs are never committed)", () => {
       mergedDraft: mergeDrafts(representativeDrafts)
     });
     expect(representativeReceipt).toMatchObject({ complete: true, package_veto: false });
-    expect(representativeReceipt.receipt_byte_length).toBe(5_998);
+    expect(representativeReceipt.receipt_byte_length).toBe(6_021);
     expect(MAX_RECORD_AUTHORITY_RECEIPT_BYTES - representativeReceipt.receipt_byte_length)
-      .toBe(256_146);
+      .toBe(256_123);
 
     expect(base.pages[8].normalizedText).toContain("fails to meet all mandatory solicitation requirements non-compliant");
     expect(base.pages[10].normalizedText).toContain("minimum of fifty (50) points");
