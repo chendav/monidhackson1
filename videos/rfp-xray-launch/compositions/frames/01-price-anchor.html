@@ -1,0 +1,359 @@
+<template>
+  <style>
+    #root {
+      position: relative;
+      width: 1920px;
+      height: 1080px;
+      overflow: hidden;
+      container-type: size;
+      color: #17212B;
+      font-family: sans-serif;
+    }
+
+    #root .clip {
+      position: absolute;
+      inset: 0;
+      overflow: hidden;
+    }
+
+    [id="f01-price-anchor-ground"] {
+      position: absolute;
+      inset: 0;
+      background: #F2F5F7;
+    }
+
+    [id="f01-price-anchor-layout"] {
+      position: absolute;
+      inset: 0;
+    }
+
+    [id="f01-price-anchor-left"] {
+      position: absolute;
+      left: 96px;
+      top: 90px;
+      width: 670px;
+      height: 738px;
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+    }
+
+    [id="f01-price-anchor-accent"] {
+      width: 60px;
+      height: 4px;
+      border-radius: 2px;
+      background: #17425F;
+      transform-origin: left center;
+    }
+
+    [id="f01-price-anchor-eyebrow"] {
+      margin-top: 23px;
+      color: #17425F;
+      font-size: 16px;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      line-height: 1;
+      text-transform: uppercase;
+    }
+
+    [id="f01-price-anchor-source-date"] {
+      margin-top: 12px;
+      color: #173748;
+      font-size: 27px;
+      font-weight: 400;
+      line-height: 1.25;
+    }
+
+    [id="f01-price-anchor-metric"] {
+      position: absolute;
+      left: 0;
+      top: 246px;
+      width: 670px;
+    }
+
+    [id="f01-price-anchor-plan"] {
+      display: inline-flex;
+      align-items: center;
+      height: 36px;
+      padding: 0 17px;
+      border-radius: 100px;
+      background: rgba(23, 66, 95, 0.08);
+      color: #17425F;
+      font-size: 16px;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    [id="f01-price-anchor-number-row"] {
+      display: flex;
+      align-items: baseline;
+      width: 670px;
+      height: 220px;
+      margin-top: 19px;
+      white-space: nowrap;
+      transform-origin: left center;
+      will-change: transform, opacity;
+    }
+
+    [id="f01-price-anchor-currency"] {
+      color: #17425F;
+      font-size: 116px;
+      font-weight: 700;
+      line-height: 1;
+      letter-spacing: -0.045em;
+    }
+
+    [id="f01-price-anchor-counter"] {
+      display: inline-block;
+      width: 355px;
+      color: #17425F;
+      font-size: 190px;
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+      letter-spacing: -0.065em;
+      line-height: 1;
+      transform-origin: left center;
+      will-change: transform;
+    }
+
+    [id="f01-price-anchor-period"] {
+      margin-left: 8px;
+      color: #173748;
+      font-size: 35px;
+      font-weight: 600;
+      letter-spacing: -0.02em;
+      line-height: 1.1;
+      white-space: nowrap;
+      will-change: transform, opacity;
+    }
+
+    [id="f01-price-anchor-qualifier"] {
+      display: flex;
+      align-items: center;
+      min-height: 78px;
+      margin-top: 22px;
+      padding: 0 24px;
+      border-left: 4px solid #17425F;
+      border-radius: 12px;
+      background: rgba(23, 66, 95, 0.08);
+      color: #17212B;
+      font-size: 32px;
+      font-weight: 600;
+      letter-spacing: -0.02em;
+      line-height: 1.25;
+      will-change: transform, opacity;
+    }
+
+    [id="f01-price-anchor-evidence"] {
+      position: absolute;
+      left: 824px;
+      top: 64px;
+      width: 1000px;
+      height: 774px;
+      padding: 18px;
+      border: 1.5px solid rgba(23, 66, 95, 0.2);
+      border-radius: 14px;
+      background: rgba(23, 66, 95, 0.04);
+      box-sizing: border-box;
+      margin: 0;
+      transform-origin: center center;
+      will-change: transform, opacity;
+    }
+
+    [id="f01-price-anchor-evidence-head"] {
+      height: 46px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 4px 12px;
+      box-sizing: border-box;
+    }
+
+    [id="f01-price-anchor-evidence-label"] {
+      color: #17425F;
+      font-size: 16px;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    [id="f01-price-anchor-evidence-state"] {
+      display: inline-flex;
+      align-items: center;
+      gap: 9px;
+      color: #173748;
+      font-size: 15px;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+    }
+
+    [id="f01-price-anchor-evidence-dot"] {
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      background: #17425F;
+    }
+
+    [id="f01-price-anchor-image-shell"] {
+      width: 964px;
+      height: 692px;
+      overflow: hidden;
+      border: 1.5px solid rgba(23, 66, 95, 0.2);
+      border-radius: 10px;
+      background: #FFFFFF;
+      box-sizing: border-box;
+    }
+
+    [id="f01-price-anchor-capture"] {
+      display: block;
+      width: 100%;
+      height: auto;
+      transform: translateY(-620px);
+    }
+
+    [id="f01-price-anchor-divider"] {
+      position: absolute;
+      left: 788px;
+      top: 105px;
+      width: 1px;
+      height: 680px;
+      background: rgba(23, 66, 95, 0.15);
+      transform-origin: center top;
+    }
+  </style>
+
+  <div id="root" data-composition-id="f01-price-anchor" data-width="1920" data-height="1080">
+    <div id="f01-price-anchor-ground-track" class="clip" data-start="0" data-duration="6" data-track-index="0">
+      <div id="f01-price-anchor-ground"></div>
+    </div>
+
+    <div id="f01-price-anchor-content-track" class="clip" data-start="0" data-duration="6" data-track-index="1">
+      <div id="f01-price-anchor-layout">
+        <section id="f01-price-anchor-left" aria-label="Verified price">
+          <div id="f01-price-anchor-accent"></div>
+          <div id="f01-price-anchor-eyebrow">Official price</div>
+          <div id="f01-price-anchor-source-date">Source checked · 03 Sep 2026</div>
+
+          <div id="f01-price-anchor-metric">
+            <div id="f01-price-anchor-plan">Starter</div>
+            <div id="f01-price-anchor-number-row">
+              <span id="f01-price-anchor-currency">£</span>
+              <span id="f01-price-anchor-counter">0</span>
+              <span id="f01-price-anchor-period">/ month</span>
+            </div>
+            <div id="f01-price-anchor-qualifier">Typical usage: one tender</div>
+          </div>
+        </section>
+
+        <div id="f01-price-anchor-divider"></div>
+
+        <figure id="f01-price-anchor-evidence">
+          <figcaption id="f01-price-anchor-evidence-head">
+            <span id="f01-price-anchor-evidence-label">Official pricing capture</span>
+            <span id="f01-price-anchor-evidence-state">
+              <span id="f01-price-anchor-evidence-dot"></span>
+              Source evidence
+            </span>
+          </figcaption>
+          <div id="f01-price-anchor-image-shell">
+            <img
+              id="f01-price-anchor-capture"
+              data-layout-allow-overflow
+              src="assets/bidworx-pricing-2026-09-03.png"
+              alt="Official bidworx pricing page showing the Starter price"
+            />
+          </div>
+        </figure>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    (() => {
+      const tl = gsap.timeline({ paused: true });
+      const counter = document.getElementById("f01-price-anchor-counter");
+      const evidence = document.getElementById("f01-price-anchor-evidence");
+      const accent = document.getElementById("f01-price-anchor-accent");
+      const eyebrow = document.getElementById("f01-price-anchor-eyebrow");
+      const sourceDate = document.getElementById("f01-price-anchor-source-date");
+      const divider = document.getElementById("f01-price-anchor-divider");
+      const plan = document.getElementById("f01-price-anchor-plan");
+      const numberRow = document.getElementById("f01-price-anchor-number-row");
+      const period = document.getElementById("f01-price-anchor-period");
+      const qualifier = document.getElementById("f01-price-anchor-qualifier");
+      const state = { value: 0 };
+
+      tl.fromTo(
+        evidence,
+        { opacity: 0, scale: 0.97, y: 12 },
+        { opacity: 1, scale: 1, y: 0, duration: 0.55, ease: "power3.out" },
+        0.08
+      );
+      tl.fromTo(
+        accent,
+        { opacity: 0, scaleX: 0 },
+        { opacity: 1, scaleX: 1, duration: 0.42, ease: "power3.out" },
+        0.12
+      );
+      tl.fromTo(
+        [eyebrow, sourceDate],
+        { opacity: 0, y: 12 },
+        { opacity: 1, y: 0, duration: 0.5, stagger: 0.11, ease: "power3.out" },
+        0.24
+      );
+      tl.fromTo(
+        divider,
+        { opacity: 0, scaleY: 0 },
+        { opacity: 1, scaleY: 1, duration: 0.65, ease: "power3.out" },
+        0.58
+      );
+
+      tl.fromTo(
+        plan,
+        { opacity: 0, scale: 0.88, y: 10 },
+        { opacity: 1, scale: 1, y: 0, duration: 0.48, ease: "power3.out" },
+        1.55
+      );
+      tl.fromTo(
+        numberRow,
+        { opacity: 0, scale: 0.96, y: 18 },
+        { opacity: 1, scale: 1, y: 0, duration: 0.42, ease: "power3.out" },
+        1.72
+      );
+      tl.to(
+        state,
+        {
+          value: 190,
+          duration: 2.05,
+          ease: "power3.out",
+          onUpdate: () => {
+            counter.textContent = Math.round(state.value).toLocaleString("en-GB");
+          }
+        },
+        1.8
+      );
+      tl.fromTo(
+        counter,
+        { scale: 0.48 },
+        { scale: 1, duration: 2.05, ease: "power3.out" },
+        1.8
+      );
+      tl.fromTo(
+        period,
+        { opacity: 0, y: 18 },
+        { opacity: 1, y: 0, duration: 0.45, ease: "power3.out" },
+        3.7
+      );
+      tl.fromTo(
+        qualifier,
+        { opacity: 0, y: 16 },
+        { opacity: 1, y: 0, duration: 0.56, ease: "power3.out" },
+        4.12
+      );
+
+      window.__timelines = window.__timelines || {};
+      window.__timelines["f01-price-anchor"] = tl;
+    })();
+  </script>
+</template>

@@ -3,12 +3,18 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "npx --yes hyperframes@0.8.27 preview",
+    "dev": "hyperframes preview",
     "evidence:check": "node scripts/verify-evidence-gates.mjs",
     "test:evidence": "node --test scripts/verify-evidence-gates.test.mjs",
-    "build": "node scripts/verify-evidence-gates.mjs && npx --yes hyperframes@0.8.27 check",
-    "check": "node scripts/verify-evidence-gates.mjs && npx --yes hyperframes@0.8.27 check",
-    "render": "node scripts/verify-evidence-gates.mjs && npx --yes hyperframes@0.8.27 render",
-    "publish": "node scripts/verify-evidence-gates.mjs && npx --yes hyperframes@0.8.27 publish"
+    "build": "node scripts/verify-evidence-gates.mjs && hyperframes check",
+    "check": "node scripts/verify-evidence-gates.mjs && hyperframes check",
+    "render": "node scripts/verify-evidence-gates.mjs && hyperframes render",
+    "publish": "node scripts/verify-evidence-gates.mjs && hyperframes publish"
+  },
+  "dependencies": {
+    "gsap": "3.14.2"
+  },
+  "devDependencies": {
+    "hyperframes": "0.8.27"
   }
 }

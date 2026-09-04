@@ -1,5 +1,6 @@
 # dependencies
 /node_modules/
+**/node_modules/
 /.pnp
 .pnp.*
 
@@ -15,6 +16,7 @@
 # local runtime data
 /.data/
 /tmp/
+/videos/rfp-xray-launch/.hyperframes/
 
 # secrets
 .env

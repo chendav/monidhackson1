@@ -3,28 +3,36 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=1920, height=1080" />
-    <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+    <title>RFP X-Ray launch</title>
+    <script src="./node_modules/gsap/dist/gsap.min.js"></script>
     <style>
       * {
-        margin: 0;
-        padding: 0;
         box-sizing: border-box;
       }
       html,
       body {
+        width: 1920px;
+        height: 1080px;
         margin: 0;
+        overflow: hidden;
+        background: #F2F5F7;
+      }
+      body {
+        color: #17212B;
+        font-family: sans-serif;
+      }
+      #root {
+        position: relative;
         width: 1920px;
         height: 1080px;
         overflow: hidden;
-        background: #000;
+        background: #F2F5F7;
       }
-      body {
-        font-family: "Inter", sans-serif;
-      }
-      code,
-      pre,
-      .monospace {
-        font-family: "JetBrains Mono", monospace;
+      #root > [data-composition-src] {
+        position: absolute;
+        inset: 0;
+        width: 1920px;
+        height: 1080px;
       }
     </style>
   </head>
@@ -33,27 +41,38 @@
       id="root"
       data-composition-id="main"
       data-start="0"
-      data-duration="10"
+      data-duration="12"
       data-width="1920"
       data-height="1080"
     >
+      <div
+        id="el-f01-price-anchor"
+        class="clip"
+        data-composition-id="f01-price-anchor"
+        data-composition-src="compositions/frames/01-price-anchor.html"
+        data-start="0"
+        data-duration="6"
+        data-track-index="1"
+        data-width="1920"
+        data-height="1080"
+      ></div>
 
-
-
-      <!--
-        Add your clips here. Example:
-        <div id="title" class="clip" data-start="0" data-duration="5" data-track-index="1"
-             style="font-size: 64px; color: #fff; padding: 40px">
-          Hello World
-        </div>
-      -->
+      <div
+        id="el-f02-scope-boundary"
+        class="clip"
+        data-composition-id="f02-scope-boundary"
+        data-composition-src="compositions/frames/02-scope-boundary.html"
+        data-start="6"
+        data-duration="6"
+        data-track-index="1"
+        data-width="1920"
+        data-height="1080"
+      ></div>
     </div>
 
     <script>
       window.__timelines = window.__timelines || {};
-      const tl = gsap.timeline({ paused: true });
-      // Example: tl.from("#title", { opacity: 0, y: -50, duration: 1 }, 0);
-      window.__timelines["main"] = tl;
+      window.__timelines["main"] = gsap.timeline({ paused: true });
     </script>
   </body>
 </html>

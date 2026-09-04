@@ -1,0 +1,282 @@
+<template>
+  <style>
+    #root {
+      position: relative;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      container-type: size;
+      color: #17212b;
+    }
+
+    [class~="02-scope-boundary-ground"] {
+      position: absolute;
+      inset: 0;
+      overflow: hidden;
+      background: #f2f5f7;
+    }
+
+    [class~="02-scope-boundary-grid"] {
+      position: absolute;
+      inset: 0;
+      display: grid;
+      grid-template-columns: 40cqw 1fr;
+      column-gap: 6cqw;
+      padding: 10cqh 5cqw 16.7cqh;
+      box-sizing: border-box;
+    }
+
+    [class~="02-scope-boundary-anchor-zone"] {
+      position: relative;
+      padding-top: 6cqh;
+    }
+
+    [class~="02-scope-boundary-eyebrow"] {
+      margin: 0 0 2.3cqh;
+      color: #17425f;
+      font-size: 1.4cqw;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    [class~="02-scope-boundary-anchor"] {
+      margin: 0;
+      max-width: 39cqw;
+      color: #17212b;
+      font-size: 4.2cqw;
+      font-weight: 700;
+      line-height: 1.06;
+      letter-spacing: -0.02em;
+      transform-origin: 0% 50%;
+      will-change: transform, opacity;
+    }
+
+    [class~="02-scope-boundary-rule"] {
+      width: 3.125cqw;
+      height: 4px;
+      margin-top: 3.3cqh;
+      border-radius: 2px;
+      background: #17425f;
+    }
+
+    [class~="02-scope-boundary-answer"] {
+      position: absolute;
+      top: 40cqh;
+      left: 0;
+      width: 41cqw;
+      min-height: 25cqh;
+    }
+
+    [class~="02-scope-boundary-answer-line"] {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: baseline;
+      column-gap: 0.55cqw;
+      row-gap: 0.8cqh;
+      max-width: 40cqw;
+      color: #17212b;
+      font-size: 2.6cqw;
+      font-weight: 600;
+      line-height: 1.08;
+      letter-spacing: -0.02em;
+    }
+
+    [class~="02-scope-boundary-word"] {
+      display: inline-block;
+      transform-origin: 0% 70%;
+      will-change: transform, opacity;
+    }
+
+    [class~="02-scope-boundary-cycle-zone"] {
+      position: relative;
+      display: flex;
+      align-items: center;
+      min-width: 0;
+      padding-bottom: 7cqh;
+    }
+
+    [class~="02-scope-boundary-cycle-card"] {
+      position: relative;
+      width: 100%;
+      min-height: 31cqh;
+      display: flex;
+      align-items: center;
+      padding: 5.2cqw 4.2cqw;
+      box-sizing: border-box;
+      border: 1.5px solid rgba(23, 66, 95, 0.2);
+      border-radius: 14px;
+      background: rgba(23, 66, 95, 0.04);
+    }
+
+    [class~="02-scope-boundary-cycle-text"] {
+      display: block;
+      min-width: 27cqw;
+      white-space: nowrap;
+      color: #17212b;
+      font-size: 3.7cqw;
+      font-weight: 700;
+      line-height: 1;
+      letter-spacing: -0.02em;
+    }
+
+    [class~="02-scope-boundary-no"] {
+      position: absolute;
+      top: 3.2cqh;
+      right: 2.2cqw;
+      min-width: 3.5cqw;
+      padding: 0.85cqh 1.15cqw;
+      box-sizing: border-box;
+      border-radius: 100px;
+      background: rgba(23, 66, 95, 0.08);
+      color: #17425f;
+      font-size: 1.4cqw;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-align: center;
+    }
+
+    [class~="02-scope-boundary-boundary-line"] {
+      position: absolute;
+      left: -3cqw;
+      top: 15cqh;
+      width: 1px;
+      height: 52cqh;
+      background: rgba(23, 66, 95, 0.2);
+    }
+
+    [class~="02-scope-boundary-chrome"] {
+      position: absolute;
+      left: 5cqw;
+      bottom: 17.2cqh;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.7cqw;
+      padding: 1.15cqh 1.35cqw;
+      border: 1.5px solid rgba(23, 66, 95, 0.2);
+      border-radius: 100px;
+      background: rgba(23, 66, 95, 0.04);
+      color: #173748;
+      font-size: 1.4cqw;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+    }
+
+    [class~="02-scope-boundary-chrome-dot"] {
+      width: 0.55cqw;
+      height: 0.55cqw;
+      border-radius: 50%;
+      background: #17425f;
+    }
+
+    [class~="02-scope-boundary-progress"] {
+      position: absolute;
+      left: 5cqw;
+      bottom: 16.8cqh;
+      width: 10cqw;
+      height: 3px;
+      background: #17425f;
+    }
+  </style>
+
+  <div id="root" data-composition-id="f02-scope-boundary" data-width="1920" data-height="1080">
+    <div id="f02-scope-boundary-ground" class="clip 02-scope-boundary-ground" data-start="0" data-duration="6" data-track-index="0">
+      <div class="02-scope-boundary-grid">
+        <section class="02-scope-boundary-anchor-zone">
+          <p class="02-scope-boundary-eyebrow">Scope boundary</p>
+          <h1 id="f02-scope-boundary-anchor" class="02-scope-boundary-anchor">RFP X-Ray<br>replaces</h1>
+          <div id="f02-scope-boundary-rule" class="02-scope-boundary-rule"></div>
+          <div class="02-scope-boundary-answer" aria-label="Supplied-document analysis">
+            <div class="02-scope-boundary-answer-line">
+              <span id="f02-scope-boundary-word-1" class="02-scope-boundary-word">SUPPLIED-</span>
+              <span id="f02-scope-boundary-word-2" class="02-scope-boundary-word">DOCUMENT</span>
+              <span id="f02-scope-boundary-word-3" class="02-scope-boundary-word">ANALYSIS</span>
+            </div>
+          </div>
+        </section>
+
+        <section class="02-scope-boundary-cycle-zone" aria-label="Excluded product categories">
+          <div class="02-scope-boundary-boundary-line"></div>
+          <div id="f02-scope-boundary-cycle-card" class="02-scope-boundary-cycle-card">
+            <span id="f02-scope-boundary-cycle-text" class="02-scope-boundary-cycle-text">Search</span>
+            <span id="f02-scope-boundary-no" class="02-scope-boundary-no">NO</span>
+          </div>
+        </section>
+      </div>
+
+      <div id="f02-scope-boundary-chrome" class="02-scope-boundary-chrome">
+        <span class="02-scope-boundary-chrome-dot"></span>
+        <span>Document-only. No search.</span>
+      </div>
+      <div class="02-scope-boundary-progress"></div>
+    </div>
+  </div>
+
+  <script>
+    (() => {
+      const tl = gsap.timeline({ paused: true });
+
+      const anchor = document.getElementById("f02-scope-boundary-anchor");
+      const anchorRule = document.getElementById("f02-scope-boundary-rule");
+      const cycleCard = document.getElementById("f02-scope-boundary-cycle-card");
+      const cycleText = document.getElementById("f02-scope-boundary-cycle-text");
+      const chrome = document.getElementById("f02-scope-boundary-chrome");
+
+      tl.fromTo(
+        anchor,
+        { scale: 0, opacity: 0, y: 10 },
+        { scale: 1, opacity: 1, y: 0, duration: 0.45, ease: "power3.out" },
+        0.05
+      );
+      tl.fromTo(
+        anchorRule,
+        { scaleX: 0, opacity: 0, transformOrigin: "0% 50%" },
+        { scaleX: 1, opacity: 1, duration: 0.45, ease: "power3.out" },
+        0.38
+      );
+      tl.fromTo(
+        cycleCard,
+        { scale: 0, opacity: 0, y: 18 },
+        { scale: 1, opacity: 1, y: 0, duration: 0.5, ease: "power3.out" },
+        1.35
+      );
+
+      tl.set(cycleText, { innerText: "Search" }, 1.4);
+      tl.set(cycleText, { innerText: "Bid writing" }, 2.1);
+      tl.set(cycleText, { innerText: "CRM" }, 2.8);
+      tl.set(cycleText, { innerText: "Approvals" }, 3.5);
+      tl.to(cycleCard, { opacity: 0, duration: 0.18, ease: "power2.out" }, 4.02);
+
+      const words = [
+        { element: document.getElementById("f02-scope-boundary-word-1"), text: "SUPPLIED-" },
+        { element: document.getElementById("f02-scope-boundary-word-2"), text: "DOCUMENT" },
+        { element: document.getElementById("f02-scope-boundary-word-3"), text: "ANALYSIS" }
+      ];
+      let wordStart = 4.2;
+      const wordTimeline = words.map((entry) => {
+        const duration = 0.16 + entry.text.length * 0.012;
+        const timed = { ...entry, start: wordStart, duration };
+        wordStart += duration;
+        return timed;
+      });
+      wordTimeline.forEach((entry) => {
+        tl.fromTo(
+          entry.element,
+          { scale: 0, opacity: 0, y: 22 },
+          { scale: 1, opacity: 1, y: 0, duration: 0.42, ease: "power3.out" },
+          entry.start
+        );
+      });
+
+      tl.fromTo(
+        chrome,
+        { scale: 0, opacity: 0, y: 10 },
+        { scale: 1, opacity: 1, y: 0, duration: 0.5, ease: "power3.out" },
+        5.2
+      );
+
+      window.__timelines = window.__timelines || {};
+      window.__timelines["f02-scope-boundary"] = tl;
+    })();
+  </script>
+</template>

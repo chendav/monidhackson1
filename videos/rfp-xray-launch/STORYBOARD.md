@@ -44,12 +44,12 @@ two motion failures: slideshow (front-load then freeze) and screensaver
 - voiceover: "Bidworx Starter is listed at one hundred ninety pounds a month — for roughly one tender."
 - duration: 6s
 - transition_in: cut
-- status: outline
+- status: animated
 - src: compositions/frames/01-price-anchor.html
 - type: hook
 - persuasion: Price contrast grounded in an official capture
 - beat: tension
-- blueprint: dataviz-countup (Adapt) — keep the count-up-to-hero signature; replace the chart field with the official source capture
+- blueprint: dataviz-countup
 - asset_candidates: assets/bidworx-pricing-2026-09-03.png — official bidworx pricing-page capture showing Starter at £190/month and typical usage of one tender
 - focal: assets/bidworx-pricing-2026-09-03.png
 - roles: bidworx-pricing-2026-09-03.png = supporting source evidence; £190 = focal verified statistic
@@ -70,12 +70,12 @@ Scene 3 (4.7–6.0s): the £190 figure, qualifier, and source panel hold fully r
 - voiceover: "Search? Bid writing? CRM? No. RFP X-Ray replaces one job: analyzing the documents you supply."
 - duration: 6s
 - transition_in: squeeze
-- status: outline
+- status: animated
 - src: compositions/frames/02-scope-boundary.html
 - type: product_intro
 - persuasion: Scope precision and expectation control
 - beat: clarity
-- blueprint: fixed-anchor-cycle (Adapt) — pin the supported job while unsupported categories cycle in a separate slot
+- blueprint: fixed-anchor-cycle
 - asset_candidates:
 
 narrativeRole: Prevent the price comparison from becoming a false full-platform replacement claim.
@@ -100,7 +100,7 @@ Scene 4 (5.2–6.0s): the completed bounded claim holds static with “Document-
 - type: feature_showcase
 - persuasion: Show-don't-tell workflow proof
 - beat: control
-- blueprint: cursor-ui-demo (Adapt) — a locked production surface with one cursor actor and four evidence-backed document states
+- blueprint: cursor-ui-demo
 - asset_candidates: assets/og-image.png — captured RFP X-Ray product image
 - focal: assets/og-image.png
 - roles: og-image.png = supporting brand/product surface until replaced by the gated live production recording
@@ -129,7 +129,7 @@ Scene 4 (9.0–10.0s): the cursor settles on the real Analyze pack control and h
 - type: feature_showcase
 - persuasion: Operational transparency
 - beat: trust
-- blueprint: agent-progress-theater (Adapt) — production stages perform visibly, then resolve into cleanup and cost receipts
+- blueprint: agent-progress-theater
 - asset_candidates: assets/og-image.png — captured RFP X-Ray product image
 - focal: assets/og-image.png
 - roles: og-image.png = supporting product surface until replaced by the gated live progress recording
@@ -144,7 +144,7 @@ status copy with the product's exact state machine and use no cursor after the
 initial handoff. This frame remains blocked by its live-capture gate.
 Scene 1 (0.0–2.0s): the real run enters `parsing`; a thin blue arc rotates finitely beside “Monid parse” and stops exactly when the stage changes (`svg-icon-enrichment`).
 Scene 2 (2.0–7.7s): Purge → Extract → Reconcile → Verify replace one another only on their spoken cues (`discrete-text-sequence`); the active row changes state while completed rows receive a drawn check (`svg-path-draw`).
-Scene 3 (7.7–11.3s): a blue-tinted receipt panel expands under the stages (`anchored-layout-expand`); app-controlled source deletion and provider-attempt rows arrive from the real ledger, never from estimates.
+Scene 3 (7.7–11.3s): a blue-tinted receipt panel expands under the stages; app-controlled source deletion and provider-attempt rows arrive from the real ledger, never from estimates.
 Scene 4 (11.3–13.0s): the run status and receipt stack hold fully resolved; the processing duration appears only if the live recording and verifier agree.
 
 ## Frame 5 — The award logic, intact
@@ -158,7 +158,7 @@ Scene 4 (11.3–13.0s): the run status and receipt stack hold fully resolved; th
 - type: feature_showcase
 - persuasion: Verifiable extraction proof
 - beat: confidence
-- blueprint: grid-card-assemble (Adapt) — four cited rules populate into an asymmetric evidence board
+- blueprint: grid-card-assemble
 - asset_candidates:
 - evidence_slot: PENDING_LIVE CER evaluation view with clickable physical-page citations
 
@@ -186,7 +186,7 @@ Scene 5 (15.2–17.0s): the four-row board holds for citation inspection; no cam
 - type: feature_showcase
 - persuasion: High-risk exception proof
 - beat: skepticism to trust
-- blueprint: transcript-scroll-artifact-reveal (Adapt) — traverse the amendment lineage, hinge on the year mismatch, reveal the conflicted claim
+- blueprint: transcript-scroll-artifact-reveal
 - asset_candidates:
 - evidence_slot: PENDING_LIVE CER amendment and conflict view with three citation clicks
 
@@ -213,7 +213,7 @@ Scene 4 (13.5–16.0s): `CONFLICTED`, candidate values 2050/2055, and “clarifi
 - type: feature_showcase
 - persuasion: Bounded-answer risk reversal
 - beat: relief
-- blueprint: prompt-type-submit-generate (Adapt) — one real production question produces one cited closed-document answer
+- blueprint: prompt-type-submit-generate
 - asset_candidates:
 - evidence_slot: PENDING_LIVE CER grounded Q&A recording
 
@@ -224,7 +224,7 @@ sourceTruth: Final campaign Q&A payload, citation verifier, and search_events=0.
 Adapt: keep the type → submit → answer sequence; remove generic thinking
 theater and show only the real production interaction. This frame remains
 blocked by the live-Q&A gate.
-Scene 1 (0.0–2.8s): the real Ask This RFP input establishes in the upper half and types “Which submission deadline controls?” character by character with a visible caret (`discrete-text-sequence`, `context-sensitive-cursor`).
+Scene 1 (0.0–2.8s): the real Ask This RFP input establishes in the upper half and types “Which submission deadline controls?” character by character with a visible caret (`discrete-text-sequence`).
 Scene 2 (2.8–4.2s): the submit control receives one restrained press; the input locks and no outside-search chrome appears (`cursor-click-ripple`).
 Scene 3 (4.2–8.2s): the verified answer arrives by phrase on its real production cadence, with the current deadline and its physical-page citation revealing only when the response supplies them (`dynamic-content-sequencing`).
 Scene 4 (8.2–10.0s): `search_events=0`, the answer, and the clickable page control hold for inspection; no fabricated second query or streaming text is added.
@@ -240,7 +240,7 @@ Scene 4 (8.2–10.0s): `search_events=0`, the answer, and the clickable page con
 - type: benefit_highlight
 - persuasion: Radical cost transparency
 - beat: trust + control
-- blueprint: dataviz-countup (Adapt) — measured campaign values land only after wallet reconciliation
+- blueprint: dataviz-countup
 - asset_candidates:
 - evidence_slot: PENDING_LIVE Audit & Cost recording
 
@@ -267,7 +267,7 @@ Scene 4 (7.6–9.0s): the measured values and completeness disclosure hold stati
 - type: cta
 - persuasion: Honest bounded comparison
 - beat: confidence
-- blueprint: titlecard-reveal (Adapt) — one restrained comparison card and a held URL
+- blueprint: titlecard-reveal
 - asset_candidates:
 
 narrativeRole: End on the exact replacement boundary and measured per-run comparison.
