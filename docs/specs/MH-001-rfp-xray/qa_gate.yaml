@@ -52,7 +52,7 @@ review:
   p0: 0
   p1: 0
   p2: 0
-  deployment_allowed: true
+  deployment_allowed: false
   previous_review:
     task: QA4
     verdict: REQUEST_CHANGES
@@ -80,7 +80,7 @@ current_release_evidence:
     status: ok
     mode: live
     dependencies: ready
-  deterministic_regression: T20 passed 10/10; current candidate awaits T22 manifest validation
+  deterministic_regression: fc85c24 passed 10/10 including the T22 fixed 81-test authority selection; this did not predict the failed live CER result
   repository_gate: T21 passed 828 tests with 12 designed skips, official PDF audit 3/3, QA19 focus 244/244, live-verifier 24/24, lint, typecheck, and production build
   production_smoke: 4/4 passed
   last_controlled_cer_run:
@@ -89,5 +89,5 @@ current_release_evidence:
 
 release:
   status: NOT_READY
-  next_gate: Record QA20 PASS, commit/redeploy the candidate, and produce its current 10/10 receipt before one budget-admitted CER proof.
+  next_gate: T25 implementation independently PASS with actual cached authority/materialization recovery; checkpoint after local gates, then execute reviewed T26 real CER Monid/v8 cache capture. Product release remains NOT_READY pending CER and production proof.
   remaining_after_cer: 12-citation review, one Edmonton signed-PUT proof, final independent review, final video, contest submission, and five publications.

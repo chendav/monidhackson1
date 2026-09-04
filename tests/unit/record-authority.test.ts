@@ -8,8 +8,10 @@ import {
   RECORD_AUTHORITY_VERSION,
   RecordAuthorityEnvelopeSchema,
   buildDocumentSourceMap,
+  positionUniqueExactSourceQuote,
   recordAuthorityManifestIntegrity,
   recordAuthorityReceiptWithinCapacity,
+  resolveUniqueIssuedSourceQuote,
   resolveSemanticSpan,
   selectorAuthenticatedPresentationValue,
   unresolvedRecordAuthority,
@@ -59,6 +61,253 @@ function document(pages: string[]) {
 function citation(quote: string) {
   return { document_sha256: sha, chunk_id: null, evidence_quote: quote, section: null };
 }
+
+describe("T24 server-positioned exact source quotes", () => {
+  it("computes UTF-16 coordinates from one unique raw occurrence without normalization", () => {
+    const sourceMap = buildDocumentSourceMap([{
+      source_fragment_id: "issued", document_sha256: sha, chunk_id: null,
+      text: "Issuer: Canada\nReference: 100022184"
+    }], [document(["Issuer: Canada\nReference: 100022184"])]);
+    expect(positionUniqueExactSourceQuote(sourceMap, {
+      source_fragment_id: "issued", exact_quote: "Canada"
+    })).toEqual({ source_fragment_id: "issued", start_utf16: 8, length_utf16: 6 });
+    expect(positionUniqueExactSourceQuote(sourceMap, {
+      source_fragment_id: "issued", exact_quote: "100022185"
+    })).toBeNull();
+    expect(positionUniqueExactSourceQuote(sourceMap, {
+      source_fragment_id: "foreign", exact_quote: "Canada"
+    })).toBeNull();
+  });
+
+  it("fails closed for repeated, whitespace-only, oversized, or malformed UTF-16 quotes", () => {
+    const sourceMap = buildDocumentSourceMap([{
+      source_fragment_id: "issued", document_sha256: sha, chunk_id: null,
+      text: `Canada Canada ${"x".repeat(501)} 😀`
+    }], [document([`Canada Canada ${"x".repeat(501)} 😀`])]);
+    for (const exactQuote of ["Canada", " \n\t ", "x".repeat(501), "\ud800", "\udc00"]) {
+      expect(positionUniqueExactSourceQuote(sourceMap, {
+        source_fragment_id: "issued", exact_quote: exactQuote
+      })).toBeNull();
+    }
+    expect(positionUniqueExactSourceQuote(sourceMap, {
+      source_fragment_id: "issued", exact_quote: "😀"
+    })).toEqual({
+      source_fragment_id: "issued",
+      start_utf16: "Canada Canada ".length + 501 + 1,
+      length_utf16: 2
+    });
+  });
+
+  it("positions a unique real wrap difference and preserves exact physical evidence", () => {
+    const monidText = "Bids must be\n submitted through the portal.";
+    const pdfText = "Bids must be submitted through the portal.";
+    const source = document([pdfText]);
+    const sourceMap = buildDocumentSourceMap([{
+      source_fragment_id: "issued", document_sha256: sha, chunk_id: null, text: monidText
+    }], [source]);
+    const positioned = positionUniqueExactSourceQuote(sourceMap, {
+      source_fragment_id: "issued", exact_quote: pdfText
+    });
+    expect(positioned).toEqual({
+      source_fragment_id: "issued", start_utf16: 0, length_utf16: monidText.length
+    });
+    expect(resolveSemanticSpan(sourceMap, positioned!, [source])).toMatchObject({
+      document_sha256: sha,
+      evidence_quote: pdfText,
+      binding: { pdf_page_1based: 1 }
+    });
+  });
+
+  it("requires one normalized occurrence globally and rejects boundary expansion", () => {
+    for (const [sourceText, exactQuote] of [
+      ["Clause one\nClause  one", "Clause one"],
+      ["Clause\tone and Clause one", "Clause one"],
+      [`A${" ".repeat(501)}B`, "A B"],
+      ["Value", " Value"],
+      ["Value", "Value "]
+    ]) {
+      const sourceMap = buildDocumentSourceMap([{
+        source_fragment_id: "issued", document_sha256: sha, chunk_id: null, text: sourceText
+      }], [document([sourceText])]);
+      expect(positionUniqueExactSourceQuote(sourceMap, {
+        source_fragment_id: "issued", exact_quote: exactQuote
+      })).toBeNull();
+    }
+  });
+
+  it.each([
+    ["changed digit", "Deadline 2050", "Deadline 2055"],
+    ["changed punctuation", "A-B", "A–B"],
+    ["changed case", "Canada", "canada"],
+    ["changed composition", "Café", "Cafe\u0301"],
+    ["removed zero width", "A\u200bB", "AB"]
+  ])("does not normalize a %s", (_label, sourceText, exactQuote) => {
+    const sourceMap = buildDocumentSourceMap([{
+      source_fragment_id: "issued", document_sha256: sha, chunk_id: null, text: sourceText
+    }], [document([sourceText])]);
+    expect(positionUniqueExactSourceQuote(sourceMap, {
+      source_fragment_id: "issued", exact_quote: exactQuote
+    })).toBeNull();
+  });
+});
+
+describe("T25 server-owned issued evidence origins", () => {
+  it("seals bindings under the issued-origin alignment contract", () => {
+    expect(RECORD_SOURCE_ALIGNMENT_VERSION).toBe("issued-origin-pdfjs-selector-utf16-v4");
+  });
+
+  const coverage = (options: {
+    id: string; page: number; pageText: string; start: number; end: number;
+    pageHash?: string; text?: string;
+  }) => ({
+    source_fragment_id: `coverage_${options.id}`,
+    document_sha256: sha,
+    chunk_id: null,
+    text: options.text ?? options.pageText.slice(options.start, options.end),
+    origin: {
+      kind: "submission_coverage" as const,
+      candidate_id: options.id,
+      pdf_page_1based: options.page,
+      page_text_sha256: options.pageHash ?? sha256Hex(options.pageText),
+      source_start_utf16: options.start,
+      source_end_utf16: options.end,
+      source_text_sha256: sha256Hex(options.text ?? options.pageText.slice(options.start, options.end))
+    }
+  });
+
+  it("ignores a wrong model-era fragment choice and finds the quote in another issued fragment", () => {
+    const source = document(["Alpha fact. Beta fact."]);
+    const sourceMap = buildDocumentSourceMap([
+      { source_fragment_id: "wrong", document_sha256: sha, chunk_id: null, text: "Alpha fact." },
+      { source_fragment_id: "right", document_sha256: sha, chunk_id: null, text: "Beta fact." }
+    ], [source]);
+    expect(resolveUniqueIssuedSourceQuote(sourceMap, {
+      document_sha256: sha, exact_quote: "Beta fact."
+    }, [source])).toMatchObject({
+      evidence_quote: "Beta fact.", binding: { source_fragment_id: "right", pdf_page_1based: 1 }
+    });
+  });
+
+  it("binds a quote issued only in a current-batch coverage window", () => {
+    const pageText = "Prefix. Coverage-only fact. Suffix.";
+    const start = pageText.indexOf("Coverage-only fact.");
+    const end = start + "Coverage-only fact.".length;
+    const source = document([pageText]);
+    const sourceMap = buildDocumentSourceMap([
+      { source_fragment_id: "monid", document_sha256: sha, chunk_id: null, text: "Prefix." },
+      coverage({ id: "candidate", page: 1, pageText, start, end })
+    ], [source]);
+    expect(resolveUniqueIssuedSourceQuote(sourceMap, {
+      document_sha256: sha, exact_quote: "Coverage-only fact."
+    }, [source])).toMatchObject({
+      evidence_quote: "Coverage-only fact.",
+      binding: { pdf_page_1based: 1, evidence_start_utf16: start, evidence_end_utf16: end }
+    });
+  });
+
+  it("deduplicates overlapping issued views only when they resolve to one physical span", () => {
+    const pageText = "One physical fact.";
+    const source = document([pageText]);
+    const sourceMap = buildDocumentSourceMap([
+      { source_fragment_id: "monid", document_sha256: sha, chunk_id: null, text: pageText },
+      coverage({ id: "candidate-a", page: 1, pageText, start: 0, end: pageText.length }),
+      coverage({ id: "candidate-b", page: 1, pageText, start: 0, end: pageText.length })
+    ], [source]);
+    expect(resolveUniqueIssuedSourceQuote(sourceMap, {
+      document_sha256: sha, exact_quote: pageText
+    }, [source])).toMatchObject({ evidence_quote: pageText, binding: { pdf_page_1based: 1 } });
+  });
+
+  it("fails closed for the same quote at distinct physical spans", () => {
+    const pages = ["Repeated fact.", "Repeated fact."];
+    const source = document(pages);
+    const sourceMap = buildDocumentSourceMap([
+      coverage({ id: "page-one", page: 1, pageText: pages[0]!, start: 0, end: pages[0]!.length }),
+      coverage({ id: "page-two", page: 2, pageText: pages[1]!, start: 0, end: pages[1]!.length })
+    ], [source]);
+    expect(resolveUniqueIssuedSourceQuote(sourceMap, {
+      document_sha256: sha, exact_quote: "Repeated fact."
+    }, [source])).toBeNull();
+  });
+
+  it("rejects hidden text, wrong document identity, altered origin metadata, and quote mutation", () => {
+    const pageText = "Visible exact fact 2050.";
+    const source = document([pageText]);
+    const validCoverage = coverage({
+      id: "candidate", page: 1, pageText, start: 0, end: pageText.length
+    });
+    for (const sourceMap of [
+      buildDocumentSourceMap([], [source]),
+      buildDocumentSourceMap([validCoverage], [source])
+    ]) {
+      expect(resolveUniqueIssuedSourceQuote(sourceMap, {
+        document_sha256: "8".repeat(64), exact_quote: pageText
+      }, [source])).toBeNull();
+    }
+    const altered = buildDocumentSourceMap([coverage({
+      id: "candidate", page: 1, pageText, start: 0, end: pageText.length,
+      pageHash: "9".repeat(64)
+    })], [source]);
+    expect(resolveUniqueIssuedSourceQuote(altered, {
+      document_sha256: sha, exact_quote: pageText
+    }, [source])).toBeNull();
+    const valid = buildDocumentSourceMap([validCoverage], [source]);
+    expect(resolveUniqueIssuedSourceQuote(valid, {
+      document_sha256: sha, exact_quote: "Visible exact fact 2055."
+    }, [source])).toBeNull();
+  });
+
+  it("re-resolves a candidate-committed coverage binding and rejects metadata drift", () => {
+    const submissionClause = "Bids must be sent by email to bids@example.com.";
+    const fact = "Insurance is required.";
+    const pageText = `${submissionClause} ${fact}`;
+    const state = artifactByCandidate([pageText], (candidate) => ({
+      coverage: "complete",
+      relations: relation(candidate.source_window, submissionClause)
+    }));
+    const candidate = state.ledger.candidates[0]!;
+    const origin = coverage({
+      id: candidate.candidate_id,
+      page: candidate.pdf_page_1based,
+      pageText,
+      start: candidate.source_start_utf16,
+      end: candidate.source_end_utf16,
+      text: candidate.source_window
+    });
+    const sourceMap = buildDocumentSourceMap([origin], [state.source]);
+    const resolved = resolveUniqueIssuedSourceQuote(sourceMap, {
+      document_sha256: sha, exact_quote: fact
+    }, [state.source])!;
+    const analysis = draft({ claims: [{
+      claim_id: "insurance", topic: "insurance", claim_text: fact,
+      claim_type: "source", confidence: 1, document_sha256: sha,
+      amendment_number: null, effect: "add", supersedes_claim_ids: [],
+      citations: [citation(fact)]
+    }] });
+    const authorityEnvelope = RecordAuthorityEnvelopeSchema.parse({
+      v: RECORD_AUTHORITY_ENVELOPE_VERSION,
+      r: [["c", 0, "n", [{ citation_ordinal: 0, ...resolved.binding }]]]
+    });
+    const verifyWith = (map: typeof sourceMap) => verifyRecordAuthorities({
+      batches: [{
+        binding: state.binding, draft: analysis, authority: authorityEnvelope, sourceMap: map
+      }],
+      ledger: state.ledger,
+      submission: state.submission,
+      documents: [state.source],
+      mergedDraft: analysis
+    });
+    expect(verifyWith(sourceMap).records[0]).toMatchObject({
+      publication: "verified", source_binding: "exact_bound"
+    });
+    const alteredOrigin = {
+      ...origin,
+      origin: { ...origin.origin, page_text_sha256: "9".repeat(64) }
+    };
+    expect(verifyWith(buildDocumentSourceMap([alteredOrigin], [state.source])).records[0])
+      .toMatchObject({ publication: "discarded", source_binding: "unlocated" });
+  });
+});
 
 function draft(records: Partial<DraftAnalysis> = {}): DraftAnalysis {
   return {

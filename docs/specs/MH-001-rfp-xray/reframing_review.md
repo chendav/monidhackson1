@@ -754,3 +754,66 @@ or release copy turns a single observation into a statistical claim.
 Rollback may restore the stricter paid benchmark, but never permits skipping
 live cleanup/cost/Q&A, exact-deployment evidence, citation review, or
 independent QA.
+# T23 local captured-response experiment — 2026-09-04
+
+This section supersedes earlier materialization hypotheses for the current
+diagnostic decision, without claiming the original product objective complete.
+
+Trigger: T20 and T21 both passed local synthetic gates yet live CER published
+zero facts. Latest retained proof has 74 authority-verified records and 131
+exact citation receipts, but all 195 model records were removed. No retained
+draft can identify which later gate removed them. Cleanup alias and draft
+post-verification mutation were inspected and are unsupported hypotheses.
+
+Underlying problem: the validation pipeline's intermediate decisions are not
+observable or reproducible after an actual provider response is discarded.
+The next change must establish a reproducer before selecting another fix.
+
+Invariants: exact official source SHA and physical pages, preserved numbers and
+polarity, typed-role correctness, literal public citations, real costs, no
+provider retries or production body retention changes.
+
+Minimum experiment: one local saved-PDF excerpt, one actual model batch capped
+at USD 0.25, cache the exact structured response under ignored `.data`, and
+replay it through the real adapter with zero-network transport to reconstruct
+authority and its process-local projection sidecar. Passively instrument actual
+gates; do not copy their logic. Record where each decoded record is dropped.
+
+Independent experiment review requires the above sidecar reconstruction,
+body-free gate traces, source/config/schema hashes, one-shot cost guard and
+at least one Requirement plus typed Evaluation. Without those records the
+outcome is INCONCLUSIVE. A one-document experiment cannot prove amendment
+reconciliation; omitting Monid cannot prove production Markdown alignment.
+
+Chief disposition: ACCEPT the revised bounded experiment specification;
+implementation must be inspected before the single paid local capture. No
+production refactor is accepted until captured evidence identifies the cause.
+
+## T23 evidence and T24 disposition
+
+Real capture completed in 13.87s with 3,787 input and 1,985 output tokens.
+The model emitted `Canada` but its selector resolved to `th the`; the correct
+solicitation number resolved to a missing-prefix slice. This confirms offset
+calculation is an inappropriate model-owned responsibility. The incomplete
+excerpt ledger stopped all records before later materialization gates, so the
+experiment does not establish complete CER causality.
+
+Reviewer independently ACCEPTED a bounded citation migration: model emits issued
+fragment ID, exact bounded quote and section; server uniquely matches raw UTF-16
+text and computes the selector. Existing physical, semantic, numeric, polarity,
+authority and reconciliation gates remain. No normalization/fuzzy repairs and
+no submission relation-offset changes. Chief disposition: ACCEPT T24 for this
+proven defect only. Cached wrong-offset response remains local replay evidence.
+
+### T24 captured quote-fidelity delta
+
+The single reviewed v7 capture (3,829 input / 2,063 output tokens) returned nine
+raw-exact quotes and two selection-method quotes differing only by the position
+of a line break. Cached zero-network measurement found all eleven uniquely
+whitespace-equivalent in their issued source. Independent Reviewer ACCEPTED
+matching through nonempty whitespace-run equivalence, with a raw-offset map,
+all non-whitespace UTF-16 units unchanged, uniqueness across the full equivalence
+domain even when a raw-exact candidate exists, and the existing raw 500-unit and
+physical-verification gates. This supersedes only T24's whitespace-exact rule.
+Chief ACCEPT: bounded representation delta, no further paid call. Full-package
+publication remains unproven because excerpt coverage is deliberately incomplete.

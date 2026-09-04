@@ -2,8 +2,17 @@
 
 Updated: 2026-09-04
 
+T25 final review PASS (P0/P1=0); alignment version v4 accurately identifies
+issued-origin physical binding. Focused152/152; full846/12 designed skips,
+typecheck/lint/build PASS. T26 keeps real Monid/model capture and replay separate
+from production cleanup/READY evidence; original provider caches are immutable.
+
 | ID | Fragile behavior | Required check | Last result |
 |---|---|---|---|
+| QR-97 | Two differently partitioned text representations in one model request create unaddressable quotes or wrong f assignments | Bind copied evidence to actual issued scope and unique physical occurrences; test same-batch fragments and that batch's coverage windows without accepting unissued text | T25 implemented; derived cached replay authority32→82, requirements16→32, integrity true and golden7/7; focused151/151; independent review pending |
+| QR-96 | Model quote has identical words but moves a PDF line wrap, or a raw-exact fast path hides an equivalent duplicate | Map nonempty whitespace runs reversibly; require global uniqueness inside issued fragment and raw span <=500; reject digit/punctuation/case/composition differences | v7 real capture: two moved-wrap quotes, all 11 uniquely whitespace-equivalent; representation-only delta ACCEPT |
+| QR-95 | Model-calculated UTF-16 citation offsets select real but unrelated source text | Accept only an issued fragment plus unique exact quote; server computes offsets; wrong fragment/repeat/altered quote fail closed; keep physical and semantic gates | T23 real capture confirms offset defect; independent hypothesis ACCEPT; T24 active |
+| QR-94 | Live verified records all disappear while synthetic materialization fixtures pass | Capture one real excerpt response, retain draft/selectors locally, trace the first rejecting gate, and replay with no additional provider call | T23 diagnostic experiment active; current CER has 74 verified records and 131 exact receipts but zero public facts |
 | QR-93 | A frozen release selection silently skips newly added safety tests | Pin the T7/T9/T16/T17/T21 identity and exact executed count; reject count, name, or digest drift | QA20 PASS; 81/81 independently verified, full-name mutation rejected |
 | QR-92 | An exact-bound Monid value with approved presentation markers fails typed Claim/Evaluation comparison, or projection mutates public evidence | Bind projection to selector/source/version; validate typed values against it while keeping public quote byte-exact PDF.js; negative twins for every scalar/role | QA19 PASS; contextual, intraword, backtick, repeat, mutation, and raw-quote cases pass |
 | QR-91 | Requirement/Risk topic text accidentally routes a non-summary record through summary field validators | Summary routing applies only to Claims; non-Claims retain specialized category/scalar/polarity/effect/lineage gates and cannot populate summary | QA19 PASS; non-Claim taxonomy publishes while Claims remain strict |

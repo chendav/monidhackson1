@@ -2,6 +2,54 @@
 
 Updated: 2026-09-04
 
+## T25 remaining acceptance boundary
+
+The derived saved-response replay improves actual publication but cannot prove
+live v8 output behavior, Monid-to-PDF.js behavior for CER, source cleanup, or
+production latency. Closing/submission remain null and risk publication remains
+zero. No complete-product claim follows from seven passing Edmonton rules.
+Next live capture must save provider responses locally before decode, with
+explicit costs/provenance and replay mode; never mutate original cached v7 data.
+T26 uses direct official HTTPS Monid inputs verified against pinned local bytes;
+this has a documented check/use gap and does not prove signed-upload cleanup.
+Its four per-source Monid locks and one model-package lock prevent paid replay.
+
+## T25 current evidence-ownership defect
+
+Implementation scope is two production modules plus focused tests; no pipeline,
+submission relation, persistence, or deployment changes. Derived v7-to-v8 replay
+may delete only f and must retain original capture/cost identities separately.
+
+The same request includes document fragments and differently partitioned
+submission coverage windows. Model facts extracted from a coverage window may
+have no valid source-fragment ID in that batch. Treating a model-selected f as
+canonical evidence location loses correctly copied text. Any replacement must
+bind only actually issued data to unique physical source occurrences, not search
+unissued package text or relax document identity/semantic verification. Existing
+cached responses suffice for the next experiment; do not pay to recreate them.
+
+## T23 evidence gap
+
+- T24's v7 capture demonstrates line-wrap drift. The accepted matching-domain
+  extension allows whitespace runs only, preserving all non-whitespace code
+  units and raw physical evidence. An exact match plus another whitespace-
+  equivalent occurrence is ambiguous and must not bypass uniqueness.
+
+- CONFIRMED: asking the model to count UTF-16 citation offsets produces wrong
+  slices even for a 985-character real page. T24 transfers positioning to the
+  server via uniquely matched exact quotes. Whitespace/paraphrase drift and
+  repeated short quotes remain fail-closed recall risks, not permission to fuzz.
+- The local excerpt's ledger was incomplete; all 11 records stopped at authority.
+  Do not treat this probe as downstream materialization or CER acceptance.
+
+- Synthetic tests and passing deployment gates have not predicted the all-zero
+  live materialization outcome. Do not use another synthetic PASS as proof of
+  live core correctness.
+- Current retained aggregates cannot attribute a verified record's later
+  rejection. T23 must capture one real local excerpt response and replay it
+  before choosing a fix. Development body artifacts stay ignored and local;
+  production retention promises and public payloads are unchanged.
+
 ## T21 deterministic materialization risks
 
 - Development override: production daily budget is USD 30 for the next

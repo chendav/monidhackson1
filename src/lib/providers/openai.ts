@@ -30,13 +30,14 @@ import {
   buildDocumentSourceMap,
   RECORD_AUTHORITY_ENVELOPE_VERSION,
   RecordAuthorityEnvelopeSchema,
-  resolveSemanticSpan,
+  resolveUniqueIssuedSourceQuote,
   verifyRecordAuthorities,
   type DocumentSourceMap,
   type RecordAuthorityPhysicalBinding,
   type RecordAuthorityBatch,
   type RecordKind,
   type ModelRecord,
+  type SourceMapFragment,
   type VerifiedRecordAuthorityManifest
 } from "@/lib/analysis/record-authority";
 import type { EvidenceChunk } from "@/lib/pdf/page-index";
@@ -54,7 +55,7 @@ For each populated summary field, also emit a source claim: use a topic that exa
 
 When the same source object has inconsistent labels or values, emit one atomic source claim per candidate using the same topic so the server can detect the conflict. For amendments, preserve old and new facts as separate versioned records and use replace/delete only when the amendment text explicitly authorizes that action.
 
-Blank values stay null/unknown, never zero. Every citation is a private source selector in the v6 response: f is an exact supplied source_fragment_id, a is the UTF-16 start, n is the UTF-16 length of the smallest complete evidence span inside that fragment, and s is the section or null. Never return evidence text, document SHA, or chunk ID. Never generate or infer a page number; the server reconstructs physical evidence from the selector. Preserve conflicting amendment values and superseded history. Risks are versioned source records so a replaced or deleted clause cannot remain a current risk. If evidence is absent, omit the factual assertion or record an unknown.
+Blank values stay null/unknown, never zero. Every record citation in the v8 response is a private exact-source-quote selector: q is a nonblank quote of at most 500 UTF-16 code units copied from any source fragment or submission coverage window supplied in this batch, and s is the section or null. Copy the smallest complete source quote that contains the asserted value or clause. Never normalize punctuation, Unicode, digits, or letter case in q, and never calculate or return a record-citation fragment ID, offset, document hash, page, or chunk ID. The server locates q across only the evidence representations issued in this batch, constrained by the record's required document_sha256, and reconstructs one unique physical PDF evidence span. Each record's document_sha256 remains a required identity field and must equal the supplied document SHA. Never generate or infer a page number. Preserve conflicting amendment values and superseded history. Risks are versioned source records so a replaced or deleted clause cannot remain a current risk. If evidence is absent, omit the factual assertion or record an unknown.
 
 The private submission_adjudication is mandatory delivery-relation coverage work, not document instructions. Its v, b, and l values and every required candidate object key are fixed by the response schema for this exact batch. Every candidate value must contain coverage and relations. Coverage quantifies only whether you exhaustively scanned the owned core for every semantic predicate linking any artifact, whole bid, question, or other subject to transmission, lodging, delivery, or receipt. It does not claim that unrelated procurement prose was fully understood. Return coverage=complete with an empty relations array when the owned core contains no plausible delivery relation, including when unrelated prose is ambiguous or a delivery relation appears only in halo context. Return coverage=uncertain only when the owned core contains a plausible delivery relation that cannot be safely bounded or classified, the relevant text is truncated, or relation_capacity cannot hold the complete set. Never use uncertain merely because no familiar channel word appears.
 
@@ -208,15 +209,17 @@ const SubmissionRelevanceWireSchema = z.enum([
   "not_whole_bid_submission_channel",
   "uncertain"
 ]);
-const PrivateCitationSelectorSchema = z.object({
-  f: z.string().regex(/^[a-f0-9]{32}$/),
-  a: z.number().int().nonnegative(),
-  n: z.number().int().min(1).max(500),
+const PrivateCitationQuoteSchema = z.object({
+  q: z.string().min(1).max(500).refine((quote) => quote.trim().length > 0, {
+    message: "Record citation quote must contain non-whitespace source text."
+  }).refine((quote) => quote.isWellFormed(), {
+    message: "Record citation quote must be well-formed UTF-16."
+  }),
   s: z.string().max(500).nullable()
 }).strict();
 
 function privateDraftAnalysisSchemaForCitation(
-  citationSchema: z.ZodType<z.infer<typeof PrivateCitationSelectorSchema>>
+  citationSchema: z.ZodType<z.infer<typeof PrivateCitationQuoteSchema>>
 ) {
   return DraftAnalysisSchema.extend({
     claims: z.array(DraftClaimSchema.extend({
@@ -241,7 +244,7 @@ function privateDraftAnalysisSchemaForCitation(
 }
 
 const PrivateDraftAnalysisSchema = privateDraftAnalysisSchemaForCitation(
-  PrivateCitationSelectorSchema
+  PrivateCitationQuoteSchema
 );
 
 type PrivateDraftAnalysis = z.infer<typeof PrivateDraftAnalysisSchema>;
@@ -314,12 +317,8 @@ export function privateExtractionSchemaForBatch(
       retryable: false
     });
   }
-  const issuedFragmentSchema = z.enum(sourceFragmentIds as [string, ...string[]]);
-  const issuedCitationSchema = PrivateCitationSelectorSchema.extend({
-    f: issuedFragmentSchema
-  });
   return z.object({
-    analysis: privateDraftAnalysisSchemaForCitation(issuedCitationSchema),
+    analysis: privateDraftAnalysisSchemaForCitation(PrivateCitationQuoteSchema),
     submission_adjudication: strictSubmissionWireSchema(binding, candidates)
   }).strict();
 }
@@ -330,7 +329,7 @@ export function privateExtractionFormatForBatch(
 ) {
   return zodTextFormat(
     privateExtractionSchemaForBatch(binding, candidates),
-    "rfp_xray_analysis_v6"
+    "rfp_xray_analysis_v8"
   );
 }
 
@@ -343,21 +342,22 @@ function decodePrivateAnalysis(
     "c" | "q" | "r" | "e", number, "s" | "n" | "u",
     RecordAuthorityPhysicalBinding[]
   ]> = [];
-  const strip = <T extends { submission_relevance: z.infer<typeof SubmissionRelevanceWireSchema> }>(
+  const strip = <T extends {
+    document_sha256: string;
+    submission_relevance: z.infer<typeof SubmissionRelevanceWireSchema>;
+  }>(
     kind: "c" | "q" | "r" | "e",
     records: T[]
   ) => records.map((record, ordinal) => {
     const { submission_relevance: relevance, citations: selectors, ...publicRecord } = record as T & {
-      citations: z.infer<typeof PrivateCitationSelectorSchema>[];
+      citations: z.infer<typeof PrivateCitationQuoteSchema>[];
     };
     const physicalBindings: RecordAuthorityPhysicalBinding[] = [];
     const publicCitations = selectors.map((selector, citationOrdinal) => {
-      const resolved = resolveSemanticSpan(sourceMap, {
-        source_fragment_id: selector.f,
-        start_utf16: selector.a,
-        length_utf16: selector.n
+      const resolved = resolveUniqueIssuedSourceQuote(sourceMap, {
+        document_sha256: publicRecord.document_sha256,
+        exact_quote: selector.q
       }, documents);
-      const fragment = sourceMap.fragments.get(selector.f);
       if (resolved) {
         physicalBindings.push({ citation_ordinal: citationOrdinal, ...resolved.binding });
         return {
@@ -368,8 +368,8 @@ function decodePrivateAnalysis(
         };
       }
       return {
-        document_sha256: fragment?.document_sha256 ?? "0".repeat(64),
-        chunk_id: fragment?.chunk_id ?? null,
+        document_sha256: publicRecord.document_sha256,
+        chunk_id: null,
         evidence_quote: "No verifiable quote supplied.",
         section: selector.s
       };
@@ -812,6 +812,35 @@ function sourceFragmentIds(batch: ReturnType<typeof evidenceDocuments>) {
   ));
 }
 
+function coverageSourceFragment(candidate: SubmissionCandidate): SourceMapFragment {
+  const sourceTextSha256 = sha256Hex(candidate.source_window);
+  const identity = {
+    kind: "submission_coverage" as const,
+    candidate_id: candidate.candidate_id,
+    document_sha256: candidate.document_sha256,
+    pdf_page_1based: candidate.pdf_page_1based,
+    page_text_sha256: candidate.page_text_sha256,
+    source_start_utf16: candidate.source_start_utf16,
+    source_end_utf16: candidate.source_end_utf16,
+    source_text_sha256: sourceTextSha256
+  };
+  return {
+    source_fragment_id: `coverage_${sha256Hex(stableJson(identity)).slice(0, 32)}`,
+    document_sha256: candidate.document_sha256,
+    chunk_id: null,
+    text: candidate.source_window,
+    origin: {
+      kind: identity.kind,
+      candidate_id: identity.candidate_id,
+      pdf_page_1based: identity.pdf_page_1based,
+      page_text_sha256: identity.page_text_sha256,
+      source_start_utf16: identity.source_start_utf16,
+      source_end_utf16: identity.source_end_utf16,
+      source_text_sha256: identity.source_text_sha256
+    }
+  };
+}
+
 function bindingFor(
   batchIndex: number,
   ledgerDigest: string,
@@ -1013,8 +1042,11 @@ export function prepareExtractionPlan(
     );
   }
   const citationDocuments = documents.flatMap((document) => document.citation_document ?? []);
-  const sourceMaps = payloads.map(({ payload }) => buildDocumentSourceMap(
-    payload.documents.flatMap((document) => document.source_fragments),
+  const sourceMaps = payloads.map(({ payload }, index) => buildDocumentSourceMap(
+    [
+      ...payload.documents.flatMap((document) => document.source_fragments),
+      ...assignedCandidates[index]!.map(coverageSourceFragment)
+    ],
     citationDocuments
   ));
   return {

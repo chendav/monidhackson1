@@ -157,16 +157,17 @@ function baseRunOptions() {
 }
 
 describe("repository-owned deterministic regression verifier", () => {
-  it("pins all 81 source-binding tests and rejects an identity-name drift", async () => {
+  it("pins all 97 source-binding tests and rejects an identity-name drift", async () => {
     const regression = await regressionPromise;
     const definition = regression.DETERMINISTIC_REGRESSION_CASES.find((item) =>
       item.id === "source-binding-and-submission-safety"
     )!;
     expect(definition).toMatchObject({
-      expectedExecuted: 81,
-      expectedIdentitySha256: "32e00055f84c91fe2979a6487317896c0515cfcf990d2c86ab1b2ef7857abdf0"
+      expectedExecuted: 97,
+      expectedIdentitySha256: "1dbbffe444e9251f96b78cf0fae38a4de6fcbf41d1b7c50d58997efd9582523b"
     });
     expect(definition.pattern).toContain("T21 selector-authenticated presentation materialization");
+    expect(definition.pattern).toContain("T24 server-positioned exact source quotes");
 
     const child = spawnSync(process.execPath, [
       path.resolve("node_modules/vitest/vitest.mjs"),
@@ -185,8 +186,8 @@ describe("repository-owned deterministic regression verifier", () => {
     });
     expect(child.status, child.stderr).toBe(0);
     expect(regression.validateStructuredTestResult(child.stdout, definition)).toMatchObject({
-      executed_test_count: 81,
-      passed_test_count: 81,
+      executed_test_count: 97,
+      passed_test_count: 97,
       skipped_test_count: 0,
       test_identity_sha256: definition.expectedIdentitySha256
     });

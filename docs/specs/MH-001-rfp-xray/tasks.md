@@ -709,3 +709,64 @@ revision_round: 0
 verdict: PASS
 findings: { P0: 0, P1: 0, P2: 0 }
 ```
+
+## T23 Local captured-response materialization experiment
+
+```yaml
+id: T23
+owner_profile: backend
+objective: Capture one real saved-PDF excerpt response and reconstruct the actual adapter/authority/materialization path offline with passive rejection traces, so the recurring all-zero live result can be diagnosed.
+depends_on: [QA20]
+include_paths: [.data/diagnostic-*, docs/specs/MH-001-rfp-xray/**, docs/agent_context/**]
+exclude_paths: [src/**, scripts/**, tests/**, videos/**]
+edits_allowed: true
+status: active
+constraints: [one_local_model_batch_max, worst_case_usd_0_25, no_Monid, no_production_retry, cache_replay_zero_network, no_secrets_in_artifacts, actual_adapter_reconstructs_WeakMap_sidecar]
+```
+
+## T24 Server-positioned exact quote citations
+
+```yaml
+id: T24
+owner_profile: backend
+objective: Eliminate experimentally confirmed model offset errors by accepting issued fragment ID plus exact bounded quote, uniquely positioning it on the server, and retaining existing physical and semantic verification.
+depends_on: [T23]
+include_paths: [src/lib/providers/openai.ts, src/lib/analysis/record-authority.ts, tests/unit/openai-adapter.test.ts, tests/unit/record-authority.test.ts]
+exclude_paths: [src/lib/analysis/submission-channel.ts, src/lib/analysis/materialize.ts, scripts/**, videos/**]
+edits_allowed: true
+status: active
+constraints: [no_nonwhitespace_repair, unique_whitespace_equivalent_quote_only, no_model_page_or_offsets, preserve_physical_binding, no_paid_worker_calls, focused_tests_first]
+handoff: docs/specs/MH-001-rfp-xray/t24-handoff.md
+review: independent_reviewer_required_before_integration
+```
+
+## T25 Batch evidence ownership reframing
+
+```yaml
+id: T25
+owner_profile: backend
+objective: Implement the independently accepted server-owned physical evidence model and measure real authority/materialization gains using a structurally converted cached v7 fixture without new model calls.
+depends_on: [T24]
+include_paths: [src/lib/providers/openai.ts, src/lib/analysis/record-authority.ts, .data/diagnostic-package-edmonton*, docs/specs/MH-001-rfp-xray/**]
+exclude_paths: [videos/**]
+edits_allowed: true
+status: reviewed_pass
+constraints: [cached_response_only, zero_provider_calls, no_production_patch_before_accepted_experiment, issued_scope_only, unique_physical_occurrence, preserve_semantic_gates]
+handoff: docs/specs/MH-001-rfp-xray/t25-handoff.md
+review: docs/specs/MH-001-rfp-xray/t25-review.md
+```
+
+## T26 Real CER provider cache and replay
+
+```yaml
+id: T26
+owner_profile: chief
+objective: Capture genuine CER Monid Markdown and v8 responses once, then diagnose and verify the actual source/authority/materialization path with zero-network replay.
+depends_on: [T25]
+include_paths: [.data/diagnostic-package-cer-v8*, docs/specs/MH-001-rfp-xray/**]
+exclude_paths: [src/**, videos/**]
+edits_allowed: true
+status: harness_review
+constraints: [four_monid_source_locks, one_model_package_lock, model_cap_usd_0_50, no_paid_retry, official_sha_pins, no_remote_storage_mutation, no_cleanup_or_ready_claim, cache_before_decode]
+handoff: docs/specs/MH-001-rfp-xray/t26-experiment.md
+```

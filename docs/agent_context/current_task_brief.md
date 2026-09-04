@@ -1,5 +1,86 @@
 # Current Task Brief
 
+## Current next action — T25 implementation review
+
+T25 is implemented and independently PASS (P0/P1=0), with 152 focused tests. Root's actual
+zero-network derived v7-to-v8 replay preserves all facts/classifications, deletes
+only citation f, and exercises the real adapter/authority/materializer. Verified
+authority grows 32 to82; public requirements16 to32; all7 existing Edmonton
+golden checks pass. Full check846 passed/12 designed skips and build PASS. Public production remains fc85c24.
+Keep the public budget controls; the user's development daily-cap waiver applies
+to isolated diagnostic work. Reuse retained sources/responses before any new call.
+
+Checkpoint the reviewed citation milestone. T26 prepares a real CER/Monid cache capture so any later defect can be
+replayed locally; do not return to uncached full production retries.
+
+## Authoritative continuation — T25 batch evidence ownership
+
+T25 hypothesis and minimum offline experiment are now independently ACCEPTED.
+
+The existing seven-rule Edmonton golden function directly PASSES the T24 local
+result; remaining citation completeness and production/CER evidence must not be
+misreported as a failure of those seven specific checks. Keep these gates separate.
+The conservative same-request-origin prototype uniquely binds107/120 citations
+versus41/120; all old41 remain, absent/ambiguous cohorts gain0. Next: implement
+the v8 server-owned origin resolver, then use the saved v7 fixture with only f
+removed to test the real authority/materialization path. No further model call.
+See `t25-reframing.md` for scope and provenance invariants. `authority_fix` is
+assigned the bounded v8 implementation. Root prepares the derived cached-fixture
+replay independently; `authority_review` reviews only after implementation handoff.
+
+T24 and its whitespace-only delta passed independent QA (145 focused tests,
+typecheck; fixed release selections now include 90 authority +55 adapter tests).
+The full cached Edmonton PDF.js/OpenAI component capture took 94.68s and produced
+13 claims/16 requirements, correct p14 selection and p43 M1–M4, plus security and
+Annex D/E facts. The existing seven-rule local golden passes; this is not comprehensive production acceptance. All four real model
+responses are cached for zero-network replay; no more paid call is needed now.
+
+Offline attribution of 120 raw citations found 44 whose quote is in a different
+fragment of the same batch; 26 whose quote is outside that batch's source
+fragments but present in that same request's submission coverage windows. The
+two input representations have different ownership partitions. T25 is read-only
+reframing of evidence ownership and an offline falsification experiment; no new
+production changes or deployment until accepted. Preserve actual issued scope,
+document identity, unique physical occurrence, raw evidence and semantic gates.
+
+## Authoritative continuation — T24 source-quote citations
+
+T24 initial implementation passed independent QA and 138 focused tests. One v7
+capture completed in 11.86s (model estimate USD 0.012156): 9/11 quotes matched
+raw source; 2 differed only in line-wrap placement. All 11 have one unique
+whitespace-equivalent occurrence, proven from the saved response without another
+call. Reviewer ACCEPT permits a representation-only delta: collapse nonempty
+whitespace runs for matching, preserve every non-whitespace UTF-16 unit, require
+uniqueness across that whole equivalence domain, map back to raw source offsets,
+keep the raw-span 500-unit cap and all downstream checks. No other normalization.
+This supersedes the earlier raw-whitespace restriction only; no more paid call.
+
+T23 captured a real Edmonton p14 response in 13.87s (3,787 input / 1,985 output
+tokens; estimated model cost USD 0.011773). It proves the model's UTF-16 offsets
+can select unrelated text: `Canada` selected `th the`. The excerpt's incomplete
+ledger prevented downstream publication, so complete CER causality is unproven.
+Independent Reviewer ACCEPT permits T24: replace private record citation f/a/n/s
+with f/q/s, where q is an exact bounded source quote; the server uniquely locates
+it and retains the existing physical verification. No fuzzy repair, new model
+pass, or changes to submission relation offsets. Test only the affected boundary
+and cached response first; no deployment or full paid package retry yet.
+
+## Authoritative continuation — T23 local failure capture
+
+T22 is committed at `fc85c24b3b794126e3ca5c62d11483894acb97d7`, deployed as
+`dpl_6aqbQYGu844UDpViH1L4xW4LKouk`, and independently approved. Its clean
+deterministic receipt passed 10/10 and deployment attestations/health/smoke
+passed. The single CER proof nevertheless ended `partial`: 74 model records
+passed authority, 131 citations were exact, and every public collection was
+empty. Source cleanup succeeded; conservative cost was USD 1.198689.
+
+Repeated materialization failure triggers reframing. T23 prepares an ignored,
+local, saved-PDF excerpt harness that captures an actual provider response and
+decoded draft, then supports zero-provider-call replay with rejection tracing.
+No production heuristic or same-candidate retry is authorized. One local model
+batch up to USD 0.25 may be executed after independent experiment review;
+the user's development budget waiver and document-caching instruction apply.
+
 ## Authoritative release continuation — T21
 
 This section supersedes T20 and older current-state text below.

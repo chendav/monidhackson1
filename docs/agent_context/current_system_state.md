@@ -1,5 +1,88 @@
 # Current System State
 
+## 2026-09-04 T25 derived cached-fixture result
+
+- Actual v8 server pipeline on derived saved v7 batches: authority82 verified,
+  34discarded; citation receipts122true/13false; requirements32, conflicts1,
+  risks0; pagescovered15/55; criticalclaims53/53cited; citationcount55.
+- Existing Edmonton seven-rule validator PASS; manifest integrity and draft
+  match true. Solicitation number recovered; closing/submission remain null.
+- New provider calls0, spend0. This is a derived fixture, not live v8 model,
+  Monid, cleanup, or production acceptance. Original four raw batches unchanged.
+- Focused tests152/152 PASS. Fixed release pin includes all97 authority tests
+  and55 adapter tests. T25 independent review PASS, P0/P1=0. Full846 tests
+  passed/12 designed skips, typecheck/lint(no errors)/production build PASS.
+- T26 local cache harness prepared for shuffled CER003/base/001/002,79pages,
+  five provisional PDF.js-source batches. Genuine Monid cache and current v8
+  responses are still absent; Reviewer checks harness before paid execution.
+- Public deployment remains fc85c24. Release automation remains PAUSED.
+
+## 2026-09-04 T24 full local proof / T25 next
+
+- Direct execution of existing `validateEdmontonGolden` on the captured T24
+  materialized result PASSED all7 existing golden checks (M1–M4 count4,55pages,
+  evaluation/security/conflict/blank-price/package rules). Earlier wording that
+  the seven-check golden gate failed was too broad. Citation completeness,
+  source form-widget audit, Monid, cleanup and final production acceptance are
+  separate requirements and are not proved by this component result.
+
+- T25 minimum experiment independently ACCEPTED:107/120 uniquely bound using
+  actual same-request origin union, keeping old41 and rejecting absent/ambiguous
+  cohorts. T25 implementation is now authorized locally. Next evidence must be real
+  authority/materialize replay, not just locator counts.
+
+- Full local cached Edmonton capture: 116,868 input /25,066 output tokens,
+  USD 0.200448 model-token estimate, 94.68s. No Monid or real cleanup performed.
+- Actual materialization: 13 claims,16 requirements,1 conflict; mandatory gate
+  true/lowest evaluated price at p14; M1–M4 and M3 up to three at p43; security
+  distinctions and Annex D/E conflict preserved. Independent Reviewer confirmed.
+- Still incomplete: 32/116 authority verified,78 rejected citation candidates,
+  closing date/submission method null, risks zero, pages covered11/55.
+- Four raw model batches and counts are cached under ignored
+  `.data/diagnostic-package-edmonton-artifacts/`. Exact replay hashes match:
+  decoded `1d3c7ae2b05d7bc78b0eb19a8ce2b055b6fcb579dfbf65fe2fc6591887ff22ef`,
+  trace `cb91b93f56731670fc4de5444e485afd5164708be248c4741735447db4a6bea3`,
+  result `c647d27c874b9f126f11d9ca46ef2112ba4ea894bf0c4ff4c0ec8075cc4a4d33`.
+- Raw-citation diagnosis: 41 resolved,44 wrong same-batch fragment,26 found in
+  another fragment batch but ALL26 present in THIS request's coverage window,
+  6 ambiguous/invalid span,3 not in any source fragment. T25 reframing active.
+- T24 code remains uncommitted/undeployed; production still fc85c24.
+
+## 2026-09-04 T23 experiment result / T24 next
+
+- T24 v7 capture saved separately at `.data/diagnostic-quote-v7-artifacts/`;
+  3,829 input / 2,063 output tokens, USD 0.012156 model estimate. 9/11 source
+  quotes raw-exact; two source quotes differ only by moving a line break.
+- Zero-network replay hashes matched; `quote-fidelity.json` proves unique
+  whitespace-equivalent matches for all 11. Representation-only delta accepted
+  by independent Reviewer. No complete-package or deployment claim follows.
+
+- Real one-page capture complete; ignored raw response and offline harness at
+  `.data/diagnostic-targeted-openai-artifacts/`. 11 model records, 12 exact PDF
+  citation receipts; 10/11 principal field strings absent from selected evidence
+  (one is typed boolean, not a literal source string). Several fields demonstrably
+  occur elsewhere in the source. Offset defect is confirmed, not all CER causes.
+- Capture model-token estimate USD 0.011773; no Monid or production run.
+- Reviewer ACCEPT: implement exact source-quote selectors for private record
+  citations only. Production remains unchanged at fc85c24 pending focused review.
+
+## 2026-09-04 T23 authoritative state
+
+- HEAD/origin/main: `fc85c24b3b794126e3ca5c62d11483894acb97d7`.
+- Production: `dpl_6aqbQYGu844UDpViH1L4xW4LKouk`; current deterministic
+  regression 10/10, runtime/provider attestations and health/smoke passed.
+- Latest CER identity hash:
+  `dff018d2867225493b345333cfe148108acdde38ec195f22e65abd26fdf9df4b`.
+  Terminal partial, cleanup confirmed, elapsed 229271 ms, USD 1.198689.
+- Retained audit: 195 model records, 74 verified, 121 discarded; 131 exact
+  citation receipts and 70 unlocated. Final claims/requirements/risks/conflicts
+  and evaluation fields all empty. See ignored
+  `.data/release-evidence/cer-diagnostic-fc85c24b.json`.
+- Monid wallet moved from 926200 to 922600 microUSD, exactly matching four
+  900-microUSD parses. Five OpenAI batches all succeeded.
+- Real provider outputs/drafts were not retained. Official PDFs are cached.
+  T23 adds local development capture/replay before further product changes.
+
 ## 2026-09-04 T21 authoritative release state
 
 - Commit `2fb219a2ae9077a9540584f2c76e30ecbd3c71dd` was deployed as

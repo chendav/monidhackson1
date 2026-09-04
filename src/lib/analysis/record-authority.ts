@@ -11,7 +11,7 @@ import type { CitationDocument } from "@/lib/evidence/citations";
 
 export const RECORD_AUTHORITY_ENVELOPE_VERSION = 2 as const;
 export const RECORD_AUTHORITY_VERSION = 3 as const;
-export const RECORD_SOURCE_ALIGNMENT_VERSION = "monid-pdfjs-selector-utf16-v3" as const;
+export const RECORD_SOURCE_ALIGNMENT_VERSION = "issued-origin-pdfjs-selector-utf16-v4" as const;
 // T10 carries relevance inline on every private model record. This bound is the
 // sum of the strict private Draft collection maxima and is a server-only guard;
 // it is no longer a positional provider sidecar or a 40-record delivery limit.
@@ -87,11 +87,27 @@ export interface SemanticSpanSelector {
   length_utf16: number;
 }
 
+export interface ExactSourceQuoteSelector {
+  source_fragment_id: string;
+  exact_quote: string;
+}
+
+export type SourceMapOrigin = { kind: "source_fragment" } | {
+  kind: "submission_coverage";
+  candidate_id: string;
+  pdf_page_1based: number;
+  page_text_sha256: string;
+  source_start_utf16: number;
+  source_end_utf16: number;
+  source_text_sha256: string;
+};
+
 export interface SourceMapFragment {
   source_fragment_id: string;
   document_sha256: string;
   chunk_id: string | null;
   text: string;
+  origin?: SourceMapOrigin;
 }
 
 interface AlignmentUnit {
@@ -109,6 +125,7 @@ export interface AlignedSourceFragment {
   source_text_length: number;
   source_representation_sha256: string;
   source_units: AlignmentUnit[];
+  origin: SourceMapOrigin;
 }
 
 export interface DocumentSourceMap {
@@ -121,11 +138,170 @@ export interface DocumentSourceMap {
   }>>;
 }
 
+function isWellFormedUtf16(value: string) {
+  for (let index = 0; index < value.length; index += 1) {
+    const unit = value.charCodeAt(index);
+    if (unit >= 0xd800 && unit <= 0xdbff) {
+      const next = value.charCodeAt(index + 1);
+      if (!(next >= 0xdc00 && next <= 0xdfff)) return false;
+      index += 1;
+    } else if (unit >= 0xdc00 && unit <= 0xdfff) {
+      return false;
+    }
+  }
+  return true;
+}
+
+interface WhitespaceAlignedUnit {
+  value: string;
+  whitespace: boolean;
+  rawStart: number;
+  rawEnd: number;
+}
+
+function whitespaceAlignedUnits(value: string) {
+  const units: WhitespaceAlignedUnit[] = [];
+  for (let cursor = 0; cursor < value.length;) {
+    const whitespace = /\p{White_Space}/u.test(value[cursor]!);
+    const start = cursor;
+    if (whitespace) {
+      while (cursor < value.length && /\p{White_Space}/u.test(value[cursor]!)) cursor += 1;
+      units.push({ value: "<ws>", whitespace: true, rawStart: start, rawEnd: cursor });
+    } else {
+      units.push({ value: value[cursor]!, whitespace: false, rawStart: cursor, rawEnd: cursor + 1 });
+      cursor += 1;
+    }
+  }
+  return units;
+}
+
+function quoteSelectorsForFragment(fragment: AlignedSourceFragment, quote: string) {
+  const quoteUnits = whitespaceAlignedUnits(quote);
+  if (quoteUnits.length === 0 || quoteUnits[0]!.whitespace || quoteUnits.at(-1)!.whitespace) {
+    return null;
+  }
+  const sourceUnits = whitespaceAlignedUnits(fragment.source_text);
+  const selectors: SemanticSpanSelector[] = [];
+  for (let start = 0; start <= sourceUnits.length - quoteUnits.length; start += 1) {
+    if (!quoteUnits.every((unit, offset) => {
+      const source = sourceUnits[start + offset]!;
+      return unit.whitespace === source.whitespace && unit.value === source.value;
+    })) continue;
+    const first = sourceUnits[start]!;
+    const last = sourceUnits[start + quoteUnits.length - 1]!;
+    const rawLength = last.rawEnd - first.rawStart;
+    if (rawLength < 1 || rawLength > 500 || !isWellFormedUtf16(
+      fragment.source_text.slice(first.rawStart, last.rawEnd)
+    )) return null;
+    selectors.push({
+      source_fragment_id: fragment.source_fragment_id,
+      start_utf16: first.rawStart,
+      length_utf16: rawLength
+    });
+  }
+  return selectors;
+}
+
+/**
+ * Convert a model-copied source quote into server-owned UTF-16 coordinates.
+ * Only nonempty Unicode whitespace runs are representation-equivalent. Every
+ * non-whitespace UTF-16 unit remains exact and ordered; no quote is repaired.
+ */
+export function positionUniqueExactSourceQuote(
+  sourceMap: DocumentSourceMap,
+  selector: ExactSourceQuoteSelector
+): SemanticSpanSelector | null {
+  const quote = selector.exact_quote;
+  if (quote.length < 1 || quote.length > 500 || !isWellFormedUtf16(quote)) {
+    return null;
+  }
+  const fragment = sourceMap.fragments.get(selector.source_fragment_id);
+  if (!fragment) return null;
+  const matches = quoteSelectorsForFragment(fragment, quote);
+  return matches?.length === 1 ? matches[0]! : null;
+}
+
 export interface ResolvedSemanticSpan {
   document_sha256: string;
   chunk_id: string | null;
   evidence_quote: string;
   binding: Omit<RecordAuthorityPhysicalBinding, "citation_ordinal">;
+}
+
+function physicalBindingKey(resolved: ResolvedSemanticSpan) {
+  const binding = resolved.binding;
+  return stableJson({
+    document_sha256: binding.document_sha256,
+    pdf_page_1based: binding.pdf_page_1based,
+    page_text_sha256: binding.page_text_sha256,
+    evidence_start_utf16: binding.evidence_start_utf16,
+    evidence_end_utf16: binding.evidence_end_utf16,
+    evidence_quote_sha256: binding.evidence_quote_sha256
+  });
+}
+
+function sourceOriginIntegrity(sourceMap: DocumentSourceMap, fragment: AlignedSourceFragment) {
+  if (fragment.origin.kind === "source_fragment") return true;
+  const origin = fragment.origin;
+  const page = (sourceMap.pages_by_document.get(fragment.document_sha256) ?? []).find((item) =>
+    item.pdfPage1Based === origin.pdf_page_1based
+  );
+  return Boolean(page && origin.candidate_id && origin.source_start_utf16 >= 0 &&
+    origin.source_end_utf16 > origin.source_start_utf16 &&
+    origin.source_end_utf16 <= page!.text.length &&
+    origin.source_end_utf16 - origin.source_start_utf16 === fragment.source_text_length &&
+    origin.page_text_sha256 === sha256Hex(page!.text) &&
+    origin.source_text_sha256 === fragment.source_representation_sha256 &&
+    page!.text.slice(origin.source_start_utf16, origin.source_end_utf16) === fragment.source_text);
+}
+
+function sourceOriginCommitted(
+  batch: RecordAuthorityBatch,
+  ledger: SubmissionCandidateLedger,
+  fragment: AlignedSourceFragment
+) {
+  if (!batch.sourceMap || !sourceOriginIntegrity(batch.sourceMap, fragment)) return false;
+  if (fragment.origin.kind === "source_fragment") {
+    return batch.binding.ordered_source_fragment_ids.includes(fragment.source_fragment_id);
+  }
+  const origin = fragment.origin;
+  const candidate = ledger.candidates.find((item) => item.candidate_id === origin.candidate_id);
+  return Boolean(candidate && batch.binding.ordered_candidate_ids.includes(origin.candidate_id) &&
+    candidate.document_sha256 === fragment.document_sha256 &&
+    candidate.pdf_page_1based === origin.pdf_page_1based &&
+    candidate.page_text_sha256 === origin.page_text_sha256 &&
+    candidate.source_start_utf16 === origin.source_start_utf16 &&
+    candidate.source_end_utf16 === origin.source_end_utf16 &&
+    sha256Hex(candidate.source_window) === origin.source_text_sha256);
+}
+
+/** Resolve a quote against every evidence representation issued in one batch. */
+export function resolveUniqueIssuedSourceQuote(
+  sourceMap: DocumentSourceMap,
+  selector: { document_sha256: string; exact_quote: string },
+  documents: CitationDocument[]
+): ResolvedSemanticSpan | null {
+  const quote = selector.exact_quote;
+  if (quote.length < 1 || quote.length > 500 || !isWellFormedUtf16(quote)) return null;
+  const resolved: ResolvedSemanticSpan[] = [];
+  for (const fragment of sourceMap.fragments.values()) {
+    if (fragment.document_sha256 !== selector.document_sha256) continue;
+    if (!sourceOriginIntegrity(sourceMap, fragment)) return null;
+    const positionedMatches = quoteSelectorsForFragment(fragment, quote);
+    if (positionedMatches === null) return null;
+    for (const positioned of positionedMatches) {
+      const match = resolveSemanticSpan(sourceMap, positioned, documents);
+      // Every representation occurrence must have a physical explanation.
+      if (!match || match.document_sha256 !== selector.document_sha256) return null;
+      resolved.push(match);
+    }
+  }
+  const byPhysicalSpan = new Map<string, ResolvedSemanticSpan>();
+  for (const match of resolved.toSorted((left, right) =>
+    left.binding.source_fragment_id.localeCompare(right.binding.source_fragment_id))) {
+    byPhysicalSpan.set(physicalBindingKey(match), match);
+  }
+  return byPhysicalSpan.size === 1 ? [...byPhysicalSpan.values()][0]! : null;
 }
 
 export type ModelRecord =
@@ -923,9 +1099,10 @@ export function buildDocumentSourceMap(
       source_text_length: fragment.text.length,
       source_representation_sha256: sha256Hex(fragment.text),
       source_units: alignmentUnits(fragment.text, {
-        markdown: true,
+        markdown: fragment.origin?.kind !== "submission_coverage",
         pdfPage1Based: null
-      })
+      }),
+      origin: fragment.origin ?? { kind: "source_fragment" }
     });
   }
   return {
@@ -948,6 +1125,37 @@ export function resolveSemanticSpan(
     !Number.isSafeInteger(selector.length_utf16) || selector.length_utf16 < 1 ||
     selector.length_utf16 > 500 || !Number.isSafeInteger(selectorEnd) ||
     selectorEnd > fragment.source_text_length) return null;
+  if (fragment.origin.kind === "submission_coverage") {
+    if (!sourceOriginIntegrity(sourceMap, fragment)) return null;
+    const origin = fragment.origin;
+    const evidenceStart = origin.source_start_utf16 + selector.start_utf16;
+    const evidenceEnd = origin.source_start_utf16 + selectorEnd;
+    const page = (sourceMap.pages_by_document.get(fragment.document_sha256) ?? []).find((item) =>
+      item.pdfPage1Based === origin.pdf_page_1based
+    );
+    const evidenceQuote = page?.text.slice(evidenceStart, evidenceEnd) ?? "";
+    if (!page || !evidenceQuote || evidenceQuote.length > 500 ||
+      evidenceQuote !== fragment.source_text.slice(selector.start_utf16, selectorEnd) ||
+      !isWellFormedUtf16(evidenceQuote)) return null;
+    return {
+      document_sha256: fragment.document_sha256,
+      chunk_id: fragment.chunk_id,
+      evidence_quote: evidenceQuote,
+      binding: {
+        source_fragment_id: fragment.source_fragment_id,
+        source_representation_sha256: fragment.source_representation_sha256,
+        selector_start_utf16: selector.start_utf16,
+        selector_end_utf16: selectorEnd,
+        document_sha256: fragment.document_sha256,
+        pdf_page_1based: origin.pdf_page_1based,
+        page_text_sha256: origin.page_text_sha256,
+        evidence_start_utf16: evidenceStart,
+        evidence_end_utf16: evidenceEnd,
+        evidence_quote_sha256: sha256Hex(evidenceQuote),
+        alignment_version: RECORD_SOURCE_ALIGNMENT_VERSION
+      }
+    };
+  }
   const intersectingUnits = fragment.source_units.filter((unit) =>
     unit.rawStart < selectorEnd && unit.rawEnd > selector.start_utf16
   );
@@ -1220,7 +1428,12 @@ export function verifyRecordAuthorities(input: {
           const selectorValid = Boolean(binding &&
             binding.selector_end_utf16 > binding.selector_start_utf16 &&
             binding.evidence_end_utf16 > binding.evidence_start_utf16 &&
-            batch.binding.ordered_source_fragment_ids.includes(binding.source_fragment_id));
+            batch.sourceMap?.fragments.get(binding.source_fragment_id) &&
+            sourceOriginCommitted(
+              batch,
+              input.ledger,
+              batch.sourceMap.fragments.get(binding.source_fragment_id)!
+            ));
           const reResolved = selectorValid && batch.sourceMap
             ? resolveSemanticSpan(batch.sourceMap, {
                 source_fragment_id: binding!.source_fragment_id,

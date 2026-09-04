@@ -63,23 +63,11 @@ function envelope(
 ) {
   type PrivateRelevance = "whole_bid_submission_channel" |
     "not_whole_bid_submission_channel" | "uncertain";
-  const serializedInput = String(request.input);
-  const jsonStart = serializedInput.indexOf("{");
-  const payload = (jsonStart >= 0
-    ? JSON.parse(serializedInput.slice(jsonStart))
-    : { documents: [] }) as {
-    documents: Array<{
-      document_sha256: string;
-      source_fragments: Array<{ source_fragment_id: string; text: string }>;
-    }>;
-  };
   const withRelevance = <T extends { citations: DraftAnalysis["claims"][number]["citations"] }>(
     records: T[]
   ): Array<Omit<T, "citations"> & {
     citations: Array<{
-      f: string;
-      a: number;
-      n: number;
+      q: string;
       s: string | null;
     }>;
     submission_relevance: PrivateRelevance;
@@ -87,22 +75,10 @@ function envelope(
     const { citations, ...rest } = record;
     return {
       ...rest,
-      citations: citations.map((citation) => {
-        const fragments = payload.documents.find((document) =>
-          document.document_sha256 === citation.document_sha256
-        )?.source_fragments ?? payload.documents.flatMap((document) => document.source_fragments);
-        const exact = fragments.find((fragment) =>
-          fragment.text.includes(citation.evidence_quote)
-        );
-        const fragment = exact ?? fragments[0]!;
-        const start = exact ? fragment.text.indexOf(citation.evidence_quote) : 0;
-        return {
-          f: fragment.source_fragment_id,
-          a: start,
-          n: exact ? citation.evidence_quote.length : 1,
-          s: citation.section
-        };
-      }),
+      citations: citations.map((citation) => ({
+        q: citation.evidence_quote,
+        s: citation.section
+      })),
       submission_relevance: "not_whole_bid_submission_channel" as const
     };
   });
@@ -546,15 +522,28 @@ describe("OpenAI Responses structured output adapter", () => {
       ...sourceDocument, parsed_markdown: text, submission_ledger: ledger
     }], testConfig());
     const binding = plan.bindings[0]!;
+    const coverageOrigins = [...plan.sourceMaps[0]!.fragments.values()].filter((fragment) =>
+      fragment.origin.kind === "submission_coverage"
+    );
+    expect(coverageOrigins).toHaveLength(binding.ordered_candidate_ids.length);
+    expect(coverageOrigins.every((fragment) =>
+      fragment.source_fragment_id.startsWith("coverage_") &&
+      fragment.origin.kind === "submission_coverage" &&
+      binding.ordered_candidate_ids.includes(fragment.origin.candidate_id) &&
+      fragment.origin.source_text_sha256 === fragment.source_representation_sha256 &&
+      !binding.ordered_source_fragment_ids.includes(fragment.source_fragment_id)
+    )).toBe(true);
     const candidates = binding.ordered_candidate_ids.map((id) =>
       ledger.candidates.find((candidate) => candidate.candidate_id === id)!
     );
     const schema = privateExtractionSchemaForBatch(binding, candidates);
     const format = privateExtractionFormatForBatch(binding, candidates) as unknown as {
+      name: string;
       schema: { properties: { submission_adjudication: { properties: {
         b: { const: string }; l: { const: string }; r: { required: string[]; additionalProperties: false }
-      } } } };
+    } } } };
     };
+    expect(format.name).toBe("rfp_xray_analysis_v8");
     expect(format.schema.properties.submission_adjudication.properties.b.const).toBe(binding.batch_id);
     expect(format.schema.properties.submission_adjudication.properties.l.const).toBe(binding.ledger_digest);
     expect(format.schema.properties.submission_adjudication.properties.r.required)
@@ -567,10 +556,24 @@ describe("OpenAI Responses structured output adapter", () => {
       claim_type: "source", confidence: 1,
       document_sha256: sourceDocument.document_sha256, amendment_number: null,
       effect: "add", supersedes_claim_ids: [],
-      citations: [{ f: binding.ordered_source_fragment_ids[0]!, a: 0, n: 4, s: null }],
+      citations: [{ q: "Bids", s: null }],
       submission_relevance: "not_whole_bid_submission_channel"
     }];
     expect(schema.safeParse(valid).success).toBe(true);
+    const legacyOffsets = structuredClone(valid);
+    legacyOffsets.analysis.claims[0]!.citations = [{
+      f: binding.ordered_source_fragment_ids[0]!, a: 0, n: 4, s: null
+    }] as never;
+    expect(schema.safeParse(legacyOffsets).success).toBe(false);
+    const whitespaceQuote = structuredClone(valid);
+    whitespaceQuote.analysis.claims[0]!.citations[0]!.q = " \n\t ";
+    expect(schema.safeParse(whitespaceQuote).success).toBe(false);
+    const unpairedSurrogate = structuredClone(valid);
+    unpairedSurrogate.analysis.claims[0]!.citations[0]!.q = "\ud800";
+    expect(schema.safeParse(unpairedSurrogate).success).toBe(false);
+    const oversizedQuote = structuredClone(valid);
+    oversizedQuote.analysis.claims[0]!.citations[0]!.q = "x".repeat(501);
+    expect(schema.safeParse(oversizedQuote).success).toBe(false);
     const legacyFreeQuote = structuredClone(valid);
     legacyFreeQuote.analysis.claims[0]!.citations = [{
       document_sha256: sourceDocument.document_sha256,
@@ -579,9 +582,11 @@ describe("OpenAI Responses structured output adapter", () => {
       section: null
     }] as never;
     expect(schema.safeParse(legacyFreeQuote).success).toBe(false);
-    const unknownFragment = structuredClone(valid);
-    unknownFragment.analysis.claims[0]!.citations[0]!.f = "0".repeat(32);
-    expect(schema.safeParse(unknownFragment).success).toBe(false);
+    const legacyFragment = structuredClone(valid) as unknown as {
+      analysis: { claims: Array<{ citations: Array<Record<string, unknown>> }> };
+    };
+    legacyFragment.analysis.claims[0]!.citations[0]!.f = binding.ordered_source_fragment_ids[0]!;
+    expect(schema.safeParse(legacyFragment).success).toBe(false);
     const candidateId = binding.ordered_candidate_ids[0]!;
     const uncertain = structuredClone(valid);
     (uncertain.submission_adjudication.r[candidateId] as { coverage: string }).coverage = "uncertain";
@@ -832,7 +837,59 @@ describe("OpenAI Responses structured output adapter", () => {
     expect(JSON.stringify(result.analysis)).not.toContain("submission_relevance");
   });
 
-  it("decodes private span selectors into exact PDF.js evidence across all record kinds", async () => {
+  it("positions the captured Edmonton-style values from exact quotes instead of model offsets", async () => {
+    const pdfText = "Issuer: Employment and Social Development Canada\nSolicitation No.: 100022184";
+    const citationDocument = {
+      name: "edmonton-page-14.pdf", sourceUrl: null,
+      index: {
+        documentSha256: sourceDocument.document_sha256,
+        representationSha256: sha256Hex(pdfText), pagesTotal: 1,
+        pages: [{ pdfPage1Based: 1, printedPageLabel: "14", text: pdfText,
+          normalizedText: pdfText.toLowerCase(), representationSha256: sha256Hex(pdfText) }],
+        chunks: [], embeddedJavaScriptDetected: false, indexVersion: "pdfjs-1based-v1" as const
+      }
+    };
+    const cited = (evidenceQuote: string) => [{
+      document_sha256: sourceDocument.document_sha256, chunk_id: null,
+      evidence_quote: evidenceQuote, section: null
+    }];
+    const analysis: DraftAnalysis = {
+      ...emptyDraft(),
+      claims: [{
+        claim_id: "issuer", topic: "issuer", claim_text: "Canada", claim_type: "source",
+        confidence: 1, document_sha256: sourceDocument.document_sha256, amendment_number: null,
+        effect: "add", citations: cited("Canada"), supersedes_claim_ids: []
+      }, {
+        claim_id: "number", topic: "solicitation number", claim_text: "100022184",
+        claim_type: "source", confidence: 1, document_sha256: sourceDocument.document_sha256,
+        amendment_number: null, effect: "add", citations: cited("100022184"),
+        supersedes_claim_ids: []
+      }]
+    };
+    const result = await new OpenAIResponsesAdapter(testConfig(), fakeClient({
+      parse: async (request) => ({ id: "response-t24-real-failure-regression",
+        output_parsed: envelope(request, analysis), usage: { input_tokens: 100, output_tokens: 200 } })
+    })).extract([{
+      ...sourceDocument, parsed_markdown: pdfText,
+      submission_ledger: discoverSubmissionCandidateLedger([{
+        ...citationDocument, role: "base" as const, amendmentNumber: null
+      }]),
+      citation_document: citationDocument
+    }], noopPaidCallbacks);
+
+    expect(result.analysis.claims.map((claim) => claim.citations[0]?.evidence_quote))
+      .toEqual(["Canada", "100022184"]);
+    expect(result.recordAuthority?.origins.flatMap((origin) =>
+      origin.citation_bindings.flatMap((binding) =>
+        binding.occurrences.map((occurrence) => occurrence.pdf_page_1based)
+      )
+    )).toEqual([1, 1]);
+    expect(result.recordAuthority?.records.every((record) =>
+      record.source_binding === "exact_bound" && record.publication === "verified"
+    )).toBe(true);
+  });
+
+  it("decodes private exact-quote selectors into exact PDF.js evidence across all record kinds", async () => {
     const pdfText = [
       "Alpha Tender",
       "Invoices are ﬁnal within 30 days.",
@@ -920,7 +977,7 @@ describe("OpenAI Responses structured output adapter", () => {
     )).toBe(true);
   });
 
-  it("discards only the record selected by a malformed private source offset", async () => {
+  it("discards only the record whose private exact quote is absent from its issued fragment", async () => {
     const pdfText = "Alpha Tender\nInvoices are payable within 30 days.";
     const citationDocument = {
       name: "source.pdf",
@@ -953,7 +1010,7 @@ describe("OpenAI Responses structured output adapter", () => {
     const result = await new OpenAIResponsesAdapter(testConfig(), fakeClient({
       parse: async (request) => {
         const output = envelope(request, analysis);
-        output.analysis.requirements[0]!.citations[0]!.a += 1;
+        output.analysis.requirements[0]!.citations[0]!.q = "Invoices are payable within 31 days.";
         return { id: "response-mutated-source-selector", output_parsed: output,
           usage: { input_tokens: 100, output_tokens: 300 } };
       }
