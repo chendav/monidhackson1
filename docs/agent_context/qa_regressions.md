@@ -2,6 +2,11 @@
 
 ## MH-002 verification boundary
 
+Automatic baseline CI:841 pass/5 fail/12 skip. Preserve clean-checkout fixture
+setup and exact test-selection identity as future focused checks; do not commit
+local `.data` or PDFs to fix test setup. Lint/typecheck passed; build not run by
+CI after the test failure. Evidence:GitHub run33931253588.
+
 This task verifies CodeGraph freshness, source-backed architectural findings,
 Git publication hygiene, and plan completeness only. No paid/full-document tests
 or product refactor. Existing T27 test results are historical evidence; a Git

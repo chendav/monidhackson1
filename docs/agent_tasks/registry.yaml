@@ -2,7 +2,7 @@ version: 1
 tasks:
   - id: MH-002
     title: Indexed baseline and LLM-only core redesign plan
-    status: active
+    status: completed
     spec_dir: docs/specs/MH-002-llm-core-reframe
     chief: chief
     opened: 2026-09-04

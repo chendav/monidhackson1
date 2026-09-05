@@ -12,7 +12,7 @@ exclude_paths: [.env*, .data, node_modules]
 edits_allowed: true
 acceptance: [AC-1, AC-2]
 handoff: handoff.md
-status: in_progress
+status: completed
 ```
 
 ## T2 — Reframing and plan
@@ -27,7 +27,7 @@ exclude_paths: [.env*, .data, node_modules, production]
 edits_allowed: true
 acceptance: [AC-3]
 handoff: reframing_review.md
-status: pending
+status: completed
 ```
 
 Only the advisory report may be edited by T2; product code is read-only.
@@ -44,5 +44,5 @@ exclude_paths: [.env*, .data, node_modules, production]
 edits_allowed: false
 acceptance: [AC-1, AC-2, AC-3, AC-4]
 handoff: qa_report.md
-status: pending
+status: completed
 ```

@@ -2,6 +2,12 @@
 
 ## Active request — MH-002 baseline and LLM-only redesign plan
 
+Index/baseline/plan deliverables passed independent QA1. Baseline6a2d81e is
+pushed; reviewed planning records are the following documentation-only commit.
+MH-002 is complete after that push is verified. Product migration remains
+DEFER, awaiting the user's resumption and the minimal experiment. Do not resume
+the older MH-001 continuation steps automatically.
+
 The user paused product implementation and paid tests, then authorized CodeGraph
 indexing, a Git baseline commit/push, and an improvement plan. This section
 supersedes all historical continuation instructions below. Do not resume MH-001

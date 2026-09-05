@@ -15,5 +15,5 @@ acceptance_checks:
 regression_checks: []
 review:
   required: true
-  verdict: pending
+  verdict: PASS
 max_revision_rounds: 3

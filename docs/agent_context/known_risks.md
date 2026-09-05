@@ -2,11 +2,16 @@
 
 ## MH-002 current risks
 
+- B-6: Fresh-checkout CI is not green:5 deterministic-regression failures.
+  Future focused test-harness setup/pin repair is required; keep baseline
+  publication distinct from product release. Owner: chief; confirmed/open.
+
 - B-1: A snapshot could be mistaken for a release. Label it pre-refactor and
   retain incomplete CER, Q&A, T27 review and release-pin limitations. Owner: chief.
 - B-2: Git publication could expose credentials, raw PDFs or cached responses.
   Inspect staged paths and scan candidate text; keep .env*, .data and live
-  CodeGraph databases ignored. Owner: chief; open until pre-push check.
+  CodeGraph databases ignored. Owner: chief; baseline scan and independent
+  candidate scan passed (format-limited); maintain the check for future pushes.
 - B-3: Replacing heuristics could simply move the same complexity into prompts.
   Propose a minimal evidence model, field-local uncertainty, and a small
   falsification experiment before migration. Owner: reframing/chief.

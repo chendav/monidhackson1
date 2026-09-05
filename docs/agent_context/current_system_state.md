@@ -2,6 +2,13 @@
 
 ## MH-002 baseline observation — 2026-09-04
 
+Checkpoint pushed:6a2d81e34bf7e67abfda33e0eb71e0ad32d8e364, remote main matched.
+Index after task setup:194 files/3101 nodes/8216 edges, zero pending changes.
+Automatic CI33931253588:lint/typecheck PASS;841 tests passed,5 failed,12 skipped.
+All five failures are deterministic-regression tests (one frozen selection
+mismatch;four missing `.data` realpath errors). Build/browser skipped. Preserve
+this limitation; no code fix or manual rerun belongs to this planning task.
+
 Before this task HEAD was bc6c41e, one commit ahead of origin/main. T27 code,
 tests, and diagnostic notes were uncommitted; preserve them as incomplete work,
 not product acceptance. CodeGraph 0.9.9 now has a local SQLite index: initial
